@@ -1,0 +1,29 @@
+# pubspec.yaml
+
+name: orpheus_project
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0' # Рекомендуется указать более широкий диапазон
+
+# pubspec.yaml
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Современная, поддерживаемая криптографическая библиотека.
+  cryptography: ^2.7.0
+
+  # Для безопасного хранения приватного ключа
+  flutter_secure_storage: ^9.0.0
+
+  # Для управления состоянием (понадобится чуть позже)
+  provider: ^6.1.1
+
+  # Для работы с WebSocket
+  web_socket_channel: ^2.4.0
+
+  cupertino_icons: ^1.0.2
