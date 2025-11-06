@@ -18,10 +18,8 @@ class AppTheme {
         scaffoldBackgroundColor: backgroundColor,
         colorScheme: baseTheme.colorScheme.copyWith(
           primary: primaryColor,
-          background: backgroundColor,
           surface: surfaceColor,
           onPrimary: Colors.white,
-          onBackground: textColor,
           onSurface: textColor,
         ),
 
