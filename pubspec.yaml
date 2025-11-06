@@ -1,29 +1,46 @@
-# pubspec.yaml
-
 name: orpheus_project
 description: "A new Flutter project."
 publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0' # Рекомендуется указать более широкий диапазон
-
-# pubspec.yaml
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # Современная, поддерживаемая криптографическая библиотека.
+  sqflite: ^2.3.0
+  path: ^1.8.3
   cryptography: ^2.7.0
-
-  # Для безопасного хранения приватного ключа
   flutter_secure_storage: ^9.0.0
-
-  # Для управления состоянием (понадобится чуть позже)
-  provider: ^6.1.1
-
-  # Для работы с WebSocket
+  provider: ^6.1.1 # Хотя мы его не используем активно, он не мешает
   web_socket_channel: ^2.4.0
-
   cupertino_icons: ^1.0.2
+  google_fonts: ^6.1.0 # <-- ДОБАВЬТЕ ЭТУ СТРОКУ
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0 # Рекомендуется обновить до последней версии
+
+# --- ВОТ НЕОБХОДИМЫЙ БЛОК, КОТОРОГО НЕ ХВАТАЛО ---
+# Этот раздел содержит настройки, специфичные для Flutter.
+flutter:
+
+  # Эта строка решает проблему с иконками.
+  # Она гарантирует, что шрифт Material Icons будет включен в ваше приложение.
+  uses-material-design: true
+
+  # Закомментированные секции ниже - это примеры того, как в будущем
+  # можно будет добавлять в приложение картинки (assets) или свои шрифты (fonts).
+  # assets:
+  #   - images/a_dot_burr.jpeg
+  #   - images/a_dot_ham.jpeg
+  #
+  # fonts:
+  #   - family: Schyler
+  #     fonts:
+  #       - asset: fonts/Schyler-Regular.ttf
+  #       - asset: fonts/Schyler-Italic.ttf
+  #         style: italic```
+
