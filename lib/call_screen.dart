@@ -6,7 +6,6 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
 
-// Вводим состояния, в которых может находиться экран звонка
 enum CallState { Dialing, Incoming, Connected }
 
 class CallScreen extends StatefulWidget {
@@ -26,16 +25,15 @@ class _CallScreenState extends State<CallScreen> {
   late CallState _callState;
   bool _isHangingUp = false;
 
+  // --- НОВОЕ СОСТОЯНИЕ: Для управления громкой связью ---
+  bool _isSpeakerOn = false;
+
   @override
   void initState() {
     super.initState();
-    // Определяем начальное состояние: если нам передали offer, значит звонок входящий.
     _callState = widget.offer != null ? CallState.Incoming : CallState.Dialing;
-
     _initRenderersAndSignaling();
 
-    // Запускаем основную логику только если состояние не "Входящий" (т.е. мы звоним)
-    // Для входящего звонка мы ждем действия пользователя (Принять/Отклонить)
     if (_callState == CallState.Dialing) {
       _initiateCall();
     }
@@ -52,6 +50,8 @@ class _CallScreenState extends State<CallScreen> {
       if (type == 'call-answer') {
         _webrtcService.handleAnswer(data);
         setState(() => _callState = CallState.Connected);
+        // --- НОВОЕ: Устанавливаем ушной динамик по умолчанию при соединении ---
+        _setSpeakerphone(false);
       } else if (type == 'ice-candidate') {
         _webrtcService.addCandidate(data);
       } else if (type == 'hang-up' || type == 'call-rejected') {
@@ -59,7 +59,6 @@ class _CallScreenState extends State<CallScreen> {
       }
     });
 
-    // Привязываем удаленный поток к рендереру
     Timer.periodic(const Duration(milliseconds: 500), (timer) {
       if (!mounted) { timer.cancel(); return; }
       if (_renderer.srcObject != _webrtcService.remoteStream) {
@@ -68,9 +67,6 @@ class _CallScreenState extends State<CallScreen> {
     });
   }
 
-  // --- Новая логика разделена на методы ---
-
-  // Вызывается, если МЫ звоним
   Future<void> _initiateCall() async {
     await _webrtcService.initialize();
     await _webrtcService.initiateCall(
@@ -79,24 +75,25 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  // Вызывается, если МЫ ПРИНИМАЕМ звонок
   void _acceptCall() async {
     setState(() => _callState = CallState.Connected);
     await _webrtcService.initialize();
     await _webrtcService.answerCall(
       offer: widget.offer!,
-      onAnswerCreated: (answer) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', answer),
+      onAnswerCreated: (answer) {
+        websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', answer);
+        // --- НОВОЕ: Устанавливаем ушной динамик по умолчанию при принятии звонка ---
+        _setSpeakerphone(false);
+      },
       onCandidateCreated: (candidate) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', candidate),
     );
   }
 
-  // Вызывается, если МЫ ОТКЛОНЯЕМ звонок
   void _rejectCall() {
     websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-rejected', {});
     _cleanupAndClose();
   }
 
-  // Вызывается, если МЫ кладём трубку в активном звонке
   void _hangUp() {
     websocketService.sendSignalingMessage(widget.contactPublicKey, 'hang-up', {});
     _cleanupAndClose();
@@ -115,6 +112,16 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  // --- НОВЫЙ МЕТОД: Для переключения динамиков ---
+  Future<void> _setSpeakerphone(bool enabled) async {
+    // Helper.setSpeakerphoneOn() - это метод из flutter_webrtc
+    // Он переключает аудиовыход.
+    await Helper.setSpeakerphoneOn(enabled);
+    setState(() {
+      _isSpeakerOn = enabled;
+    });
+  }
+
   @override
   void dispose() {
     _signalingSubscription.cancel();
@@ -125,8 +132,6 @@ class _CallScreenState extends State<CallScreen> {
     super.dispose();
   }
 
-  // --- Динамический UI в зависимости от состояния ---
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -135,11 +140,8 @@ class _CallScreenState extends State<CallScreen> {
         child: Center(
           child: Column(
             children: [
-              // Невидимый виджет для воспроизведения аудио
               SizedBox(height: 1.0, width: 1.0, child: Opacity(opacity: 0.0, child: RTCVideoView(_renderer))),
-
               const Spacer(flex: 2),
-
               Text(
                 _getCallStatusText(),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white),
@@ -149,12 +151,8 @@ class _CallScreenState extends State<CallScreen> {
                 widget.contactPublicKey.substring(0, 16),
                 style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 16),
               ),
-
               const Spacer(flex: 3),
-
-              // Рендерим кнопки в зависимости от состояния
               _buildCallActions(),
-
               const SizedBox(height: 60),
             ],
           ),
@@ -165,20 +163,43 @@ class _CallScreenState extends State<CallScreen> {
 
   String _getCallStatusText() {
     switch (_callState) {
-      case CallState.Dialing:
-        return 'Вызов...';
-      case CallState.Incoming:
-        return 'Входящий звонок';
-      case CallState.Connected:
-        return 'Звонок активен';
+      case CallState.Dialing: return 'Вызов...';
+      case CallState.Incoming: return 'Входящий звонок';
+      case CallState.Connected: return 'Звонок активен';
     }
   }
 
   Widget _buildCallActions() {
-    if (_callState == CallState.Incoming) {
-      // Кнопки "Принять" и "Отклонить"
+    if (_callState == CallState.Connected) {
+      // --- НОВОЕ: Отображаем панель управления активным звонком ---
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          // Кнопка переключения на громкую связь
+          _buildActionButton(
+            icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_down,
+            backgroundColor: Colors.white.withOpacity(0.2),
+            onPressed: () => _setSpeakerphone(!_isSpeakerOn),
+          ),
+          // Кнопка завершения звонка
+          _buildActionButton(
+            icon: Icons.call_end,
+            backgroundColor: Colors.redAccent,
+            onPressed: _hangUp,
+          ),
+          // Пустая кнопка-заглушка для симметрии (в будущем можно добавить "выключить микрофон")
+          _buildActionButton(
+            icon: Icons.mic_off_outlined,
+            backgroundColor: Colors.white.withOpacity(0.2),
+            onPressed: () { /* TODO: Mute microphone */ },
+          ),
+        ],
+      );
+    }
+    else if (_callState == CallState.Incoming) {
+      // Кнопки "Принять" и "Отклонить"
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _buildActionButton(
             icon: Icons.call_end,
@@ -192,7 +213,7 @@ class _CallScreenState extends State<CallScreen> {
           ),
         ],
       );
-    } else {
+    } else { // Dialing
       // Одна кнопка "Положить трубку"
       return _buildActionButton(
         icon: Icons.call_end,
@@ -207,9 +228,9 @@ class _CallScreenState extends State<CallScreen> {
       style: IconButton.styleFrom(
         backgroundColor: backgroundColor,
         shape: const CircleBorder(),
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20), // Немного уменьшим паддинг
       ),
-      icon: Icon(icon, color: Colors.white, size: 40),
+      icon: Icon(icon, color: Colors.white, size: 36), // Уменьшим иконку
       onPressed: onPressed,
     );
   }

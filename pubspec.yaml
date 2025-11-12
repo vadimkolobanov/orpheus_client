@@ -20,6 +20,7 @@ dependencies:
   google_fonts: ^6.1.0
   flutter_webrtc: ^1.2.0
   permission_handler: ^11.0.1
+  rxdart: ^0.27.7
 dev_dependencies:
   flutter_test:
     sdk: flutter

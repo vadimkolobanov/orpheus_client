@@ -4,12 +4,23 @@ import 'dart:convert';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+// --- ИЗМЕНЕНИЕ ЗДЕСЬ: Добавляем ваш TURN-сервер в конфигурацию ---
 const Map<String, dynamic> rtcConfiguration = {
   'iceServers': [
+    // Мы по-прежнему оставляем STUN-сервер от Google. Он быстрый и бесплатный.
+    // Клиент сначала попробует соединиться через него.
     {'urls': 'stun:stun.l.google.com:19302'},
-    {'urls': 'stun:stun1.l.google.com:19302'},
+
+    // Если STUN не справится (как в случае со звонком в РФ),
+    // клиент будет использовать ваш TURN-сервер как запасной вариант.
+    {
+      'urls': 'turn:213.171.10.108:3478', // Адрес вашего сервера и порт
+      'username': 'orpheus',               // Имя пользователя из конфига
+      'credential': 'TEST112',             // Пароль из конфига
+    },
   ]
 };
+// --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
 class WebRTCService {
   RTCPeerConnection? _peerConnection;
@@ -32,8 +43,6 @@ class WebRTCService {
     return await Permission.microphone.isGranted;
   }
 
-  // --- ИЗМЕНЕНИЕ: Метод переименован с `createPeerConnection` на `initiateCall` ---
-  // Это устраняет конфликт имен с библиотекой flutter_webrtc.
   Future<void> initiateCall({
     required Function(Map<String, dynamic> offer) onOfferCreated,
     required Function(Map<String, dynamic> candidate) onCandidateCreated,
@@ -43,7 +52,6 @@ class WebRTCService {
       return;
     }
 
-    // Теперь этот вызов однозначно относится к глобальной функции из пакета.
     _peerConnection = await createPeerConnection(rtcConfiguration);
 
     _localStream!.getTracks().forEach((track) {
@@ -72,7 +80,6 @@ class WebRTCService {
     onOfferCreated(offerMap);
   }
 
-  // --- ИЗМЕНЕНИЕ: Метод для ответа на звонок теперь тоже создает соединение ---
   Future<void> answerCall({
     required Map<String, dynamic> offer,
     required Function(Map<String, dynamic> answer) onAnswerCreated,
@@ -143,4 +150,6 @@ class WebRTCService {
       print("Звонок завершен, ресурсы очищены.");
     } catch (e) {
       print("Ошибка при завершении звонка: $e");
-    }}}
+    }
+  }
+}
