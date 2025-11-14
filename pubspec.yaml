@@ -21,6 +21,7 @@ dependencies:
   flutter_webrtc: ^1.2.0
   permission_handler: ^11.0.1
   rxdart: ^0.27.7
+  audioplayers: ^5.2.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -33,7 +34,8 @@ flutter:
   # Эта строка решает проблему с иконками.
   # Она гарантирует, что шрифт Material Icons будет включен в ваше приложение.
   uses-material-design: true
-
+  assets:
+    - assets/sounds/
   # Закомментированные секции ниже - это примеры того, как в будущем
   # можно будет добавлять в приложение картинки (assets) или свои шрифты (fonts).
   # assets:
