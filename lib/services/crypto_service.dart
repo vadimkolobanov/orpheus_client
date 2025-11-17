@@ -7,8 +7,7 @@ import 'package:cryptography/cryptography.dart';
 class CryptoService {
   final _secureStorage = const FlutterSecureStorage();
 
-  // ИЗМЕНЕНИЕ: Нам нужно хранить приватную и публичную части ключа отдельно,
-  // чтобы правильно восстановить пару.
+
   static const _privateKeyStoreKey = 'orpheus_private_key_data';
   static const _publicKeyStoreKey = 'orpheus_public_key_data';
 
@@ -21,23 +20,21 @@ class CryptoService {
   String? get publicKeyBase64 => _publicKey != null ? base64.encode(_publicKey!.bytes) : null;
 
   Future<void> init() async {
-    // Пытаемся загрузить обе части ключа из хранилища
+
     final privateKeyB64 = await _secureStorage.read(key: _privateKeyStoreKey);
     final publicKeyB64 = await _secureStorage.read(key: _publicKeyStoreKey);
 
     if (privateKeyB64 != null && publicKeyB64 != null) {
-      // Если обе части найдены, восстанавливаем из них пару
+
       final privateKeyBytes = base64.decode(privateKeyB64);
       final publicKeyBytes = base64.decode(publicKeyB64);
 
-      // 1. Сначала создаем объект публичного ключа
+
       _publicKey = SimplePublicKey(
         publicKeyBytes,
         type: KeyPairType.x25519,
       );
 
-      // 2. Затем, используя его, создаем полную пару ключей.
-      //    ЭТО И ЕСТЬ ИСПРАВЛЕНИЕ, которого требовал компилятор.
       _keyPair = SimpleKeyPairData(
         privateKeyBytes,
         publicKey: _publicKey!, // Передаем обязательный именованный параметр `publicKey`
@@ -46,14 +43,14 @@ class CryptoService {
       print("Ключи X25519 успешно загружены из хранилища.");
 
     } else {
-      // Если хотя бы одной части нет, генерируем все заново
+
       _keyPair = await keyExchangeAlgorithm.newKeyPair();
 
-      // Извлекаем обе части
+
       final privateKeyData = await _keyPair!.extract();
       _publicKey = await _keyPair!.extractPublicKey();
 
-      // Сохраняем обе части в хранилище по разным ключам
+
       await _secureStorage.write(
         key: _privateKeyStoreKey,
         value: base64.encode(privateKeyData.bytes),
@@ -65,8 +62,6 @@ class CryptoService {
       print("Новые ключи X25519 сгенерированы и сохранены.");
     }
   }
-
-  // Методы encrypt и decrypt остаются БЕЗ ИЗМЕНЕНИЙ. Они были написаны правильно.
 
   Future<String> encrypt(String recipientPublicKeyBase64, String message) async {
     if (_keyPair == null) throw Exception("Ключи не инициализированы!");

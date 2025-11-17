@@ -2,11 +2,12 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:orpheus_project/call_screen.dart'; // <-- Импорт экрана звонка
+import 'package:orpheus_project/call_screen.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/config.dart'; // <-- Импорт конфигурации
 
 class ChatScreen extends StatefulWidget {
   final Contact contact;
@@ -52,7 +53,6 @@ class _ChatScreenState extends State<ChatScreen> {
     await DatabaseService.instance.addMessage(sentMessage, widget.contact.publicKey);
     try {
       final payload = await cryptoService.encrypt(widget.contact.publicKey, messageText);
-      // ИЗМЕНЕНИЕ: Используем новый метод sendChatMessage
       websocketService.sendChatMessage(widget.contact.publicKey, payload);
     } catch (e) {
       print("Ошибка отправки: $e");
@@ -83,22 +83,54 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.background,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
-        title: Text(widget.contact.name),
+        // ВЕРСИЯ И ОБЛАЧКО В TITLE
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Зеленое облачко (можно заменить на свой виджет статуса)
+            const Icon(Icons.cloud_rounded, color: Colors.green, size: 26),
+
+            // Отступ между облачком и версией
+            const SizedBox(width: 6),
+
+            // Текст с версией приложения
+            Text(
+              AppConfig.appVersion,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.green,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            // Отступ между версией и именем контакта
+            const SizedBox(width: 12),
+
+            // Имя контакта
+            Flexible(
+              child: Text(
+                widget.contact.name,
+                style: const TextStyle(fontSize: 18),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        // Кнопки действий в AppBar
         actions: [
-          // --- КНОПКА ЗВОНКА ---
+          // Кнопка звонка
           IconButton(
             icon: const Icon(Icons.call_outlined, size: 26),
             tooltip: 'Позвонить',
             onPressed: () {
               Navigator.push(context, MaterialPageRoute(
-                // Передаем только ключ контакта, т.к. мы инициатор звонка
                 builder: (context) => CallScreen(contactPublicKey: widget.contact.publicKey),
               ));
             },
           ),
-          // --- КНОПКА УДАЛЕНИЯ ИСТОРИИ ---
+          // Кнопка очистки истории
           IconButton(
             icon: const Icon(Icons.delete_sweep_outlined),
             tooltip: 'Очистить историю чата',
@@ -108,6 +140,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
+          // Список сообщений
           Expanded(
             child: ListView.builder(
               reverse: true,
@@ -143,6 +176,7 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
+          // Поле ввода сообщения
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
             decoration: BoxDecoration(

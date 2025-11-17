@@ -114,8 +114,9 @@ class WebRTCService {
     _peerConnection?.onIceCandidate = (RTCIceCandidate candidate) {
       if (candidate.candidate == null) return;
       String type = 'unknown';
-      if (candidate.candidate!.contains('typ host')) type = 'host (прямой)';
-      else if (candidate.candidate!.contains('typ srflx')) type = 'srflx (STUN)';
+      if (candidate.candidate!.contains('typ host')) {
+        type = 'host (прямой)';
+      } else if (candidate.candidate!.contains('typ srflx')) type = 'srflx (STUN)';
       else if (candidate.candidate!.contains('typ relay')) type = 'relay (TURN)';
       _addLog(WebRTCConnectionState.Connecting, iceCandidateType: type);
       final candidateMap = { 'candidate': candidate.candidate, 'sdpMid': candidate.sdpMid, 'sdpMLineIndex': candidate.sdpMLineIndex };

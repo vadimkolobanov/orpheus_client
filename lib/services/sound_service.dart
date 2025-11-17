@@ -15,7 +15,7 @@ class SoundService {
 
   final AudioPlayer _dialingPlayer = AudioPlayer();
   final AudioPlayer _notificationPlayer = AudioPlayer();
-  bool _isDisposed = false;
+  final bool _isDisposed = false;
 
   Future<void> playDialingSound() async {
     if (_isDisposed) return;
