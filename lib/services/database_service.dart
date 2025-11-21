@@ -3,7 +3,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:orpheus_project/models/contact_model.dart';
-import 'package:orpheus_project/models/chat_message_model.dart'; // <-- Импортируем модель сообщения
+import 'package:orpheus_project/models/chat_message_model.dart';
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
@@ -12,28 +12,31 @@ class DatabaseService {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('orpheus.db'); // Переименуем для ясности
+    _database = await _initDB('orpheus.db');
     return _database!;
   }
 
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
-    // При изменении схемы БД (добавлении таблиц) нужно увеличить версию
-    return await openDatabase(path, version: 2, onCreate: _createDB, onUpgrade: _upgradeDB);
+
+    // Увеличиваем версию до 3
+    return await openDatabase(path, version: 3, onCreate: _createDB, onUpgrade: _upgradeDB);
   }
 
-  // Этот метод вызывается только при самом первом создании БД
   Future _createDB(Database db, int version) async {
     await _createContactsTable(db);
     await _createMessagesTable(db);
   }
 
-  // Этот метод вызывается, если мы увеличили версию БД
-  // Полезно для добавления новых таблиц в уже существующую БД
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await _createMessagesTable(db);
+    }
+    if (oldVersion < 3) {
+      // Миграция для версии 3: Добавляем колонки status и isRead
+      await db.execute("ALTER TABLE messages ADD COLUMN status INTEGER DEFAULT 1"); // 1 = sent
+      await db.execute("ALTER TABLE messages ADD COLUMN isRead INTEGER DEFAULT 1"); // 1 = true
     }
   }
 
@@ -47,20 +50,21 @@ class DatabaseService {
     ''');
   }
 
-  // НОВЫЙ МЕТОД: Создание таблицы для сообщений
   Future<void> _createMessagesTable(Database db) async {
     await db.execute('''
       CREATE TABLE messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         contactPublicKey TEXT NOT NULL, 
         text TEXT NOT NULL,
-        isSentByMe INTEGER NOT NULL, -- 1 для true, 0 для false
-        timestamp INTEGER NOT NULL -- Время в миллисекундах
+        isSentByMe INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        status INTEGER DEFAULT 1,
+        isRead INTEGER DEFAULT 1
       )
     ''');
   }
 
-  // --- Методы для работы с контактами ---
+  // --- Контакты ---
   Future<void> addContact(Contact contact) async {
     final db = await instance.database;
     await db.insert('contacts', contact.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
@@ -78,51 +82,65 @@ class DatabaseService {
     });
   }
 
-  // НОВЫЙ МЕТОД: Удаление контакта И ВСЕХ ЕГО СООБЩЕНИЙ
   Future<void> deleteContact(int id, String publicKey) async {
     final db = await instance.database;
-    // Используем транзакцию, чтобы обе операции выполнились успешно, либо ни одна
     await db.transaction((txn) async {
-      // Сначала удаляем все сообщения, связанные с этим контактом
       await txn.delete('messages', where: 'contactPublicKey = ?', whereArgs: [publicKey]);
-      // Затем удаляем сам контакт
       await txn.delete('contacts', where: 'id = ?', whereArgs: [id]);
     });
   }
 
-  // --- НОВЫЕ МЕТОДЫ для работы с сообщениями ---
+  // --- Сообщения ---
 
-  // Сохранить новое сообщение
+  // Сохранить сообщение
   Future<void> addMessage(ChatMessage message, String contactKey) async {
     final db = await instance.database;
-    final messageMap = {
-      'contactPublicKey': contactKey,
-      'text': message.text,
-      'isSentByMe': message.isSentByMe ? 1 : 0,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-    await db.insert('messages', messageMap);
+    await db.insert('messages', message.toMap(contactKey));
   }
 
-  // Получить все сообщения для конкретного контакта
+  // Получить сообщения (с маппингом новых полей)
   Future<List<ChatMessage>> getMessagesForContact(String contactKey) async {
     final db = await instance.database;
     final maps = await db.query(
       'messages',
       where: 'contactPublicKey = ?',
       whereArgs: [contactKey],
-      orderBy: 'timestamp ASC', // Сортируем по времени, чтобы чат был в правильном порядке
+      orderBy: 'timestamp ASC',
     );
 
     return List.generate(maps.length, (i) {
       return ChatMessage(
+        id: maps[i]['id'] as int,
         text: maps[i]['text'] as String,
         isSentByMe: (maps[i]['isSentByMe'] as int) == 1,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(maps[i]['timestamp'] as int),
+        status: MessageStatus.values[(maps[i]['status'] as int?) ?? 1],
+        isRead: ((maps[i]['isRead'] as int?) ?? 1) == 1,
       );
     });
   }
 
-  // Удалить всю историю чата для контакта
+  // Пометить все сообщения от контакта как прочитанные
+  Future<void> markMessagesAsRead(String contactKey) async {
+    final db = await instance.database;
+    await db.update(
+      'messages',
+      {'isRead': 1},
+      where: 'contactPublicKey = ? AND isRead = 0',
+      whereArgs: [contactKey],
+    );
+  }
+
+  // Получить количество непрочитанных для контакта
+  Future<int> getUnreadCount(String contactKey) async {
+    final db = await instance.database;
+    final result = await db.rawQuery(
+        'SELECT COUNT(*) FROM messages WHERE contactPublicKey = ? AND isRead = 0',
+        [contactKey]
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
   Future<void> clearChatHistory(String contactKey) async {
     final db = await instance.database;
     await db.delete('messages', where: 'contactPublicKey = ?', whereArgs: [contactKey]);

@@ -2,12 +2,12 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:orpheus_project/call_screen.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/services/database_service.dart';
-import 'package:orpheus_project/config.dart'; // <-- Импорт конфигурации
 
 class ChatScreen extends StatefulWidget {
   final Contact contact;
@@ -20,43 +20,78 @@ class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   List<ChatMessage> _chatHistory = [];
   late StreamSubscription _messageUpdateSubscription;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _loadChatHistory();
+    // При входе сразу помечаем прочитанными
+    _markAsRead();
+
     _messageUpdateSubscription = messageUpdateController.stream.listen((senderKey) {
       if (senderKey == widget.contact.publicKey) {
         _loadChatHistory();
+        _markAsRead(); // Если пришло новое, пока мы в чате - сразу читаем
       }
     });
   }
 
   Future<void> _loadChatHistory() async {
     final history = await DatabaseService.instance.getMessagesForContact(widget.contact.publicKey);
-    setState(() {
-      _chatHistory = history;
-    });
+    if (mounted) {
+      setState(() {
+        _chatHistory = history;
+      });
+      // Скролл вниз после загрузки
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            0.0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
+  Future<void> _markAsRead() async {
+    await DatabaseService.instance.markMessagesAsRead(widget.contact.publicKey);
+    // Уведомляем глобально, чтобы обновился счетчик в списке контактов
+    // (Это можно сделать через отдельный Stream, но пока используем обновление UI)
   }
 
   @override
   void dispose() {
     _messageUpdateSubscription.cancel();
     _messageController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   void _sendMessage() async {
-    final messageText = _messageController.text;
+    final messageText = _messageController.text.trim();
     if (messageText.isEmpty) return;
-    final sentMessage = ChatMessage(text: messageText, isSentByMe: true);
+
+    final sentMessage = ChatMessage(
+        text: messageText,
+        isSentByMe: true,
+        status: MessageStatus.sent, // Пока просто sent
+        isRead: true
+    );
+
     await DatabaseService.instance.addMessage(sentMessage, widget.contact.publicKey);
+
     try {
       final payload = await cryptoService.encrypt(widget.contact.publicKey, messageText);
       websocketService.sendChatMessage(widget.contact.publicKey, payload);
+      // Тут можно обновить статус на 'delivered' если бы сервер отвечал подтверждением
     } catch (e) {
       print("Ошибка отправки: $e");
+      // Тут можно обновить статус на 'failed'
     }
+
     _messageController.clear();
     _loadChatHistory();
   }
@@ -66,7 +101,7 @@ class _ChatScreenState extends State<ChatScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Очистить историю'),
-          content: const Text('Вы уверены, что хотите удалить все сообщения в этом чате?'),
+          content: const Text('Вы уверены, что хотите удалить все сообщения?'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
             TextButton(
@@ -80,138 +115,191 @@ class _ChatScreenState extends State<ChatScreen> {
         ));
   }
 
+  // --- Виджет одного сообщения ---
+  Widget _buildMessageItem(ChatMessage message) {
+    final isMyMessage = message.isSentByMe;
+    final timeStr = DateFormat('HH:mm').format(message.timestamp);
+
+    return Align(
+      alignment: isMyMessage ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+          decoration: BoxDecoration(
+            color: isMyMessage ? Theme.of(context).colorScheme.primary : Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: isMyMessage ? const Radius.circular(16) : Radius.zero,
+              bottomRight: isMyMessage ? Radius.zero : const Radius.circular(16),
+            ),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 3, offset: const Offset(0, 1))
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Текст сообщения
+              Text(
+                message.text,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isMyMessage ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 4),
+
+              // Строка статуса (время + иконки)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  // Для понта: иконка замка (шифрование)
+                  Icon(
+                    Icons.lock_outline,
+                    size: 10,
+                    color: isMyMessage ? Colors.white70 : Colors.grey,
+                  ),
+                  const SizedBox(width: 4),
+
+                  // Время
+                  Text(
+                    timeStr,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isMyMessage ? Colors.white70 : Colors.grey,
+                    ),
+                  ),
+
+                  // Статус (галочки) только для моих сообщений
+                  if (isMyMessage) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      // Логика иконок: Sent -> одна галочка, Read -> две галочки (синие или белые)
+                      // Пока у нас нет receipts от сервера, ставим одну галочку "Sent"
+                      Icons.done,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ]
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: const Color(0xFFF2F5F7), // Светло-серый фон чата
       appBar: AppBar(
-        // ВЕРСИЯ И ОБЛАЧКО В TITLE
         title: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            // Зеленое облачко (можно заменить на свой виджет статуса)
-            const Icon(Icons.cloud_rounded, color: Colors.green, size: 26),
-
-            // Отступ между облачком и версией
-            const SizedBox(width: 6),
-
-            // Текст с версией приложения
-            Text(
-              AppConfig.appVersion,
-              style: const TextStyle(
-                fontSize: 13,
-                color: Colors.green,
-                fontWeight: FontWeight.bold,
+            // Аватарка в AppBar
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Colors.white24,
+              child: Text(
+                widget.contact.name[0].toUpperCase(),
+                style: const TextStyle(color: Colors.white, fontSize: 16),
               ),
             ),
-
-            // Отступ между версией и именем контакта
-            const SizedBox(width: 12),
-
-            // Имя контакта
-            Flexible(
-              child: Text(
-                widget.contact.name,
-                style: const TextStyle(fontSize: 18),
-                overflow: TextOverflow.ellipsis,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.contact.name, style: const TextStyle(fontSize: 18)),
+                  // Статус "В сети" (фейковый или реальный, если допилим presense)
+                  const Text(
+                    "Orpheus Secure",
+                    style: TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-        // Кнопки действий в AppBar
         actions: [
-          // Кнопка звонка
           IconButton(
-            icon: const Icon(Icons.call_outlined, size: 26),
-            tooltip: 'Позвонить',
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(
-                builder: (context) => CallScreen(contactPublicKey: widget.contact.publicKey),
-              ));
-            },
+            icon: const Icon(Icons.call_outlined),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(
+                builder: (context) => CallScreen(contactPublicKey: widget.contact.publicKey))),
           ),
-          // Кнопка очистки истории
           IconButton(
-            icon: const Icon(Icons.delete_sweep_outlined),
-            tooltip: 'Очистить историю чата',
+            icon: const Icon(Icons.more_vert),
             onPressed: _showClearHistoryDialog,
           ),
         ],
       ),
       body: Column(
         children: [
-          // Список сообщений
           Expanded(
             child: ListView.builder(
-              reverse: true,
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              controller: _scrollController,
+              reverse: true, // Список снизу вверх
               itemCount: _chatHistory.length,
               itemBuilder: (context, index) {
+                // reverse: true переворачивает массив визуально, но нам нужно брать с конца
                 final message = _chatHistory.reversed.toList()[index];
-                final isMyMessage = message.isSentByMe;
-
-                return Align(
-                  alignment: isMyMessage ? Alignment.centerRight : Alignment.centerLeft,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-                      margin: const EdgeInsets.symmetric(vertical: 5),
-                      decoration: BoxDecoration(
-                        color: isMyMessage ? Theme.of(context).colorScheme.primary : Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 5, offset: const Offset(0, 2))
-                        ],
-                      ),
-                      child: Text(
-                        message.text,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: isMyMessage ? Colors.white : Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
+                return _buildMessageItem(message);
               },
             ),
           ),
-          // Поле ввода сообщения
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              boxShadow: [BoxShadow(offset: const Offset(0, -2), blurRadius: 4, color: Colors.black.withOpacity(0.03))],
+          _buildInputArea(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputArea() {
+    return Container(
+      padding: const EdgeInsets.all(8.0),
+      color: Colors.white,
+      child: SafeArea(
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline, color: Colors.grey),
+              onPressed: () {}, // Заглушка для аттачей
             ),
-            child: SafeArea(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                      decoration: const InputDecoration(
-                        hintText: 'Сообщение...',
-                        filled: false,
-                      ),
-                      onSubmitted: (_) => _sendMessage(),
-                    ),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: TextField(
+                  controller: _messageController,
+                  decoration: const InputDecoration(
+                    hintText: 'Сообщение...',
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
                   ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    style: IconButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      shape: const CircleBorder(),
-                      padding: const EdgeInsets.all(12),
-                    ),
-                    icon: const Icon(Icons.send, color: Colors.white),
-                    onPressed: _sendMessage,
-                  ),
-                ],
+                  maxLines: null, // Многострочный ввод
+                  textCapitalization: TextCapitalization.sentences,
+                ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            CircleAvatar(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              child: IconButton(
+                icon: const Icon(Icons.send, color: Colors.white, size: 18),
+                onPressed: _sendMessage,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

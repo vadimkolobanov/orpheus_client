@@ -10,42 +10,42 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # База данных
   sqflite: ^2.3.0
   path: ^1.8.3
+
+  # Криптография и безопасность
   cryptography: ^2.7.0
   flutter_secure_storage: ^9.0.0
+
+  # Утилиты
   provider: ^6.1.1
+  rxdart: ^0.27.7
+  intl: ^0.18.0
+  permission_handler: ^11.0.1
+
+  # Сеть
   web_socket_channel: ^2.4.0
+
+  # UI и Медиа
   cupertino_icons: ^1.0.2
   google_fonts: ^6.1.0
-  flutter_webrtc: ^1.2.0
-  permission_handler: ^11.0.1
-  rxdart: ^0.27.7
   audioplayers: ^5.2.1
+  qr_flutter: ^4.1.0
+
+  # Звонки
+  flutter_webrtc: ^1.2.0
+
+  # Firebase (Уведомления) - ДОБАВЛЕНО
+  firebase_core: ^2.24.2
+  firebase_messaging: ^14.7.9
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0 # Рекомендуется обновить до последней версии
+  flutter_lints: ^3.0.0
 
-# --- ВОТ НЕОБХОДИМЫЙ БЛОК, КОТОРОГО НЕ ХВАТАЛО ---
-# Этот раздел содержит настройки, специфичные для Flutter.
 flutter:
-
-  # Эта строка решает проблему с иконками.
-  # Она гарантирует, что шрифт Material Icons будет включен в ваше приложение.
   uses-material-design: true
   assets:
     - assets/sounds/
-  # Закомментированные секции ниже - это примеры того, как в будущем
-  # можно будет добавлять в приложение картинки (assets) или свои шрифты (fonts).
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
-  #
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic```
-
