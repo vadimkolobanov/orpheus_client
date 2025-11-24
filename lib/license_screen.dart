@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:orpheus_project/config.dart';
-import 'package:orpheus_project/main.dart'; // Для доступа к cryptoService и websocketService
+import 'package:orpheus_project/main.dart';
 
 class LicenseScreen extends StatefulWidget {
   final VoidCallback onLicenseConfirmed;
@@ -20,12 +20,12 @@ class LicenseScreen extends StatefulWidget {
 class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  // Состояние для вкладки Crypto
+  // Состояние Crypto
   bool _isLoadingCrypto = false;
   Map<String, dynamic>? _invoice;
   StreamSubscription? _wsSubscription;
 
-  // Состояние для вкладки Promo
+  // Состояние Promo
   final TextEditingController _promoController = TextEditingController();
   bool _isActivatingPromo = false;
   String? _promoError;
@@ -35,8 +35,10 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
 
-    // Сразу запрашиваем инвойс при входе
-    _requestInvoice();
+    // Запускаем запрос инвойса с небольшой задержкой, чтобы UI успел отрисоваться
+    Future.delayed(Duration.zero, () {
+      _requestInvoice();
+    });
 
     _wsSubscription = websocketService.stream.listen((message) {
       try {
@@ -63,8 +65,13 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
   }
 
   Future<void> _activatePromo() async {
+    // Убираем пробелы, но оставляем регистр и символы
     final code = _promoController.text.trim();
-    if (code.isEmpty) return;
+
+    if (code.isEmpty) {
+      setState(() => _promoError = "Введите код");
+      return;
+    }
 
     setState(() {
       _isActivatingPromo = true;
@@ -75,8 +82,9 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
       final myPubkey = cryptoService.publicKeyBase64;
       if (myPubkey == null) throw Exception("Ключи не инициализированы");
 
-      // Используем HTTP для одноразового запроса
+      // HTTP запрос
       final url = Uri.parse(AppConfig.httpUrl('/api/activate-promo'));
+      print("Sending promo request to $url with code: $code");
 
       final response = await http.post(
         url,
@@ -90,20 +98,20 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
       final data = json.decode(response.body);
 
       if (response.statusCode == 200 && data['status'] == 'ok') {
-        // Успех! Сервер сам пришлет уведомление в сокет о смене статуса,
-        // и наш _wsSubscription сработает и закроет экран.
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Промокод принят! Активация..."))
+            const SnackBar(content: Text("Промокод принят!"))
         );
+        // websocketService сам пришлет подтверждение лицензии
       } else {
         setState(() {
-          _promoError = data['message'] ?? "Ошибка активации";
+          _promoError = data['message'] ?? "Неверный код";
         });
       }
     } catch (e) {
       setState(() {
-        _promoError = "Ошибка соединения: $e";
+        _promoError = "Ошибка соединения. Проверьте интернет.";
       });
+      print("Promo error: $e");
     } finally {
       if (mounted) setState(() => _isActivatingPromo = false);
     }
@@ -119,27 +127,34 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text("Лицензия"),
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          indicatorColor: Colors.white,
-          tabs: const [
-            Tab(text: "Оплата Crypto"),
-            Tab(text: "Промокод"),
-          ],
+    // Используем GestureDetector, чтобы убирать клавиатуру при тапе в пустоту
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        backgroundColor: Colors.black, // Темная тема
+        appBar: AppBar(
+          title: const Text("АКТИВАЦИЯ"),
+          backgroundColor: const Color(0xFF101010),
+          bottom: TabBar(
+            controller: _tabController,
+            labelColor: const Color(0xFFB0BEC5), // Серебро
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: const Color(0xFFB0BEC5),
+            tabs: const [
+              Tab(text: "CRYPTO"),
+              Tab(text: "ПРОМОКОД"),
+            ],
+          ),
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildCryptoTab(),
-          _buildPromoTab(),
-        ],
+        body: SafeArea(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildCryptoTab(),
+              _buildPromoTab(),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -150,36 +165,29 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          const SizedBox(height: 20),
           const Icon(Icons.currency_bitcoin, size: 60, color: Colors.orange),
           const SizedBox(height: 24),
           const Text(
             "Оплата TRON (TRX)",
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 10),
           const Text(
-            "Переведите точную сумму на адрес ниже. Активация произойдет автоматически.",
+            "Автоматическая активация после перевода точной суммы.",
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 32),
 
           if (_isLoadingCrypto)
-            const CircularProgressIndicator()
+            const CircularProgressIndicator(color: Colors.white)
           else if (_invoice != null) ...[
             Container(
               padding: const EdgeInsets.all(15),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey.shade200),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 5),
-                  )
-                ],
               ),
               child: QrImageView(
                 data: _invoice!['address'],
@@ -191,24 +199,26 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(12)),
+                  color: const Color(0xFF202020),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white12)
+              ),
               child: Column(
                 children: [
                   Text("Сумма: ${_invoice!['amount']} TRX",
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
                         child: SelectableText(
                           _invoice!['address'],
-                          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                          style: const TextStyle(fontFamily: 'monospace', fontSize: 13, color: Colors.grey),
                           textAlign: TextAlign.center,
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.copy),
+                        icon: const Icon(Icons.copy, color: Colors.white),
                         onPressed: () {
                           Clipboard.setData(ClipboardData(text: _invoice!['address']));
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -221,7 +231,7 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
               ),
             ),
             const SizedBox(height: 20),
-            const LinearProgressIndicator(),
+            const LinearProgressIndicator(color: Colors.orange, backgroundColor: Colors.grey),
             const SizedBox(height: 8),
             const Text("Ожидание транзакции...", style: TextStyle(color: Colors.grey, fontSize: 12)),
           ]
@@ -231,20 +241,21 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
   }
 
   Widget _buildPromoTab() {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(24.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.vpn_key, size: 60, color: Colors.blueGrey),
+          const SizedBox(height: 40),
+          const Icon(Icons.vpn_key, size: 60, color: Color(0xFFB0BEC5)),
           const SizedBox(height: 24),
           const Text(
-            "Есть код активации?",
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            "ВВЕДИТЕ КОД",
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.5),
           ),
           const SizedBox(height: 10),
           const Text(
-            "Введите код, который вы получили от администратора или купили альтернативным способом.",
+            "Введите полученный код активации.\nПоддерживаются символы _ и -",
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey),
           ),
@@ -252,25 +263,39 @@ class _LicenseScreenState extends State<LicenseScreen> with SingleTickerProvider
 
           TextField(
             controller: _promoController,
+            style: const TextStyle(color: Colors.white, fontSize: 18, fontFamily: 'monospace'),
+            textAlign: TextAlign.center,
+
+            // ВАЖНО: Это позволяет вводить любые символы без автозамены
+            keyboardType: TextInputType.visiblePassword,
+
             decoration: InputDecoration(
-              labelText: 'Промокод',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              prefixIcon: const Icon(Icons.confirmation_number),
+              hintText: 'CODE-XXXX-XXXX',
+              hintStyle: TextStyle(color: Colors.grey[700]),
+              filled: true,
+              fillColor: const Color(0xFF1A1A1A),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFB0BEC5))),
               errorText: _promoError,
             ),
+            // ВАЖНО: Делаем ввод капсом, но не запрещаем символы
             textCapitalization: TextCapitalization.characters,
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
 
           SizedBox(
             width: double.infinity,
-            height: 50,
+            height: 56,
             child: ElevatedButton(
               onPressed: _isActivatingPromo ? null : _activatePromo,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFB0BEC5),
+                foregroundColor: Colors.black,
+              ),
               child: _isActivatingPromo
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text("Активировать"),
+                  ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                  : const Text("АКТИВИРОВАТЬ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
           ),
         ],

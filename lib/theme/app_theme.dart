@@ -4,79 +4,97 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // --- Наши цветовые константы ---
-  static const Color primaryColor = Color(0xFF2B4F60);    // Глубокий сине-зеленый
-  static const Color backgroundColor = Color(0xFFF2F5F7); // Светло-серый фон
-  static const Color surfaceColor = Colors.white;         // Цвет карточек
-  static const Color textColor = Color(0xFF1E2022);       // Основной темный текст
+  static const Color background = Color(0xFF050505);
+  static const Color surface = Color(0xFF1A1A1A);
+  static const Color primarySilver = Color(0xFFB0BEC5);
+  static const Color accentSilver = Color(0xFFECEFF1);
+  static const Color textWhite = Color(0xFFEEEEEE);
+  static const Color textGrey = Color(0xFFAAAAAA);
+  static const Color errorRed = Color(0xFFCF6679);
 
-  // --- Наша светлая тема ---
-  static ThemeData get lightTheme {
-    final baseTheme = ThemeData.light();
+  static ThemeData get darkTheme {
+    final baseTheme = ThemeData.dark();
 
     return baseTheme.copyWith(
-        scaffoldBackgroundColor: backgroundColor,
-        colorScheme: baseTheme.colorScheme.copyWith(
-          primary: primaryColor,
-          surface: surfaceColor,
-          onPrimary: Colors.white,
-          onSurface: textColor,
-        ),
+      scaffoldBackgroundColor: background,
+      colorScheme: const ColorScheme.dark(
+        primary: primarySilver,
+        onPrimary: Colors.black,
+        secondary: accentSilver,
+        surface: surface,
+        onSurface: textWhite,
+        error: errorRed,
+      ),
 
-        // --- ГЛАВНОЕ ИСПРАВЛЕНИЕ ЦВЕТА ТЕКСТА ---
-        // Мы явно указываем цвет для каждого важного стиля текста.
-        // Это надежнее, чем .apply(), и предотвращает проблемы с наследованием.
-        textTheme: GoogleFonts.robotoTextTheme(baseTheme.textTheme).copyWith(
-          titleLarge: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-          titleMedium: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
-          bodyLarge: const TextStyle(fontSize: 17, height: 1.4, color: textColor),
-          bodyMedium: const TextStyle(fontSize: 16, color: textColor),
-          labelLarge: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
+      // ТИПОГРАФИКА
+      textTheme: GoogleFonts.robotoTextTheme(baseTheme.textTheme).copyWith(
+        titleLarge: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textWhite),
+        titleMedium: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textWhite),
+        bodyLarge: const TextStyle(fontSize: 16, height: 1.4, color: textWhite),
+        bodyMedium: const TextStyle(fontSize: 14, color: textGrey),
+      ),
 
-        appBarTheme: const AppBarTheme(
-            backgroundColor: primaryColor,
-            foregroundColor: Colors.white,
-            elevation: 1,
-            titleTextStyle: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)
+      // APP BAR
+      appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.black,
+          foregroundColor: primarySilver,
+          elevation: 0,
+          centerTitle: true,
+          titleTextStyle: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: primarySilver,
+            letterSpacing: 1.5,
+          )
+      ),
+
+      // КАРТОЧКИ
+      cardTheme: CardThemeData(
+        color: surface,
+        elevation: 4,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.white.withOpacity(0.1), width: 1),
         ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: primaryColor,
-          foregroundColor: Colors.white,
+        margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      ),
+
+      // ДИАЛОГИ (ИСПРАВЛЕНИЕ БЕЛОГО ТЕКСТА)
+      dialogTheme: DialogThemeData(
+        backgroundColor: const Color(0xFF202020), // Темно-серый фон
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: primarySilver, width: 0.5)
         ),
-        dialogTheme: DialogThemeData(
-          backgroundColor: surfaceColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          titleTextStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
+        titleTextStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: primarySilver),
+        contentTextStyle: const TextStyle(color: textWhite, fontSize: 16),
+      ),
+
+      // ПОЛЯ ВВОДА
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0xFF121212),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        hintStyle: const TextStyle(color: Colors.grey),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: primarySilver, width: 1.5),
         ),
-        cardTheme: CardThemeData(
-          elevation: 0.5,
-          color: surfaceColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.grey[100],
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(
-            foregroundColor: primaryColor,
-            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: primaryColor,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)
-            )
-        )
+      ),
+
+      // КНОПКИ
+      elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: primarySilver,
+            foregroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          )
+      ),
+      textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(foregroundColor: primarySilver)
+      ),
+      iconTheme: const IconThemeData(color: primarySilver),
     );
   }
 }

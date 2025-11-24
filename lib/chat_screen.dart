@@ -1,5 +1,5 @@
 // lib/chat_screen.dart
-
+// (Импорты остаются те же)
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -26,13 +26,12 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _loadChatHistory();
-    // При входе сразу помечаем прочитанными
     _markAsRead();
 
     _messageUpdateSubscription = messageUpdateController.stream.listen((senderKey) {
       if (senderKey == widget.contact.publicKey) {
         _loadChatHistory();
-        _markAsRead(); // Если пришло новое, пока мы в чате - сразу читаем
+        _markAsRead();
       }
     });
   }
@@ -43,7 +42,6 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _chatHistory = history;
       });
-      // Скролл вниз после загрузки
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -58,8 +56,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _markAsRead() async {
     await DatabaseService.instance.markMessagesAsRead(widget.contact.publicKey);
-    // Уведомляем глобально, чтобы обновился счетчик в списке контактов
-    // (Это можно сделать через отдельный Stream, но пока используем обновление UI)
   }
 
   @override
@@ -77,21 +73,17 @@ class _ChatScreenState extends State<ChatScreen> {
     final sentMessage = ChatMessage(
         text: messageText,
         isSentByMe: true,
-        status: MessageStatus.sent, // Пока просто sent
+        status: MessageStatus.sent,
         isRead: true
     );
 
     await DatabaseService.instance.addMessage(sentMessage, widget.contact.publicKey);
-
     try {
       final payload = await cryptoService.encrypt(widget.contact.publicKey, messageText);
       websocketService.sendChatMessage(widget.contact.publicKey, payload);
-      // Тут можно обновить статус на 'delivered' если бы сервер отвечал подтверждением
     } catch (e) {
       print("Ошибка отправки: $e");
-      // Тут можно обновить статус на 'failed'
     }
-
     _messageController.clear();
     _loadChatHistory();
   }
@@ -100,12 +92,11 @@ class _ChatScreenState extends State<ChatScreen> {
     showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Очистить историю'),
-          content: const Text('Вы уверены, что хотите удалить все сообщения?'),
+          title: const Text('Удалить историю?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('ОТМЕНА')),
             TextButton(
-                child: const Text('Удалить', style: TextStyle(color: Colors.red)),
+                child: const Text('УДАЛИТЬ', style: TextStyle(color: Colors.red)),
                 onPressed: () async {
                   await DatabaseService.instance.clearChatHistory(widget.contact.publicKey);
                   Navigator.pop(context);
@@ -115,10 +106,18 @@ class _ChatScreenState extends State<ChatScreen> {
         ));
   }
 
-  // --- Виджет одного сообщения ---
+  // --- ВИДЖЕТ СООБЩЕНИЯ ---
   Widget _buildMessageItem(ChatMessage message) {
     final isMyMessage = message.isSentByMe;
     final timeStr = DateFormat('HH:mm').format(message.timestamp);
+
+    // Цвета пузырей под новый стиль
+    final bubbleColor = isMyMessage
+        ? const Color(0xFFB0BEC5) // Моё: Светлое серебро
+        : const Color(0xFF263238); // Чужое: Темный Gunmetal
+
+    final textColor = isMyMessage ? Colors.black : Colors.white;
+    final metaColor = isMyMessage ? Colors.black54 : Colors.white54;
 
     return Align(
       alignment: isMyMessage ? Alignment.centerRight : Alignment.centerLeft,
@@ -128,63 +127,36 @@ class _ChatScreenState extends State<ChatScreen> {
           padding: const EdgeInsets.all(10),
           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
           decoration: BoxDecoration(
-            color: isMyMessage ? Theme.of(context).colorScheme.primary : Colors.white,
+            color: bubbleColor,
             borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(16),
-              topRight: const Radius.circular(16),
-              bottomLeft: isMyMessage ? const Radius.circular(16) : Radius.zero,
-              bottomRight: isMyMessage ? Radius.zero : const Radius.circular(16),
+              topLeft: const Radius.circular(12),
+              topRight: const Radius.circular(12),
+              bottomLeft: isMyMessage ? const Radius.circular(12) : Radius.zero,
+              bottomRight: isMyMessage ? Radius.zero : const Radius.circular(12),
             ),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 3, offset: const Offset(0, 1))
-            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Текст сообщения
               Text(
                 message.text,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: isMyMessage ? Colors.white : Colors.black87,
-                ),
+                style: TextStyle(fontSize: 16, color: textColor),
               ),
               const SizedBox(height: 4),
-
-              // Строка статуса (время + иконки)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  // Для понта: иконка замка (шифрование)
-                  Icon(
-                    Icons.lock_outline,
-                    size: 10,
-                    color: isMyMessage ? Colors.white70 : Colors.grey,
-                  ),
+                  // Иконка замка
+                  Icon(Icons.lock, size: 10, color: metaColor),
                   const SizedBox(width: 4),
-
                   // Время
-                  Text(
-                    timeStr,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isMyMessage ? Colors.white70 : Colors.grey,
-                    ),
-                  ),
+                  Text(timeStr, style: TextStyle(fontSize: 11, color: metaColor)),
 
-                  // Статус (галочки) только для моих сообщений
                   if (isMyMessage) ...[
                     const SizedBox(width: 4),
-                    Icon(
-                      // Логика иконок: Sent -> одна галочка, Read -> две галочки (синие или белые)
-                      // Пока у нас нет receipts от сервера, ставим одну галочку "Sent"
-                      Icons.done,
-                      size: 14,
-                      color: Colors.white,
-                    ),
+                    Icon(Icons.done_all, size: 14, color: Colors.black), // Черная галочка на светлом фоне
                   ]
                 ],
               ),
@@ -198,17 +170,18 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F5F7), // Светло-серый фон чата
+      // Черный фон чата
+      backgroundColor: Colors.black,
       appBar: AppBar(
+        backgroundColor: const Color(0xFF101010),
         title: Row(
           children: [
-            // Аватарка в AppBar
             CircleAvatar(
               radius: 18,
-              backgroundColor: Colors.white24,
+              backgroundColor: const Color(0xFFB0BEC5),
               child: Text(
                 widget.contact.name[0].toUpperCase(),
-                style: const TextStyle(color: Colors.white, fontSize: 16),
+                style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(width: 10),
@@ -216,11 +189,10 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.contact.name, style: const TextStyle(fontSize: 18)),
-                  // Статус "В сети" (фейковый или реальный, если допилим presense)
+                  Text(widget.contact.name, style: const TextStyle(fontSize: 16, color: Colors.white)),
                   const Text(
-                    "Orpheus Secure",
-                    style: TextStyle(fontSize: 12, color: Colors.white70),
+                    "ENCRYPTED",
+                    style: TextStyle(fontSize: 10, color: Colors.grey, letterSpacing: 1.5),
                   ),
                 ],
               ),
@@ -229,12 +201,14 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.call_outlined),
+            icon: const Icon(Icons.call),
+            color: const Color(0xFFB0BEC5),
             onPressed: () => Navigator.push(context, MaterialPageRoute(
                 builder: (context) => CallScreen(contactPublicKey: widget.contact.publicKey))),
           ),
           IconButton(
-            icon: const Icon(Icons.more_vert),
+            icon: const Icon(Icons.delete_outline),
+            color: Colors.red[300],
             onPressed: _showClearHistoryDialog,
           ),
         ],
@@ -244,10 +218,9 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
-              reverse: true, // Список снизу вверх
+              reverse: true,
               itemCount: _chatHistory.length,
               itemBuilder: (context, index) {
-                // reverse: true переворачивает массив визуально, но нам нужно брать с конца
                 final message = _chatHistory.reversed.toList()[index];
                 return _buildMessageItem(message);
               },
@@ -261,40 +234,34 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildInputArea() {
     return Container(
-      padding: const EdgeInsets.all(8.0),
-      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      color: const Color(0xFF101010),
       child: SafeArea(
         child: Row(
           children: [
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline, color: Colors.grey),
-              onPressed: () {}, // Заглушка для аттачей
-            ),
             Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: TextField(
-                  controller: _messageController,
-                  decoration: const InputDecoration(
-                    hintText: 'Сообщение...',
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 10),
+              child: TextField(
+                controller: _messageController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Сообщение...',
+                  hintStyle: const TextStyle(color: Colors.grey),
+                  fillColor: const Color(0xFF202020),
+                  filled: true,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none
                   ),
-                  maxLines: null, // Многострочный ввод
-                  textCapitalization: TextCapitalization.sentences,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
+                textCapitalization: TextCapitalization.sentences,
               ),
             ),
             const SizedBox(width: 8),
             CircleAvatar(
-              backgroundColor: Theme.of(context).colorScheme.primary,
+              backgroundColor: const Color(0xFFB0BEC5),
               child: IconButton(
-                icon: const Icon(Icons.send, color: Colors.white, size: 18),
+                icon: const Icon(Icons.send, color: Colors.black, size: 18),
                 onPressed: _sendMessage,
               ),
             ),

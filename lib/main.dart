@@ -14,6 +14,7 @@ import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/theme/app_theme.dart';
+import 'package:orpheus_project/welcome_screen.dart'; // Экран входа/восстановления
 
 // --- Глобальные сервисы ---
 final cryptoService = CryptoService();
@@ -23,9 +24,12 @@ final notificationService = NotificationService();
 // Глобальный ключ навигации
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// Контроллеры потоков для обновления UI
+// Контроллеры потоков
 final StreamController<String> messageUpdateController = StreamController.broadcast();
 final StreamController<Map<String, dynamic>> signalingStreamController = StreamController.broadcast();
+
+// Глобальная переменная: есть ли ключи на старте
+bool _hasKeys = false;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,26 +37,22 @@ void main() async {
   // 1. Инициализация Firebase
   try {
     await Firebase.initializeApp();
-    print("FIREBASE: Инициализирован успешно");
-
-    // Регистрация фонового обработчика (ОБЯЗАТЕЛЬНО до runApp)
+    // Регистрация фонового обработчика
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-
-    // Инициализация нашего сервиса уведомлений (запрос прав, получение токена)
+    // Инициализация сервиса уведомлений
     await notificationService.init();
-
   } catch (e) {
-    print("FIREBASE ERROR: Ошибка инициализации: $e");
+    print("FIREBASE ERROR: $e");
   }
 
-  // 2. Инициализация криптографии
-  await cryptoService.init();
+  // 2. Инициализация криптографии (возвращает true, если ключи уже есть)
+  _hasKeys = await cryptoService.init();
 
-  // 3. Запуск слушателя WebSocket сообщений
+  // 3. Запуск слушателя сообщений
   _listenForMessages();
 
-  // 4. Подключение к WebSocket (если есть ключи)
-  if (cryptoService.publicKeyBase64 != null) {
+  // 4. Если ключи есть сразу - подключаемся. Если нет - ждем прохождения WelcomeScreen
+  if (_hasKeys && cryptoService.publicKeyBase64 != null) {
     websocketService.connect(cryptoService.publicKeyBase64!);
   }
 
@@ -65,37 +65,28 @@ void _listenForMessages() {
       final messageData = json.decode(messageJson) as Map<String, dynamic>;
       final type = messageData['type'] as String?;
 
-      // Пропускаем системные сообщения и ошибки
       if (type == 'error' || type == 'payment-confirmed' || type == 'license-status') return;
 
       final senderKey = messageData['sender_pubkey'] as String?;
-      // Если нет отправителя - игнорируем (кроме системных, но их мы отфильтровали выше)
       if (senderKey == null) return;
 
-      // --- ЛОГИКА ЗВОНКОВ ---
+      // --- ЗВОНКИ ---
       if (type == 'call-offer') {
-        print("<<< Входящий звонок от $senderKey");
         final data = messageData['data'] as Map<String, dynamic>;
-
-        // Открываем экран звонка через глобальный ключ навигации
         navigatorKey.currentState?.push(MaterialPageRoute(
           builder: (context) => CallScreen(contactPublicKey: senderKey, offer: data),
         ));
-
       } else if (type == 'call-answer' || type == 'ice-candidate' || type == 'hang-up' || type == 'call-rejected') {
-        // Пересылаем сигналы WebRTC в контроллер (его слушает CallScreen)
         signalingStreamController.add(messageData);
       }
 
-      // --- ЛОГИКА ЧАТА ---
+      // --- ЧАТ ---
       else if (type == 'chat') {
         final payload = messageData['payload'] as String?;
         if (payload != null) {
           try {
             final decryptedMessage = await cryptoService.decrypt(senderKey, payload);
 
-            // Сохраняем сообщение как НЕ ПРОЧИТАННОЕ (isRead: false)
-            // Благодаря этому в контактах появится красный кружок
             final receivedMessage = ChatMessage(
                 text: decryptedMessage,
                 isSentByMe: false,
@@ -104,17 +95,15 @@ void _listenForMessages() {
             );
 
             await DatabaseService.instance.addMessage(receivedMessage, senderKey);
-
-            // Уведомляем UI (чтобы обновились счетчики внутри приложения и экран чата)
             messageUpdateController.add(senderKey);
 
           } catch (e) {
-            print("Ошибка расшифровки сообщения: $e");
+            print("Ошибка расшифровки: $e");
           }
         }
       }
     } catch (e) {
-      print("Ошибка обработки сообщения в main: $e");
+      print("Ошибка обработки: $e");
     }
   });
 }
@@ -127,16 +116,20 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
-  // Состояние лицензии
   bool _isLicensed = false;
-  bool _isCheckCompleted = false; // Ждем ответа от сервера перед показом экрана
+  bool _isCheckCompleted = false;
+
+  // Локальное состояние наличия ключей (чтобы обновить UI после создания аккаунта)
+  late bool _keysExist;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Слушаем WebSocket для глобальной проверки статуса лицензии
+    // Инициализируем состояние из глобальной переменной
+    _keysExist = _hasKeys;
+
     websocketService.stream.listen((message) {
       try {
         final data = json.decode(message);
@@ -151,10 +144,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             _isCheckCompleted = true;
           });
         }
-      } catch (e) {
-        // Игнорируем ошибки парсинга
-      }
+      } catch (_) {}
     });
+  }
+
+  // Коллбэк, который вызывается из WelcomeScreen после успешного создания/импорта
+  void _onAuthComplete() {
+    setState(() {
+      _keysExist = true;
+    });
+    // Сразу подключаемся к серверу
+    if (cryptoService.publicKeyBase64 != null) {
+      websocketService.connect(cryptoService.publicKeyBase64!);
+    }
   }
 
   @override
@@ -165,45 +167,31 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Переподключение при сворачивании/разворачивании
     if (state == AppLifecycleState.resumed) {
       if (cryptoService.publicKeyBase64 != null) {
         websocketService.connect(cryptoService.publicKeyBase64!);
       }
     }
-    // Примечание: мы специально НЕ вызываем disconnect() при паузе,
-    // чтобы WebSocket жил как можно дольше в фоне.
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Orpheus Client',
-      theme: AppTheme.lightTheme,
-      navigatorKey: navigatorKey, // Важно для входящих звонков
-      debugShowCheckedModeBanner: false,
+      title: 'Orpheus',
 
-      // ЛОГИКА МАРШРУТИЗАЦИИ
-      home: !_isCheckCompleted
-          ? const Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text("Подключение к серверу..."),
-            ],
-          ),
-        ),
-      )
+      // ВКЛЮЧАЕМ ТЕМНУЮ ТЕМУ
+      theme: AppTheme.darkTheme,
+      themeMode: ThemeMode.dark, // Принудительно темная
+
+      navigatorKey: navigatorKey,
+      debugShowCheckedModeBanner: false,
+      home: !_keysExist
+          ? WelcomeScreen(onAuthComplete: _onAuthComplete)
+          : !_isCheckCompleted
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : _isLicensed
-          ? const ContactsScreen() // Лицензия есть -> Контакты
-          : LicenseScreen(       // Лицензии нет -> Экран оплаты
-        onLicenseConfirmed: () {
-          setState(() => _isLicensed = true);
-        },
-      ),
+          ? const ContactsScreen()
+          : LicenseScreen(onLicenseConfirmed: () => setState(() => _isLicensed = true)),
     );
   }
 }
