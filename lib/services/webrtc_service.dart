@@ -13,27 +13,21 @@ class WebRTCLog {
   final DateTime timestamp;
 
   WebRTCLog({required this.state, this.iceCandidateType, required this.timestamp});
-
-  @override
-  String toString() {
-    final time = '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}:${timestamp.second.toString().padLeft(2, '0')}';
-    if (iceCandidateType != null) {
-      return '[$time] Тип ICE: $iceCandidateType';
-    }
-    return '[$time] Состояние: $state';
-  }
 }
 
+// --- ТВОЙ TURN СЕРВЕР ---
 const Map<String, dynamic> rtcConfiguration = {
   'iceServers': [
-    // УБИРАЕМ STUN, как вы и просили.
-    // Оставляем только ваш TURN-сервер.
     {
       'urls': 'turn:213.171.10.108:3478',
       'username': 'orpheus',
       'credential': 'TEST112',
     },
-  ]
+  ],
+  'sdpSemantics': 'unified-plan',
+  'iceTransportPolicy': 'all', // Разрешаем все пути (важно для эмулятора)
+  'bundlePolicy': 'max-bundle',
+  'rtcpMuxPolicy': 'require',
 };
 
 class WebRTCService {
@@ -42,42 +36,65 @@ class WebRTCService {
   MediaStream? _remoteStream;
 
   MediaStream? get remoteStream => _remoteStream;
+  MediaStream? get localStream => _localStream;
 
   final _logStreamController = BehaviorSubject<List<WebRTCLog>>();
   Stream<List<WebRTCLog>> get logStream => _logStreamController.stream;
   final List<WebRTCLog> _logs = [];
 
+  final List<RTCIceCandidate> _queuedRemoteCandidates = [];
+  bool _remoteDescriptionSet = false;
+
   void _addLog(WebRTCConnectionState state, {String? iceCandidateType}) {
     final log = WebRTCLog(state: state, iceCandidateType: iceCandidateType, timestamp: DateTime.now());
     _logs.add(log);
-    // Отправляем копию списка, чтобы виджеты гарантированно перерисовывались
-    _logStreamController.add(List.from(_logs));
-  }
-
-  Future<void> initialize() async {
-    if (await _requestPermissions()) {
-      _localStream = await mediaDevices.getUserMedia({'audio': true, 'video': false});
+    if (!_logStreamController.isClosed) {
+      _logStreamController.add(List.from(_logs));
     }
   }
 
-  Future<bool> _requestPermissions() async {
-    await Permission.microphone.request();
-    await Permission.camera.request();
-    return await Permission.microphone.isGranted;
+  Future<void> initialize() async {
+    var status = await Permission.microphone.request();
+    if (status.isGranted) {
+      _localStream = await mediaDevices.getUserMedia({
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': false
+      });
+    }
+  }
+
+  Future<RTCPeerConnection> _createPeerConnection(Function(Map<String, dynamic> candidate) onCandidateCreated) async {
+    final pc = await createPeerConnection(rtcConfiguration);
+
+    _registerPeerConnectionListeners(pc, onCandidateCreated);
+
+    _localStream?.getTracks().forEach((track) {
+      pc.addTrack(track, _localStream!);
+    });
+
+    return pc;
   }
 
   Future<void> initiateCall({
     required Function(Map<String, dynamic> offer) onOfferCreated,
     required Function(Map<String, dynamic> candidate) onCandidateCreated,
   }) async {
-    if (_localStream == null) return;
-    _peerConnection = await createPeerConnection(rtcConfiguration);
-    _registerPeerConnectionListeners(onCandidateCreated);
-    _localStream!.getTracks().forEach((track) { _peerConnection!.addTrack(track, _localStream!); });
-    RTCSessionDescription offer = await _peerConnection!.createOffer();
+    if (_localStream == null) await initialize();
+
+    _peerConnection = await _createPeerConnection(onCandidateCreated);
+
+    RTCSessionDescription offer = await _peerConnection!.createOffer({
+      'offerToReceiveAudio': true,
+      'offerToReceiveVideo': false,
+    });
+
     await _peerConnection!.setLocalDescription(offer);
-    final offerMap = {'sdp': offer.sdp, 'type': offer.type};
-    onOfferCreated(offerMap);
+
+    onOfferCreated({'sdp': offer.sdp, 'type': offer.type});
   }
 
   Future<void> answerCall({
@@ -85,80 +102,108 @@ class WebRTCService {
     required Function(Map<String, dynamic> answer) onAnswerCreated,
     required Function(Map<String, dynamic> candidate) onCandidateCreated,
   }) async {
-    if (_localStream == null) return;
-    _peerConnection = await createPeerConnection(rtcConfiguration);
-    _registerPeerConnectionListeners(onCandidateCreated);
-    _localStream!.getTracks().forEach((track) { _peerConnection!.addTrack(track, _localStream!); });
+    if (_localStream == null) await initialize();
+
+    _peerConnection = await _createPeerConnection(onCandidateCreated);
+
     await handleOffer(offer, onAnswerCreated: onAnswerCreated);
   }
 
-  void _registerPeerConnectionListeners(Function(Map<String, dynamic> candidate) onCandidateCreated) {
-    _peerConnection?.onIceGatheringState = (RTCIceGatheringState state) { print('ICE gathering state: $state'); };
-    _peerConnection?.onConnectionState = (RTCPeerConnectionState state) { print('Connection state: $state'); };
-    _peerConnection?.onIceConnectionState = (RTCIceConnectionState state) {
-      print('ICE connection state: $state');
+  void _registerPeerConnectionListeners(RTCPeerConnection pc, Function(Map<String, dynamic> candidate) onCandidateCreated) {
+    pc.onConnectionState = (RTCPeerConnectionState state) {
+      print('WebRTC Connection state: $state');
+    };
+
+    pc.onIceConnectionState = (RTCIceConnectionState state) {
+      print('WebRTC ICE state: $state');
       WebRTCConnectionState? logState;
       switch(state) {
-        case RTCIceConnectionState.RTCIceConnectionStateNew: logState = WebRTCConnectionState.New; break;
         case RTCIceConnectionState.RTCIceConnectionStateChecking: logState = WebRTCConnectionState.Connecting; break;
         case RTCIceConnectionState.RTCIceConnectionStateConnected:
         case RTCIceConnectionState.RTCIceConnectionStateCompleted: logState = WebRTCConnectionState.Connected; break;
         case RTCIceConnectionState.RTCIceConnectionStateDisconnected: logState = WebRTCConnectionState.Disconnected; break;
         case RTCIceConnectionState.RTCIceConnectionStateFailed: logState = WebRTCConnectionState.Failed; break;
-        case RTCIceConnectionState.RTCIceConnectionStateClosed: logState = WebRTCConnectionState.Closed; break;
         default: break;
       }
       if (logState != null) _addLog(logState);
     };
 
-    _peerConnection?.onIceCandidate = (RTCIceCandidate candidate) {
+    pc.onIceCandidate = (RTCIceCandidate candidate) {
       if (candidate.candidate == null) return;
-      String type = 'unknown';
-      if (candidate.candidate!.contains('typ host')) {
-        type = 'host (прямой)';
-      } else if (candidate.candidate!.contains('typ srflx')) type = 'srflx (STUN)';
-      else if (candidate.candidate!.contains('typ relay')) type = 'relay (TURN)';
-      _addLog(WebRTCConnectionState.Connecting, iceCandidateType: type);
-      final candidateMap = { 'candidate': candidate.candidate, 'sdpMid': candidate.sdpMid, 'sdpMLineIndex': candidate.sdpMLineIndex };
-      onCandidateCreated(candidateMap);
+      onCandidateCreated({
+        'candidate': candidate.candidate,
+        'sdpMid': candidate.sdpMid,
+        'sdpMLineIndex': candidate.sdpMLineIndex
+      });
     };
 
-    _peerConnection?.onTrack = (RTCTrackEvent event) {
+    pc.onTrack = (RTCTrackEvent event) {
       if (event.streams.isNotEmpty) {
         _remoteStream = event.streams[0];
+        Helper.setSpeakerphoneOn(false);
       }
     };
   }
 
   Future<void> handleOffer(Map<String, dynamic> offerData, { required Function(Map<String, dynamic> answer) onAnswerCreated, }) async {
     if (_peerConnection == null) return;
+
     final offer = RTCSessionDescription(offerData['sdp'], offerData['type']);
     await _peerConnection!.setRemoteDescription(offer);
+
+    _remoteDescriptionSet = true;
+    await _drainCandidateQueue();
+
     final answer = await _peerConnection!.createAnswer();
     await _peerConnection!.setLocalDescription(answer);
-    final answerMap = {'sdp': answer.sdp, 'type': answer.type};
-    onAnswerCreated(answerMap);
+
+    onAnswerCreated({'sdp': answer.sdp, 'type': answer.type});
   }
 
   Future<void> handleAnswer(Map<String, dynamic> answerData) async {
     if (_peerConnection == null) return;
     final answer = RTCSessionDescription(answerData['sdp'], answerData['type']);
     await _peerConnection!.setRemoteDescription(answer);
+
+    _remoteDescriptionSet = true;
+    await _drainCandidateQueue();
   }
 
   Future<void> addCandidate(Map<String, dynamic> candidateData) async {
     if (_peerConnection == null) return;
-    if (candidateData['candidate'] == null) return;
-    final candidate = RTCIceCandidate(candidateData['candidate'], candidateData['sdpMid'], candidateData['sdpMLineIndex']);
-    await _peerConnection!.addCandidate(candidate);
+
+    final candidate = RTCIceCandidate(
+        candidateData['candidate'],
+        candidateData['sdpMid'],
+        candidateData['sdpMLineIndex']
+    );
+
+    if (_remoteDescriptionSet) {
+      await _peerConnection!.addCandidate(candidate);
+    } else {
+      _queuedRemoteCandidates.add(candidate);
+    }
+  }
+
+  Future<void> _drainCandidateQueue() async {
+    for (final candidate in _queuedRemoteCandidates) {
+      await _peerConnection!.addCandidate(candidate);
+    }
+    _queuedRemoteCandidates.clear();
   }
 
   Future<void> hangUp() async {
     try {
+      _localStream?.getTracks().forEach((track) => track.stop());
       await _localStream?.dispose();
-      await _remoteStream?.dispose();
+      _localStream = null;
+
       await _peerConnection?.close();
       _peerConnection = null;
+
+      _remoteDescriptionSet = false;
+      _queuedRemoteCandidates.clear();
+
       _logs.clear();
       _logStreamController.add([]);
     } catch (e) { print("Ошибка при hangUp: $e"); }

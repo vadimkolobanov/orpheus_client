@@ -1,9 +1,10 @@
 // lib/call_screen.dart
 
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:orpheus_project/main.dart'; // Доступ к websocketService и signalingStreamController
+import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
 
@@ -11,7 +12,6 @@ enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed }
 
 class CallScreen extends StatefulWidget {
   final String contactPublicKey;
-  // Если offer != null, значит это входящий звонок
   final Map<String, dynamic>? offer;
 
   const CallScreen({
@@ -28,430 +28,357 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   final _webrtcService = WebRTCService();
   final _renderer = RTCVideoRenderer();
 
-  late StreamSubscription _signalingSubscription;
-  late StreamSubscription _webrtcLogSubscription;
+  StreamSubscription? _signalingSubscription;
+  StreamSubscription? _webrtcLogSubscription;
 
-  late CallState _callState;
-  bool _isHangingUp = false; // Флаг для защиты от двойного сброса
+  CallState _callState = CallState.Dialing;
+
   bool _isSpeakerOn = false;
+  bool _isMicMuted = false;
+  bool _isDisposed = false;
 
-  final _soundService = SoundService.instance;
-  late AnimationController _pulseAnimationController;
-  final List<WebRTCLog> _logs = [];
+  late AnimationController _pulseController;
+  Timer? _durationTimer;
+  final Stopwatch _stopwatch = Stopwatch();
+  String _durationText = "00:00";
+  String _debugStatus = "Init";
 
   @override
   void initState() {
     super.initState();
-    // Определяем начальное состояние: Входящий или Исходящий
     _callState = widget.offer != null ? CallState.Incoming : CallState.Dialing;
 
-    // Анимация пульсации иконки
-    _pulseAnimationController = AnimationController(
+    _pulseController = AnimationController(
         vsync: this,
         duration: const Duration(seconds: 2)
-    )..repeat(reverse: true);
+    )..repeat(reverse: false);
 
-    _initRenderersAndSignaling();
-
-    // Если мы звоним, начинаем процесс инициализации
-    if (_callState == CallState.Dialing) {
-      _initiateCall();
-      _tryPlaySound(_soundService.playDialingSound);
-    } else {
-      // Если входящий, играем рингтон (в данном случае тот же звук дозвона для примера)
-      _tryPlaySound(_soundService.playDialingSound);
-    }
+    _initCallSequence();
   }
 
-  void _tryPlaySound(Future<void> Function() playFunction) {
-    try {
-      playFunction();
-    } catch (e) {
-      print("Ошибка воспроизведения звука: $e");
-    }
-  }
-
-  Future<void> _initRenderersAndSignaling() async {
+  Future<void> _initCallSequence() async {
     await _renderer.initialize();
 
-    // 1. Слушаем логи WebRTC для определения момента соединения
     _webrtcLogSubscription = _webrtcService.logStream.listen((logs) {
-      if (!mounted) return;
+      if (_isDisposed || logs.isEmpty) return;
+      final state = logs.last.state;
 
-      final lastLog = logs.isNotEmpty ? logs.last : null;
-      if (lastLog == null) return;
+      if (mounted) {
+        setState(() => _debugStatus = state.toString().split('.').last);
+      }
 
-      setState(() {
-        _logs.clear();
-        _logs.addAll(logs);
-      });
-
-      if (lastLog.state == WebRTCConnectionState.Connected) {
-        // Соединение установлено!
-        if (_callState != CallState.Connected) {
-          _soundService.stopAllSounds();
-          _tryPlaySound(_soundService.playConnectedSound);
-          setState(() {
-            _callState = CallState.Connected;
-          });
-        }
-      } else if (lastLog.state == WebRTCConnectionState.Failed) {
-        if (mounted && _callState != CallState.Failed) {
-          setState(() => _callState = CallState.Failed);
-          // Сообщаем о сбое и закрываемся через паузу
-          Future.delayed(const Duration(seconds: 3), () => _hangUp());
-        }
+      if (state == WebRTCConnectionState.Connected) {
+        if (_callState != CallState.Connected) _onConnected();
+      } else if (state == WebRTCConnectionState.Failed) {
+        if (!_isDisposed) _onError("Сбой (ICE)");
+      } else if (state == WebRTCConnectionState.Closed) {
+        if (!_isDisposed && _callState == CallState.Connected) _onError("Завершен");
       }
     });
 
-    // 2. Слушаем входящие сигналы от сервера (через контроллер в main.dart)
-    _signalingSubscription = signalingStreamController.stream.listen((signal) {
-      // Фильтруем сигналы: только от того, с кем говорим
-      if (!mounted || signal['sender_pubkey'] != widget.contactPublicKey) return;
+    _signalingSubscription = signalingStreamController.stream.listen((signal) async {
+      if (_isDisposed || signal['sender_pubkey'] != widget.contactPublicKey) return;
 
-      final type = signal['type'] as String;
+      final type = signal['type'];
+      final data = signal['data'];
 
-      if (type == 'call-rejected') {
-        // Собеседник отклонил звонок
-        _soundService.stopAllSounds();
-        if (mounted) setState(() => _callState = CallState.Rejected);
-        Future.delayed(const Duration(seconds: 2), () => _cleanupResourcesAndClose());
-
-      } else if (type == 'call-answer') {
-        // Собеседник ответил
-        final data = signal['data'] as Map<String, dynamic>;
-        _webrtcService.handleAnswer(data);
-        if (mounted) setState(() => _callState = CallState.Connecting);
-
+      if (type == 'call-answer') {
+        if (mounted) setState(() => _debugStatus = "Answer received");
+        await _webrtcService.handleAnswer(data);
+        if (_callState != CallState.Connected && mounted) {
+          setState(() => _callState = CallState.Connecting);
+        }
       } else if (type == 'ice-candidate') {
-        // Прилетел ICE кандидат (путь для соединения)
-        final data = signal['data'] as Map<String, dynamic>;
-        _webrtcService.addCandidate(data);
-
-      } else if (type == 'hang-up') {
-        // Собеседник положил трубку
-        _cleanupResourcesAndClose(remoteHangup: true);
+        await _webrtcService.addCandidate(data);
+      } else if (type == 'hang-up' || type == 'call-rejected') {
+        _onRemoteHangup();
       }
     });
 
-    // Периодически обновляем поток видео (если есть), хотя для аудио-звонка это опционально
-    Timer.periodic(const Duration(milliseconds: 500), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_renderer.srcObject != _webrtcService.remoteStream) {
-        if (mounted) setState(() {
-          _renderer.srcObject = _webrtcService.remoteStream;
-        });
-      }
-    });
-  }
-
-  // --- Логика исходящего звонка ---
-  Future<void> _initiateCall() async {
-    await _webrtcService.initialize();
-    await _webrtcService.initiateCall(
-      onOfferCreated: (offer) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-offer', offer),
-      onCandidateCreated: (candidate) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', candidate),
-    );
-  }
-
-  // --- Логика ответа на входящий звонок (ИСПРАВЛЕНО) ---
-  void _acceptCall() async {
-    // Защита от множественных нажатий
-    if (_callState == CallState.Connecting || _callState == CallState.Connected) return;
-
-    if (mounted) {
-      setState(() => _callState = CallState.Connecting);
+    if (_callState == CallState.Dialing) {
+      SoundService.instance.playDialingSound();
+      _startOutgoingCall();
+    } else {
+      SoundService.instance.playDialingSound();
     }
-    // Останавливаем рингтон входящего вызова
-    _soundService.stopAllSounds();
+  }
 
+  void _onConnected() {
+    SoundService.instance.stopAllSounds();
+    SoundService.instance.playConnectedSound();
+
+    if (mounted) setState(() => _callState = CallState.Connected);
+
+    _stopwatch.start();
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      final elapsed = _stopwatch.elapsed;
+      final min = elapsed.inMinutes.toString().padLeft(2, '0');
+      final sec = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
+      setState(() => _durationText = "$min:$sec");
+    });
+  }
+
+  void _onRemoteHangup() {
+    if (_isDisposed) return;
+    SoundService.instance.stopAllSounds();
+    SoundService.instance.playDisconnectedSound();
+    if (mounted) setState(() => _callState = CallState.Rejected);
+    Future.delayed(const Duration(seconds: 1), _safePop);
+  }
+
+  void _onError(String msg) {
+    if (_isDisposed) return;
+    if (mounted) setState(() => _callState = CallState.Failed);
+    Future.delayed(const Duration(seconds: 2), _safePop);
+  }
+
+  Future<void> _startOutgoingCall() async {
     try {
-      await _webrtcService.initialize();
-      await _webrtcService.answerCall(
-        offer: widget.offer!,
-        onAnswerCreated: (answer) {
-          // Отправляем ответ собеседнику
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', answer);
-          // Выключаем громкую связь по умолчанию (прикладываем к уху)
-          _setSpeakerphone(false);
-        },
-        onCandidateCreated: (candidate) {
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', candidate);
-        },
+      await _webrtcService.initiateCall(
+        onOfferCreated: (offer) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-offer', offer),
+        onCandidateCreated: (cand) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand),
       );
     } catch (e) {
-      print("Ошибка при ответе на звонок: $e");
-      _hangUp();
+      _onError("Mic Error");
     }
   }
 
-  // --- Логика отклонения вызова ---
-  void _rejectCall() {
-    _hangUp(); // _hangUp внутри сам определит, что это отклонение, так как состояние Incoming
-  }
-
-  // --- Логика завершения звонка (ИСПРАВЛЕНО) ---
-  void _hangUp() {
-    if (_isHangingUp) return;
-    _isHangingUp = true;
-
-    // Определяем тип сигнала
-    String signalType = 'hang-up';
-    if (_callState == CallState.Incoming) {
-      signalType = 'call-rejected';
-    }
-
-    // 1. Пытаемся уведомить собеседника
+  void _acceptCall() async {
+    SoundService.instance.stopAllSounds();
+    if (mounted) setState(() => _callState = CallState.Connecting);
     try {
-      websocketService.sendSignalingMessage(widget.contactPublicKey, signalType, {});
+      await _webrtcService.answerCall(
+        offer: widget.offer!,
+        onAnswerCreated: (ans) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', ans),
+        onCandidateCreated: (cand) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand),
+      );
     } catch (e) {
-      print("Ошибка отправки сигнала завершения: $e");
-    }
-
-    // 2. Чистим ресурсы и закрываем экран
-    _cleanupResourcesAndClose();
-  }
-
-  // --- Общий метод очистки ресурсов и выхода ---
-  void _cleanupResourcesAndClose({bool remoteHangup = false}) {
-    _signalingSubscription.cancel();
-    _webrtcLogSubscription.cancel();
-    _soundService.stopAllSounds();
-
-    // Если положили трубку удаленно или мы сбросили - играем звук завершения
-    _tryPlaySound(_soundService.playDisconnectedSound);
-
-    _webrtcService.hangUp();
-
-    if (mounted) {
-      // Даем пользователю долю секунды услышать звук завершения или увидеть статус
-      // Но для отзывчивости лучше закрывать почти сразу
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
+      _onError("Connect Error");
     }
   }
 
-  // Используется в dispose, если окно закрыли системной кнопкой "Назад"
-  void _cleanupResourcesOnly() {
-    _signalingSubscription.cancel();
-    _webrtcLogSubscription.cancel();
-    _soundService.stopAllSounds();
-    _webrtcService.hangUp();
+  void _endCallButton() {
+    if (_isDisposed) return;
+    String signal = _callState == CallState.Incoming ? 'call-rejected' : 'hang-up';
+    websocketService.sendSignalingMessage(widget.contactPublicKey, signal, {});
+    _safePop();
   }
 
-  Future<void> _setSpeakerphone(bool enabled) async {
-    await Helper.setSpeakerphoneOn(enabled);
-    if (mounted) setState(() {
-      _isSpeakerOn = enabled;
-    });
+  void _safePop() {
+    if (_isDisposed) return;
+    _isDisposed = true;
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
+
+  void _toggleSpeaker() {
+    setState(() => _isSpeakerOn = !_isSpeakerOn);
+    Helper.setSpeakerphoneOn(_isSpeakerOn);
+  }
+
+  void _toggleMic() {
+    // Безопасное переключение микрофона
+    final tracks = _webrtcService.localStream?.getAudioTracks();
+    if (tracks != null && tracks.isNotEmpty) {
+      setState(() => _isMicMuted = !_isMicMuted);
+      tracks[0].enabled = !_isMicMuted;
+    }
   }
 
   @override
   void dispose() {
-    _pulseAnimationController.dispose();
+    _isDisposed = true;
+    _pulseController.dispose();
     _renderer.dispose();
+    _stopwatch.stop();
+    _durationTimer?.cancel();
+    _signalingSubscription?.cancel();
+    _webrtcLogSubscription?.cancel();
+    SoundService.instance.stopAllSounds();
 
-    // Если мы выходим, а звонок формально не завершен через кнопку - завершаем его
-    if (!_isHangingUp) {
-      // Пытаемся отправить hang-up "вдогонку"
+    if (_callState == CallState.Connected || _callState == CallState.Dialing) {
       try {
         websocketService.sendSignalingMessage(widget.contactPublicKey, 'hang-up', {});
       } catch (_) {}
-      _cleanupResourcesOnly();
     }
+
+    _webrtcService.hangUp();
     super.dispose();
   }
+
+  // --- UI ---
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Темный фон для звонка
-      backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.95),
-      body: SafeArea(
-        child: Center(
-          child: Column(
-            children: [
-              // Скрытый рендерер видео (нужен для работы WebRTC, даже если аудио)
-              SizedBox(height: 1.0, width: 1.0, child: Opacity(opacity: 0.0, child: RTCVideoView(_renderer))),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF1A1A1A), Color(0xFF000000)],
+              ),
+            ),
+          ),
 
-              const Spacer(flex: 1),
+          SizedBox(height: 0, width: 0, child: RTCVideoView(_renderer)),
 
-              // Анимированная иконка статуса
-              FadeTransition(
-                opacity: _pulseAnimationController.drive(CurveTween(curve: Curves.easeInOut)),
-                child: Container(
-                  width: 100, height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _getStatusIndicatorColor().withOpacity(0.3),
-                    border: Border.all(color: _getStatusIndicatorColor(), width: 2),
-                  ),
-                  child: Icon(_getStatusIndicatorIcon(), color: Colors.white, size: 40),
+          SafeArea(
+            child: Column(
+              children: [
+                const SizedBox(height: 40),
+                Text("Orpheus Secure", style: TextStyle(color: Colors.white54, fontSize: 14)),
+                const SizedBox(height: 10),
+                Text(
+                  _callState == CallState.Connected ? "Собеседник" : widget.contactPublicKey.substring(0, 8),
+                  style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
                 ),
-              ),
+                const SizedBox(height: 8),
 
-              const SizedBox(height: 24),
-
-              // Текстовый статус
-              Text(
-                _getCallStatusText(),
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white),
-              ),
-
-              const SizedBox(height: 12),
-
-              // Логи (для отладки) - можно скрыть в релизе
-              Expanded(
-                flex: 2,
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-                  padding: const EdgeInsets.all(8.0),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
+                if (_callState == CallState.Connected)
+                  Text(_durationText, style: const TextStyle(color: Color(0xFF6AD394), fontSize: 24, fontFamily: "monospace"))
+                else
+                  Column(
+                    children: [
+                      Text(_getStatusText(), style: const TextStyle(color: Colors.grey, fontSize: 18)),
+                      const SizedBox(height: 4),
+                      Text(_debugStatus, style: const TextStyle(color: Colors.red, fontSize: 10)),
+                    ],
                   ),
-                  child: StreamBuilder<List<WebRTCLog>>(
-                    stream: _webrtcService.logStream,
-                    builder: (context, snapshot) {
-                      final logs = snapshot.data ?? [];
-                      return ListView.builder(
-                        reverse: true,
-                        itemCount: logs.length,
-                        itemBuilder: (context, index) {
-                          final log = logs.reversed.toList()[index];
-                          return Text(
-                            log.toString(),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 11,
-                              fontFamily: 'monospace',
+
+                const Spacer(),
+
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (_callState != CallState.Failed && _callState != CallState.Rejected)
+                      ScaleTransition(
+                        scale: Tween(begin: 1.0, end: 1.5).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeOut)),
+                        child: FadeTransition(
+                          opacity: Tween(begin: 0.5, end: 0.0).animate(_pulseController),
+                          child: Container(
+                            width: 150, height: 150,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
                             ),
-                          );
-                        },
-                      );
-                    },
-                  ),
+                          ),
+                        ),
+                      ),
+                    const CircleAvatar(
+                      radius: 60,
+                      backgroundColor: Colors.grey,
+                      child: Icon(Icons.person, size: 60, color: Colors.white),
+                    ),
+                  ],
                 ),
-              ),
 
-              const Spacer(flex: 1),
+                const Spacer(),
 
-              // Кнопки управления
-              _buildCallActions(),
+                _buildControlPanel(),
 
-              const SizedBox(height: 60),
-            ],
+                const SizedBox(height: 60),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlPanel() {
+    if (_callState == CallState.Incoming) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _buildActionBtn(Icons.call_end, Colors.red, "ОТКЛОНИТЬ", _endCallButton),
+            _buildActionBtn(Icons.call, Colors.green, "ОТВЕТИТЬ", _acceptCall),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildControlBtn(
+              icon: _isMicMuted ? Icons.mic_off : Icons.mic,
+              isActive: _isMicMuted,
+              label: "Микрофон",
+              onTap: _toggleMic,
+            ),
+            _buildControlBtn(
+              icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_down,
+              isActive: _isSpeakerOn,
+              label: "Динамик",
+              onTap: _toggleSpeaker,
+            ),
+          ],
+        ),
+        const SizedBox(height: 40),
+        _buildActionBtn(Icons.call_end, Colors.redAccent, "ЗАВЕРШИТЬ", _endCallButton),
+      ],
+    );
+  }
+
+  Widget _buildControlBtn({required IconData icon, required bool isActive, required String label, required VoidCallback onTap}) {
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isActive ? Colors.white : Colors.white.withOpacity(0.1),
+            ),
+            child: Icon(icon, size: 28, color: isActive ? Colors.black : Colors.white),
           ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12))
+      ],
     );
   }
 
-  String _getCallStatusText() {
-    switch (_callState) {
-      case CallState.Dialing: return 'Вызов...';
-      case CallState.Incoming: return 'Входящий звонок';
-      case CallState.Connecting: return 'Соединение...';
-      case CallState.Connected: return 'Звонок активен';
-      case CallState.Rejected: return 'Звонок отклонен';
-      case CallState.Failed: return 'Ошибка соединения';
-    }
-  }
-
-  Color _getStatusIndicatorColor() {
-    switch (_callState) {
-      case CallState.Dialing:
-      case CallState.Connecting: return Colors.blue.shade300;
-      case CallState.Incoming: return Colors.green.shade300;
-      case CallState.Connected: return Colors.lightGreenAccent.shade400;
-      case CallState.Rejected:
-      case CallState.Failed: return Colors.red.shade300;
-    }
-  }
-
-  IconData _getStatusIndicatorIcon() {
-    switch (_callState) {
-      case CallState.Dialing:
-      case CallState.Connecting: return Icons.phone_forwarded_outlined;
-      case CallState.Incoming: return Icons.ring_volume_outlined;
-      case CallState.Connected: return Icons.mic_none_outlined;
-      case CallState.Rejected:
-      case CallState.Failed: return Icons.phone_disabled_outlined;
-    }
-  }
-
-  Widget _buildCallActions() {
-    if (_callState == CallState.Rejected || _callState == CallState.Failed) {
-      return const SizedBox(height: 76);
-    }
-
-    if (_callState == CallState.Connected) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _buildActionButton(
-            icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_down,
-            backgroundColor: Colors.white.withOpacity(0.2),
-            onPressed: () => _setSpeakerphone(!_isSpeakerOn),
+  Widget _buildActionBtn(IconData icon, Color color, String label, VoidCallback onTap) {
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 15)],
+            ),
+            child: Icon(icon, size: 36, color: Colors.white),
           ),
-          _buildActionButton(
-            icon: Icons.call_end,
-            backgroundColor: Colors.redAccent,
-            onPressed: _hangUp,
-          ),
-          // Заглушка для микрофона (пока без функционала Mute)
-          _buildActionButton(
-            icon: Icons.mic_off_outlined,
-            backgroundColor: Colors.white.withOpacity(0.2),
-            onPressed: () {},
-          ),
-        ],
-      );
-    } else if (_callState == CallState.Incoming) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildActionButton(
-            icon: Icons.call_end,
-            backgroundColor: Colors.redAccent,
-            onPressed: _rejectCall,
-          ),
-          _buildActionButton(
-            icon: Icons.call,
-            backgroundColor: Colors.green,
-            onPressed: _acceptCall,
-          ),
-        ],
-      );
-    } else {
-      // Dialing or Connecting
-      // Всегда даем возможность сбросить, даже если соединяемся
-      return _buildActionButton(
-        icon: Icons.call_end,
-        backgroundColor: Colors.redAccent,
-        onPressed: _hangUp,
-      );
-    }
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required Color backgroundColor,
-    required VoidCallback onPressed,
-  }) {
-    return IconButton.filled(
-      style: IconButton.styleFrom(
-        backgroundColor: backgroundColor,
-        shape: const CircleBorder(),
-        padding: const EdgeInsets.all(20),
-      ),
-      icon: Icon(icon, color: Colors.white, size: 36),
-      onPressed: onPressed,
+        ),
+        const SizedBox(height: 8),
+        Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))
+      ],
     );
+  }
+
+  String _getStatusText() {
+    switch (_callState) {
+      case CallState.Dialing: return "Вызов...";
+      case CallState.Incoming: return "Входящий звонок";
+      case CallState.Connecting: return "Соединение...";
+      case CallState.Rejected: return "Завершен";
+      case CallState.Failed: return "Сбой";
+      default: return "";
+    }
   }
 }
