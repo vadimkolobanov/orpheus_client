@@ -1,6 +1,7 @@
 // lib/services/crypto_service.dart
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart'; // Для compute
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:cryptography/cryptography.dart';
 
@@ -10,15 +11,17 @@ class CryptoService {
   static const _privateKeyStoreKey = 'orpheus_private_key_data';
   static const _publicKeyStoreKey = 'orpheus_public_key_data';
 
+  // Алгоритмы (используются в основном потоке для генерации ключей)
   final keyExchangeAlgorithm = X25519();
-  final symmetricCipher = Chacha20.poly1305Aead();
 
+  // Храним ключи в памяти
   SimpleKeyPair? _keyPair;
   SimplePublicKey? _publicKey;
 
   String? get publicKeyBase64 => _publicKey != null ? base64.encode(_publicKey!.bytes) : null;
 
-  // Метод инициализации теперь возвращает true, если ключи загружены, и false, если их нет
+  // --- ИНИЦИАЛИЗАЦИЯ И УПРАВЛЕНИЕ КЛЮЧАМИ ---
+
   Future<bool> init() async {
     final privateKeyB64 = await _secureStorage.read(key: _privateKeyStoreKey);
     final publicKeyB64 = await _secureStorage.read(key: _publicKeyStoreKey);
@@ -34,12 +37,11 @@ class CryptoService {
         type: KeyPairType.x25519,
       );
       print("Ключи загружены.");
-      return true; // Ключи есть
+      return true;
     }
-    return false; // Ключей нет
+    return false;
   }
 
-  // Явная генерация (для кнопки "Создать аккаунт")
   Future<void> generateNewKeys() async {
     _keyPair = await keyExchangeAlgorithm.newKeyPair();
     final privateKeyData = await _keyPair!.extract();
@@ -49,15 +51,12 @@ class CryptoService {
     print("Новые ключи сгенерированы.");
   }
 
-  // Импорт ключа (для кнопки "Восстановить")
-  // Принимает приватный ключ в Base64
   Future<void> importPrivateKey(String privateKeyB64) async {
     try {
       final privateKeyBytes = base64.decode(privateKeyB64);
 
-      // Восстанавливаем пару из приватного ключа
       _keyPair = await keyExchangeAlgorithm.newKeyPairFromSeed(privateKeyBytes);
-      final privateKeyData = await _keyPair!.extract(); // Убеждаемся, что данные валидны
+      final privateKeyData = await _keyPair!.extract();
       _publicKey = await _keyPair!.extractPublicKey();
 
       await _saveKeys(privateKeyData.bytes, _publicKey!.bytes);
@@ -67,7 +66,6 @@ class CryptoService {
     }
   }
 
-  // Экспорт приватного ключа (для бэкапа)
   Future<String> getPrivateKeyBase64() async {
     if (_keyPair == null) throw Exception("Нет ключей");
     final data = await _keyPair!.extract();
@@ -79,13 +77,72 @@ class CryptoService {
     await _secureStorage.write(key: _publicKeyStoreKey, value: base64.encode(publicBytes));
   }
 
-  // Шифрование и дешифровка (остаются без изменений)
+  // --- ШИФРОВАНИЕ (В ИЗОЛЯТАХ) ---
+
   Future<String> encrypt(String recipientPublicKeyBase64, String message) async {
     if (_keyPair == null) throw Exception("Ключи не инициализированы!");
-    final recipientPublicKey = SimplePublicKey(base64.decode(recipientPublicKeyBase64), type: KeyPairType.x25519);
-    final sharedSecret = await keyExchangeAlgorithm.sharedSecretKey(keyPair: _keyPair!, remotePublicKey: recipientPublicKey);
+
+    // Извлекаем сырые байты, чтобы передать их в изолят
+    final keyData = await _keyPair!.extract();
+    final myPrivateKeyBytes = keyData.bytes;
+    final myPublicKeyBytes = (await _keyPair!.extractPublicKey()).bytes;
+
+    // Запускаем тяжелую задачу в отдельном потоке
+    return await compute(_encryptTask, {
+      'myPrivateKey': myPrivateKeyBytes,
+      'myPublicKey': myPublicKeyBytes,
+      'recipientPublicKey': recipientPublicKeyBase64,
+      'message': message,
+    });
+  }
+
+  Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload) async {
+    if (_keyPair == null) throw Exception("Ключи не инициализированы!");
+
+    final keyData = await _keyPair!.extract();
+    final myPrivateKeyBytes = keyData.bytes;
+    final myPublicKeyBytes = (await _keyPair!.extractPublicKey()).bytes;
+
+    return await compute(_decryptTask, {
+      'myPrivateKey': myPrivateKeyBytes,
+      'myPublicKey': myPublicKeyBytes,
+      'senderPublicKey': senderPublicKeyBase64,
+      'payload': encryptedPayload,
+    });
+  }
+
+  // --- СТАТИЧЕСКИЕ ЗАДАЧИ ДЛЯ COMPUTE ---
+  // Они не имеют доступа к `this`, поэтому все данные передаются через Map
+
+  static Future<String> _encryptTask(Map<String, dynamic> data) async {
+    final algorithm = X25519();
+    final cipher = Chacha20.poly1305Aead();
+
+    final myPrivateKeyBytes = data['myPrivateKey'] as List<int>;
+    final myPublicKeyBytes = data['myPublicKey'] as List<int>;
+    final recipientKeyB64 = data['recipientPublicKey'] as String;
+    final message = data['message'] as String;
+
+    // Восстанавливаем ключи
+    final myPublicKey = SimplePublicKey(myPublicKeyBytes, type: KeyPairType.x25519);
+    final myKeyPair = SimpleKeyPairData(
+      myPrivateKeyBytes,
+      publicKey: myPublicKey,
+      type: KeyPairType.x25519,
+    );
+
+    final recipientPublicKey = SimplePublicKey(base64.decode(recipientKeyB64), type: KeyPairType.x25519);
+
+    // Вычисляем общий секрет
+    final sharedSecret = await algorithm.sharedSecretKey(
+      keyPair: myKeyPair,
+      remotePublicKey: recipientPublicKey,
+    );
+
+    // Шифруем
     final messageBytes = utf8.encode(message);
-    final secretBox = await symmetricCipher.encrypt(messageBytes, secretKey: sharedSecret);
+    final secretBox = await cipher.encrypt(messageBytes, secretKey: sharedSecret);
+
     return json.encode({
       'cipherText': base64.encode(secretBox.cipherText),
       'nonce': base64.encode(secretBox.nonce),
@@ -93,17 +150,40 @@ class CryptoService {
     });
   }
 
-  Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload) async {
-    if (_keyPair == null) throw Exception("Ключи не инициализированы!");
-    final senderPublicKey = SimplePublicKey(base64.decode(senderPublicKeyBase64), type: KeyPairType.x25519);
-    final sharedSecret = await keyExchangeAlgorithm.sharedSecretKey(keyPair: _keyPair!, remotePublicKey: senderPublicKey);
-    final payloadMap = json.decode(encryptedPayload) as Map<String, dynamic>;
+  static Future<String> _decryptTask(Map<String, dynamic> data) async {
+    final algorithm = X25519();
+    final cipher = Chacha20.poly1305Aead();
+
+    final myPrivateKeyBytes = data['myPrivateKey'] as List<int>;
+    final myPublicKeyBytes = data['myPublicKey'] as List<int>;
+    final senderKeyB64 = data['senderPublicKey'] as String;
+    final payloadJson = data['payload'] as String;
+
+    // Восстанавливаем ключи
+    final myPublicKey = SimplePublicKey(myPublicKeyBytes, type: KeyPairType.x25519);
+    final myKeyPair = SimpleKeyPairData(
+      myPrivateKeyBytes,
+      publicKey: myPublicKey,
+      type: KeyPairType.x25519,
+    );
+
+    final senderPublicKey = SimplePublicKey(base64.decode(senderKeyB64), type: KeyPairType.x25519);
+
+    // Вычисляем общий секрет
+    final sharedSecret = await algorithm.sharedSecretKey(
+      keyPair: myKeyPair,
+      remotePublicKey: senderPublicKey,
+    );
+
+    // Дешифруем
+    final payloadMap = json.decode(payloadJson) as Map<String, dynamic>;
     final secretBox = SecretBox(
       base64.decode(payloadMap['cipherText']!),
       nonce: base64.decode(payloadMap['nonce']!),
       mac: Mac(base64.decode(payloadMap['mac']!)),
     );
-    final decryptedBytes = await symmetricCipher.decrypt(secretBox, secretKey: sharedSecret);
+
+    final decryptedBytes = await cipher.decrypt(secretBox, secretKey: sharedSecret);
     return utf8.decode(decryptedBytes);
   }
 }

@@ -238,36 +238,48 @@ class _ChatScreenState extends State<ChatScreen> {
       color: const Color(0xFF101010),
       child: SafeArea(
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end, // Выравнивание по низу, чтобы кнопка не прыгала
           children: [
             Expanded(
-              child: TextField(
-                controller: _messageController,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Сообщение...',
-                  hintStyle: const TextStyle(color: Colors.grey),
-                  fillColor: const Color(0xFF202020),
-                  filled: true,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF202020),
+                  borderRadius: BorderRadius.circular(24),
                 ),
-                textCapitalization: TextCapitalization.sentences,
+                child: TextField(
+                  controller: _messageController,
+                  style: const TextStyle(color: Colors.white),
+
+                  // --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
+                  maxLines: null, // Разрешаем перенос строк
+                  keyboardType: TextInputType.multiline, // Клавиатура с кнопкой Enter
+                  minLines: 1, // Минимальная высота
+                  // -------------------------
+
+                  decoration: const InputDecoration(
+                    hintText: 'Сообщение...',
+                    hintStyle: TextStyle(color: Colors.grey),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                ),
               ),
             ),
             const SizedBox(width: 8),
-            CircleAvatar(
-              backgroundColor: const Color(0xFFB0BEC5),
-              child: IconButton(
-                icon: const Icon(Icons.send, color: Colors.black, size: 18),
-                onPressed: _sendMessage,
+            // Кнопка отправки
+            Container(
+              margin: const EdgeInsets.only(bottom: 4), // Небольшой отступ снизу
+              child: CircleAvatar(
+                backgroundColor: const Color(0xFFB0BEC5),
+                child: IconButton(
+                  icon: const Icon(Icons.send, color: Colors.black, size: 18),
+                  onPressed: _sendMessage,
+                ),
               ),
             ),
           ],
         ),
       ),
     );
-  }
-}
+  }}

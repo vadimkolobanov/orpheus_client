@@ -1,5 +1,3 @@
-// lib/services/webrtc_service.dart
-
 import 'dart:async';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -15,17 +13,34 @@ class WebRTCLog {
   WebRTCLog({required this.state, this.iceCandidateType, required this.timestamp});
 }
 
-// --- ТВОЙ TURN СЕРВЕР ---
+// --- КОНФИГУРАЦИЯ ICE (TURN/STUN) ---
+// Обновлено для работы через порт 443 (обход блокировок)
 const Map<String, dynamic> rtcConfiguration = {
   'iceServers': [
+    // 1. STUN (Определение IP)
+    {
+      'urls': 'stun:213.171.10.108:3478',
+    },
+    // 2. TURN UDP (Стандартный порт 3478) - Самый быстрый
     {
       'urls': 'turn:213.171.10.108:3478',
       'username': 'orpheus',
       'credential': 'TEST112',
     },
+    // 3. TURN TCP (Порт 443) - "Серебряная пуля" для обхода фаерволов
+    // Работает, если на сервере в конфиге turnserver.conf есть listening-port=443
+    {
+      'urls': 'turn:213.171.10.108:443?transport=tcp',
+      'username': 'orpheus',
+      'credential': 'TEST112',
+    },
   ],
   'sdpSemantics': 'unified-plan',
-  'iceTransportPolicy': 'all', // Разрешаем все пути (важно для эмулятора)
+  // 'relay' = только через сервер (максимальная анонимность, скрывает IP).
+  // 'all' = разрешает P2P (лучше качество, но палит IP собеседнику).
+  // Для Production Secure Messenger лучше использовать 'relay', но нужен мощный сервер.
+  // Пока оставляем 'all' для лучшего качества связи.
+  'iceTransportPolicy': 'all',
   'bundlePolicy': 'max-bundle',
   'rtcpMuxPolicy': 'require',
 };
@@ -42,6 +57,7 @@ class WebRTCService {
   Stream<List<WebRTCLog>> get logStream => _logStreamController.stream;
   final List<WebRTCLog> _logs = [];
 
+  // Очередь кандидатов (защита от гонки данных)
   final List<RTCIceCandidate> _queuedRemoteCandidates = [];
   bool _remoteDescriptionSet = false;
 
@@ -54,16 +70,27 @@ class WebRTCService {
   }
 
   Future<void> initialize() async {
-    var status = await Permission.microphone.request();
-    if (status.isGranted) {
+    // Запрашиваем разрешения заранее
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.microphone,
+      Permission.bluetoothConnect, // Нужно для гарнитур на Android 12+
+    ].request();
+
+    if (statuses[Permission.microphone]!.isGranted) {
       _localStream = await mediaDevices.getUserMedia({
         'audio': {
           'echoCancellation': true,
           'noiseSuppression': true,
           'autoGainControl': true,
+          'googEchoCancellation': true,
+          'googNoiseSuppression': true,
+          'googHighpassFilter': true,
         },
         'video': false
       });
+    } else {
+      print("WebRTC Error: Нет прав на микрофон");
+      _addLog(WebRTCConnectionState.Failed);
     }
   }
 
@@ -72,9 +99,11 @@ class WebRTCService {
 
     _registerPeerConnectionListeners(pc, onCandidateCreated);
 
-    _localStream?.getTracks().forEach((track) {
-      pc.addTrack(track, _localStream!);
-    });
+    if (_localStream != null) {
+      _localStream!.getTracks().forEach((track) {
+        pc.addTrack(track, _localStream!);
+      });
+    }
 
     return pc;
   }
@@ -87,6 +116,7 @@ class WebRTCService {
 
     _peerConnection = await _createPeerConnection(onCandidateCreated);
 
+    // Создаем Offer
     RTCSessionDescription offer = await _peerConnection!.createOffer({
       'offerToReceiveAudio': true,
       'offerToReceiveVideo': false,
@@ -112,6 +142,13 @@ class WebRTCService {
   void _registerPeerConnectionListeners(RTCPeerConnection pc, Function(Map<String, dynamic> candidate) onCandidateCreated) {
     pc.onConnectionState = (RTCPeerConnectionState state) {
       print('WebRTC Connection state: $state');
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _addLog(WebRTCConnectionState.Connected);
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        _addLog(WebRTCConnectionState.Failed);
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        _addLog(WebRTCConnectionState.Closed);
+      }
     };
 
     pc.onIceConnectionState = (RTCIceConnectionState state) {
@@ -130,6 +167,15 @@ class WebRTCService {
 
     pc.onIceCandidate = (RTCIceCandidate candidate) {
       if (candidate.candidate == null) return;
+
+      // Логируем тип кандидата (relay, srflx, host) для отладки
+      String type = 'unknown';
+      if (candidate.candidate!.contains('typ relay')) type = 'RELAY (TURN)';
+      else if (candidate.candidate!.contains('typ srflx')) type = 'P2P (STUN)';
+      else if (candidate.candidate!.contains('typ host')) type = 'LOCAL';
+
+      print("WebRTC Generated Candidate: $type");
+
       onCandidateCreated({
         'candidate': candidate.candidate,
         'sdpMid': candidate.sdpMid,
@@ -140,6 +186,7 @@ class WebRTCService {
     pc.onTrack = (RTCTrackEvent event) {
       if (event.streams.isNotEmpty) {
         _remoteStream = event.streams[0];
+        // По умолчанию звук идет в динамик (earpiece), переключение на громкую связь управляется из UI
         Helper.setSpeakerphoneOn(false);
       }
     };

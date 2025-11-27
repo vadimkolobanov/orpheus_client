@@ -7,6 +7,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
+import 'package:orpheus_project/services/database_service.dart'; // <-- Импорт для поиска имени
 
 enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed }
 
@@ -43,9 +44,19 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   String _durationText = "00:00";
   String _debugStatus = "Init";
 
+  // --- НОВАЯ ПЕРЕМЕННАЯ ДЛЯ ИМЕНИ ---
+  String _displayName = "Аноним";
+
   @override
   void initState() {
     super.initState();
+
+    // По умолчанию показываем обрезанный ключ, пока ищем имя
+    _displayName = widget.contactPublicKey.substring(0, 8);
+
+    // Запускаем поиск имени в базе
+    _resolveContactName();
+
     _callState = widget.offer != null ? CallState.Incoming : CallState.Dialing;
 
     _pulseController = AnimationController(
@@ -54,6 +65,31 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     )..repeat(reverse: false);
 
     _initCallSequence();
+  }
+
+  // --- ФУНКЦИЯ ПОИСКА ИМЕНИ ---
+  Future<void> _resolveContactName() async {
+    try {
+      // Получаем все контакты (можно оптимизировать, добавив метод getContactByKey в DatabaseService, но пока так)
+      final contacts = await DatabaseService.instance.getContacts();
+
+      // Ищем совпадение по ключу
+      final found = contacts.firstWhere(
+            (c) => c.publicKey == widget.contactPublicKey,
+        orElse: () =>  null as dynamic, // Если не найдено (вернет null, обработаем ниже)
+      );
+
+      // Если нашли (и это не null заглушка)
+      if (found != null && found.toString() != 'null') {
+        if (mounted) {
+          setState(() {
+            _displayName = found.name;
+          });
+        }
+      }
+    } catch (e) {
+      print("Ошибка поиска имени: $e");
+    }
   }
 
   Future<void> _initCallSequence() async {
@@ -179,7 +215,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _toggleMic() {
-    // Безопасное переключение микрофона
     final tracks = _webrtcService.localStream?.getAudioTracks();
     if (tracks != null && tracks.isNotEmpty) {
       setState(() => _isMicMuted = !_isMicMuted);
@@ -232,12 +267,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             child: Column(
               children: [
                 const SizedBox(height: 40),
-                Text("Orpheus Secure", style: TextStyle(color: Colors.white54, fontSize: 14)),
+                // Заголовок поменял на "Защищенный звонок"
+                Text("Secure Call", style: TextStyle(color: Colors.white54, fontSize: 14)),
                 const SizedBox(height: 10),
+
+                // --- ИМЯ КОНТАКТА ---
                 Text(
-                  _callState == CallState.Connected ? "Собеседник" : widget.contactPublicKey.substring(0, 8),
+                  _displayName, // Используем найденное имя
                   style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
+
                 const SizedBox(height: 8),
 
                 if (_callState == CallState.Connected)
@@ -270,10 +310,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                           ),
                         ),
                       ),
-                    const CircleAvatar(
+                    // Вместо иконки можно вставить первую букву имени
+                    CircleAvatar(
                       radius: 60,
-                      backgroundColor: Colors.grey,
-                      child: Icon(Icons.person, size: 60, color: Colors.white),
+                      backgroundColor: Colors.grey[800],
+                      child: Text(
+                        _displayName.isNotEmpty ? _displayName[0].toUpperCase() : "?",
+                        style: const TextStyle(fontSize: 40, color: Colors.white),
+                      ),
                     ),
                   ],
                 ),
