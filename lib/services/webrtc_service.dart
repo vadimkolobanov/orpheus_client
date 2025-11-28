@@ -20,11 +20,11 @@ const Map<String, dynamic> rtcConfiguration = {
     {
       'urls': [
         // Твой сервер (TCP 443 - самый надежный)
-        'turn:213.171.10.108:443?transport=tcp',
+        'turn:155.212.186.14:443?transport=tcp',
         // Твой сервер (TCP 3478)
-        'turn:213.171.10.108:3478?transport=tcp',
+        'turn:155.212.186.14:3478?transport=tcp',
         // Твой сервер (UDP 3478 - стандарт)
-        'turn:213.171.10.108:3478',
+        'turn:155.212.186.14:3478',
       ],
       'username': 'orpheus',
       'credential': 'TEST112',
