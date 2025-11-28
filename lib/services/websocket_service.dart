@@ -1,12 +1,10 @@
-// lib/services/websocket_service.dart
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:orpheus_project/config.dart';
-import 'package:orpheus_project/services/notification_service.dart'; // <-- Импорт
+import 'package:orpheus_project/services/notification_service.dart';
 import 'package:rxdart/rxdart.dart';
 
 enum ConnectionStatus { Disconnected, Connecting, Connected }
@@ -52,10 +50,7 @@ class WebSocketService {
         _statusController.add(ConnectionStatus.Connected);
         print("WS: Соединение установлено!");
 
-        // --- ВАЖНОЕ ДОПОЛНЕНИЕ: СРАЗУ ОТПРАВЛЯЕМ ТОКЕН ---
         _sendFcmToken();
-        // -----------------------------------------------
-
         _startPingPong();
 
         _channel!.stream.listen(
@@ -146,8 +141,15 @@ class WebSocketService {
     _sendMessage({"recipient_pubkey": recipientPublicKey, "type": "chat", "payload": payload});
   }
 
+  // --- ДИАГНОСТИКА: ЛОГИРОВАНИЕ ОТПРАВКИ СИГНАЛОВ ---
   void sendSignalingMessage(String recipientPublicKey, String type, Map<String, dynamic> data) {
-    _sendMessage({"recipient_pubkey": recipientPublicKey, "type": type, "data": data});
+    final msg = {
+      "recipient_pubkey": recipientPublicKey,
+      "type": type,
+      "data": data
+    };
+    print("📤 WS SEND $type → ${recipientPublicKey.substring(0, 8)}... Size: ${data.toString().length}");
+    _sendMessage(msg);
   }
 
   void sendRawMessage(String jsonString) {

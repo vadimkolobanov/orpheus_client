@@ -1,13 +1,10 @@
-// lib/call_screen.dart
-
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
-import 'package:orpheus_project/services/database_service.dart'; // <-- Импорт для поиска имени
+import 'package:orpheus_project/services/database_service.dart';
 
 enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed }
 
@@ -38,23 +35,24 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   bool _isMicMuted = false;
   bool _isDisposed = false;
 
+  // --- ЛОГИРОВАНИЕ В UI ---
+  bool _showDebugLogs = false; // Флаг видимости
+  final List<String> _debugLogs = []; // Список логов
+  final ScrollController _logScrollController = ScrollController();
+
   late AnimationController _pulseController;
   Timer? _durationTimer;
   final Stopwatch _stopwatch = Stopwatch();
   String _durationText = "00:00";
   String _debugStatus = "Init";
 
-  // --- НОВАЯ ПЕРЕМЕННАЯ ДЛЯ ИМЕНИ ---
   String _displayName = "Аноним";
 
   @override
   void initState() {
     super.initState();
 
-    // По умолчанию показываем обрезанный ключ, пока ищем имя
     _displayName = widget.contactPublicKey.substring(0, 8);
-
-    // Запускаем поиск имени в базе
     _resolveContactName();
 
     _callState = widget.offer != null ? CallState.Incoming : CallState.Dialing;
@@ -67,19 +65,30 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _initCallSequence();
   }
 
-  // --- ФУНКЦИЯ ПОИСКА ИМЕНИ ---
+  // Метод добавления лога на экран
+  void _addLog(String message) {
+    if (!mounted) return;
+    setState(() {
+      _debugLogs.add("${DateTime.now().toString().substring(11, 19)} $message");
+    });
+    // Автоскролл вниз
+    if (_showDebugLogs) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_logScrollController.hasClients) {
+          _logScrollController.jumpTo(_logScrollController.position.maxScrollExtent);
+        }
+      });
+    }
+  }
+
   Future<void> _resolveContactName() async {
     try {
-      // Получаем все контакты (можно оптимизировать, добавив метод getContactByKey в DatabaseService, но пока так)
       final contacts = await DatabaseService.instance.getContacts();
-
-      // Ищем совпадение по ключу
       final found = contacts.firstWhere(
             (c) => c.publicKey == widget.contactPublicKey,
-        orElse: () =>  null as dynamic, // Если не найдено (вернет null, обработаем ниже)
+        orElse: () => null as dynamic,
       );
 
-      // Если нашли (и это не null заглушка)
       if (found != null && found.toString() != 'null') {
         if (mounted) {
           setState(() {
@@ -95,25 +104,27 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Future<void> _initCallSequence() async {
     await _renderer.initialize();
 
-    _webrtcLogSubscription = _webrtcService.logStream.listen((logs) {
-      if (_isDisposed || logs.isEmpty) return;
-      final state = logs.last.state;
+    // Подписка на логи WebRTC (из сервиса)
+    _webrtcLogSubscription = _webrtcService.onDebugLog.listen((log) {
+      _addLog(log); // Выводим на экран
 
-      if (mounted) {
-        setState(() => _debugStatus = state.toString().split('.').last);
-      }
-
-      if (state == WebRTCConnectionState.Connected) {
+      // Обновляем статус для юзера
+      if (log.contains("Connected")) {
         if (_callState != CallState.Connected) _onConnected();
-      } else if (state == WebRTCConnectionState.Failed) {
+      } else if (log.contains("Failed")) {
         if (!_isDisposed) _onError("Сбой (ICE)");
-      } else if (state == WebRTCConnectionState.Closed) {
-        if (!_isDisposed && _callState == CallState.Connected) _onError("Завершен");
       }
     });
 
+    // Подписка на Сигналинг (WebSocket)
     _signalingSubscription = signalingStreamController.stream.listen((signal) async {
-      if (_isDisposed || signal['sender_pubkey'] != widget.contactPublicKey) return;
+      // Логируем входящий сигнал
+      _addLog("📥 IN: ${signal['type']} from ${signal['sender_pubkey'].toString().substring(0, 6)}...");
+
+      if (_isDisposed || signal['sender_pubkey'] != widget.contactPublicKey) {
+        _addLog("❌ DROPPED: Wrong sender");
+        return;
+      }
 
       final type = signal['type'];
       final data = signal['data'];
@@ -172,10 +183,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Future<void> _startOutgoingCall() async {
     try {
       await _webrtcService.initiateCall(
-        onOfferCreated: (offer) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-offer', offer),
-        onCandidateCreated: (cand) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand),
+        onOfferCreated: (offer) {
+          _addLog("📤 OUT: call-offer");
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-offer', offer);
+        },
+        onCandidateCreated: (cand) {
+          _addLog("📤 OUT: ice-candidate");
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
+        },
       );
     } catch (e) {
+      _addLog("ERROR: $e");
       _onError("Mic Error");
     }
   }
@@ -186,8 +204,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     try {
       await _webrtcService.answerCall(
         offer: widget.offer!,
-        onAnswerCreated: (ans) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', ans),
-        onCandidateCreated: (cand) => websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand),
+        onAnswerCreated: (ans) {
+          _addLog("📤 OUT: call-answer");
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', ans);
+        },
+        onCandidateCreated: (cand) {
+          _addLog("📤 OUT: ice-candidate");
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
+        },
       );
     } catch (e) {
       _onError("Connect Error");
@@ -243,8 +267,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // --- UI ---
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -267,13 +289,21 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             child: Column(
               children: [
                 const SizedBox(height: 40),
-                // Заголовок поменял на "Защищенный звонок"
-                Text("Secure Call", style: TextStyle(color: Colors.white54, fontSize: 14)),
+
+                // --- СКРЫТАЯ КНОПКА ЛОГОВ ---
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _showDebugLogs = !_showDebugLogs;
+                    });
+                  },
+                  child: const Text("Secure Call", style: TextStyle(color: Colors.white54, fontSize: 14, decoration: TextDecoration.underline)),
+                ),
+
                 const SizedBox(height: 10),
 
-                // --- ИМЯ КОНТАКТА ---
                 Text(
-                  _displayName, // Используем найденное имя
+                  _displayName,
                   style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
@@ -293,6 +323,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
                 const Spacer(),
 
+                // --- АВАТАР ---
                 Stack(
                   alignment: Alignment.center,
                   children: [
@@ -310,7 +341,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                           ),
                         ),
                       ),
-                    // Вместо иконки можно вставить первую букву имени
                     CircleAvatar(
                       radius: 60,
                       backgroundColor: Colors.grey[800],
@@ -330,6 +360,48 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               ],
             ),
           ),
+
+          // --- ОВЕРЛЕЙ С ЛОГАМИ ---
+          if (_showDebugLogs)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withOpacity(0.85),
+                padding: const EdgeInsets.only(top: 50, bottom: 20, left: 10, right: 10),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("DEBUG LOGS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          onPressed: () => setState(() => _showDebugLogs = false),
+                        )
+                      ],
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        controller: _logScrollController,
+                        itemCount: _debugLogs.length,
+                        itemBuilder: (context, index) {
+                          final log = _debugLogs[index];
+                          Color color = Colors.white;
+                          if (log.contains("OUT:")) color = Colors.blueAccent;
+                          if (log.contains("IN:")) color = Colors.greenAccent;
+                          if (log.contains("RELAY")) color = Colors.orangeAccent;
+                          if (log.contains("ERROR") || log.contains("Failed") || log.contains("DROPPED")) color = Colors.redAccent;
+
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Text(log, style: TextStyle(color: color, fontSize: 10, fontFamily: 'monospace')),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
