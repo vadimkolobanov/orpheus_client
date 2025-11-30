@@ -16,15 +16,23 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final _messageController = TextEditingController();
   List<ChatMessage> _chatHistory = [];
   late StreamSubscription _messageUpdateSubscription;
   final ScrollController _scrollController = ScrollController();
+  
+  // Анимация шифрования
+  late AnimationController _encryptionController;
+  bool _isEncrypting = false;
 
   @override
   void initState() {
     super.initState();
+    _encryptionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
     _loadChatHistory();
     _markAsRead();
 
@@ -63,12 +71,18 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageUpdateSubscription.cancel();
     _messageController.dispose();
     _scrollController.dispose();
+    _encryptionController.dispose();
     super.dispose();
   }
 
   void _sendMessage() async {
     final messageText = _messageController.text.trim();
     if (messageText.isEmpty) return;
+
+    // Запускаем анимацию шифрования
+    setState(() => _isEncrypting = true);
+    _encryptionController.reset();
+    _encryptionController.forward();
 
     final sentMessage = ChatMessage(
         text: messageText,
@@ -84,6 +98,13 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       print("Ошибка отправки: $e");
     }
+    
+    // Завершаем анимацию
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (mounted) {
+      setState(() => _isEncrypting = false);
+    }
+    
     _messageController.clear();
     _loadChatHistory();
   }
@@ -127,13 +148,24 @@ class _ChatScreenState extends State<ChatScreen> {
           padding: const EdgeInsets.all(10),
           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
           decoration: BoxDecoration(
-            color: bubbleColor,
+            color: bubbleColor.withOpacity(0.9),
             borderRadius: BorderRadius.only(
               topLeft: const Radius.circular(12),
               topRight: const Radius.circular(12),
               bottomLeft: isMyMessage ? const Radius.circular(12) : Radius.zero,
               bottomRight: isMyMessage ? Radius.zero : const Radius.circular(12),
             ),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.1),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -243,8 +275,19 @@ class _ChatScreenState extends State<ChatScreen> {
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF202020),
+                  color: const Color(0xFF202020).withOpacity(0.8),
                   borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.1),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
                 child: TextField(
                   controller: _messageController,
@@ -267,15 +310,50 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // Кнопка отправки
+            // Кнопка отправки с анимацией шифрования
             Container(
-              margin: const EdgeInsets.only(bottom: 4), // Небольшой отступ снизу
-              child: CircleAvatar(
-                backgroundColor: const Color(0xFFB0BEC5),
-                child: IconButton(
-                  icon: const Icon(Icons.send, color: Colors.black, size: 18),
-                  onPressed: _sendMessage,
-                ),
+              margin: const EdgeInsets.only(bottom: 4),
+              child: AnimatedBuilder(
+                animation: _encryptionController,
+                builder: (context, child) {
+                  if (_isEncrypting) {
+                    return Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFF6AD394).withOpacity(0.2),
+                        border: Border.all(
+                          color: const Color(0xFF6AD394),
+                          width: 2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF6AD394).withOpacity(0.5),
+                            blurRadius: 15,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: RotationTransition(
+                        turns: Tween(begin: 0.0, end: 1.0).animate(
+                          CurvedAnimation(
+                            parent: _encryptionController,
+                            curve: Curves.linear,
+                          ),
+                        ),
+                        child: const Icon(Icons.lock, color: Color(0xFF6AD394), size: 20),
+                      ),
+                    );
+                  }
+                  return CircleAvatar(
+                    backgroundColor: const Color(0xFFB0BEC5),
+                    child: IconButton(
+                      icon: const Icon(Icons.send, color: Colors.black, size: 18),
+                      onPressed: _sendMessage,
+                    ),
+                  );
+                },
               ),
             ),
           ],

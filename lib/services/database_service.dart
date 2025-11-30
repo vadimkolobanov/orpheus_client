@@ -17,11 +17,27 @@ class DatabaseService {
   }
 
   Future<Database> _initDB(String filePath) async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, filePath);
+    try {
+      print("DB: Получение пути к базе данных...");
+      final dbPath = await getDatabasesPath();
+      final path = join(dbPath, filePath);
+      print("DB: Путь к БД: $path");
 
-    // Увеличиваем версию до 3
-    return await openDatabase(path, version: 3, onCreate: _createDB, onUpgrade: _upgradeDB);
+      print("DB: Открытие базы данных...");
+      // Увеличиваем версию до 3
+      final db = await openDatabase(
+        path, 
+        version: 3, 
+        onCreate: _createDB, 
+        onUpgrade: _upgradeDB,
+        singleInstance: true, // Важно для избежания блокировок
+      );
+      print("DB: База данных открыта успешно");
+      return db;
+    } catch (e) {
+      print("DB: КРИТИЧЕСКАЯ ОШИБКА инициализации: $e");
+      rethrow;
+    }
   }
 
   Future _createDB(Database db, int version) async {
@@ -30,13 +46,32 @@ class DatabaseService {
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      await _createMessagesTable(db);
-    }
-    if (oldVersion < 3) {
-      // Миграция для версии 3: Добавляем колонки status и isRead
-      await db.execute("ALTER TABLE messages ADD COLUMN status INTEGER DEFAULT 1"); // 1 = sent
-      await db.execute("ALTER TABLE messages ADD COLUMN isRead INTEGER DEFAULT 1"); // 1 = true
+    print("DB: Миграция с версии $oldVersion на $newVersion");
+    try {
+      if (oldVersion < 2) {
+        print("DB: Создание таблицы messages...");
+        await _createMessagesTable(db);
+      }
+      if (oldVersion < 3) {
+        print("DB: Миграция до версии 3...");
+        // Проверяем, существуют ли колонки перед добавлением
+        try {
+          await db.execute("ALTER TABLE messages ADD COLUMN status INTEGER DEFAULT 1");
+          print("DB: Колонка status добавлена");
+        } catch (e) {
+          print("DB: Колонка status уже существует или ошибка: $e");
+        }
+        try {
+          await db.execute("ALTER TABLE messages ADD COLUMN isRead INTEGER DEFAULT 1");
+          print("DB: Колонка isRead добавлена");
+        } catch (e) {
+          print("DB: Колонка isRead уже существует или ошибка: $e");
+        }
+      }
+      print("DB: Миграция завершена");
+    } catch (e) {
+      print("DB: ОШИБКА миграции: $e");
+      rethrow;
     }
   }
 

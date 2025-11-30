@@ -30,7 +30,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
   @override
   void initState() {
     super.initState();
-    _refreshContacts();
+    // Инициализируем Future сразу, чтобы избежать проблем с асинхронностью
+    _contactsFuture = _loadContactsWithTimeout();
     _updateSubscription = messageUpdateController.stream.listen((_) {
       _refreshContacts();
     });
@@ -43,6 +44,21 @@ class _ContactsScreenState extends State<ContactsScreen> {
     });
     // ------------------------------------
   }
+  
+  Future<List<Contact>> _loadContactsWithTimeout() async {
+    try {
+      return await DatabaseService.instance.getContacts().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          print("Таймаут загрузки контактов");
+          return <Contact>[];
+        },
+      );
+    } catch (e) {
+      print("Ошибка загрузки контактов: $e");
+      return <Contact>[];
+    }
+  }
 
   @override
   void dispose() {
@@ -53,7 +69,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   void _refreshContacts() {
     if (mounted) {
       setState(() {
-        _contactsFuture = DatabaseService.instance.getContacts();
+        _contactsFuture = _loadContactsWithTimeout();
       });
     }
   }
@@ -351,10 +367,56 @@ class _ContactsScreenState extends State<ContactsScreen> {
       body: FutureBuilder<List<Contact>>(
         future: _contactsFuture,
         builder: (context, snapshot) {
+          // Показываем загрузку только если действительно идет загрузка
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text(
+                    "Загрузка контактов...",
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ],
+              ),
+            );
           }
 
+          // Обработка ошибок
+          if (snapshot.hasError) {
+            print("FutureBuilder error: ${snapshot.error}");
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 60, color: Colors.red[300]),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Ошибка загрузки",
+                    style: TextStyle(color: Colors.red[300], fontSize: 18),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text(
+                      snapshot.error.toString(),
+                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _refreshContacts,
+                    child: const Text("ПОВТОРИТЬ"),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // Если данные есть (даже пустой список), показываем их
           final contacts = snapshot.data ?? [];
 
           // --- ЕСЛИ НЕТ КОНТАКТОВ ---

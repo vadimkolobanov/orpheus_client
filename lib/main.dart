@@ -82,7 +82,9 @@ void _listenForMessages() {
       // --- ЗВОНКИ ---
       if (type == 'call-offer') {
         final data = messageData['data'] as Map<String, dynamic>;
-        // Инициализируем буфер для этого звонка
+        // Очищаем старый буфер, если он есть (на случай если приложение было свернуто)
+        _incomingCallBuffers.remove(senderKey);
+        // Инициализируем новый буфер для этого звонка
         _incomingCallBuffers[senderKey] = [];
         navigatorKey.currentState?.push(MaterialPageRoute(
           builder: (context) => CallScreen(contactPublicKey: senderKey, offer: data),

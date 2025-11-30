@@ -36,6 +36,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   bool _isSpeakerOn = false;
   bool _isMicMuted = false;
   bool _isDisposed = false;
+  bool _messagesSent = false; // Флаг для отслеживания отправки системных сообщений
 
   // --- ЛОГИРОВАНИЕ В UI ---
   bool _showDebugLogs = false; // Флаг видимости
@@ -43,12 +44,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   final ScrollController _logScrollController = ScrollController();
 
   late AnimationController _pulseController;
+  late AnimationController _particlesController;
+  late AnimationController _waveController;
   Timer? _durationTimer;
   final Stopwatch _stopwatch = Stopwatch();
   String _durationText = "00:00";
   String _debugStatus = "Init";
 
   String _displayName = "Аноним";
+  
+  // Для визуализации аудио волн
+  final List<double> _audioWaveData = List.generate(20, (_) => 0.0);
 
   @override
   void initState() {
@@ -63,6 +69,16 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         vsync: this,
         duration: const Duration(seconds: 2)
     )..repeat(reverse: false);
+
+    _particlesController = AnimationController(
+        vsync: this,
+        duration: const Duration(seconds: 8)
+    )..repeat();
+
+    _waveController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1500)
+    );
 
     _initCallSequence();
   }
@@ -168,7 +184,24 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     SoundService.instance.stopAllSounds();
     SoundService.instance.playConnectedSound();
 
-    if (mounted) setState(() => _callState = CallState.Connected);
+    if (mounted) {
+      setState(() => _callState = CallState.Connected);
+      _waveController.repeat(); // Запускаем волны при соединении
+    }
+
+    // Симуляция аудио волн во время звонка
+    Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (!mounted || _isDisposed || _callState != CallState.Connected) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        for (int i = 0; i < _audioWaveData.length; i++) {
+          _audioWaveData[i] = (0.2 + (i % 3) * 0.1) + 
+              (DateTime.now().millisecondsSinceEpoch % 1000) / 1000 * 0.3;
+        }
+      });
+    });
 
     _stopwatch.start();
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -181,7 +214,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _onRemoteHangup() {
-    if (_isDisposed) return;
+    if (_isDisposed || _messagesSent) return;
     SoundService.instance.stopAllSounds();
     SoundService.instance.playDisconnectedSound();
     
@@ -192,7 +225,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     
     // Отправляем системное сообщение о завершении звонка
     if (wasConnected) {
-      _sendCallStatusMessage("Входящий звонок", false);
+      // Для меня: входящий звонок
+      _saveCallStatusMessageLocally("Входящий звонок", false);
+      // Для контакта: исходящий звонок
+      _sendCallStatusMessageToContact("Исходящий звонок");
+      _messagesSent = true;
     }
     
     Future.delayed(const Duration(seconds: 1), _safePop);
@@ -252,15 +289,25 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     // Отправляем системные сообщения о звонке
     if (currentState == CallState.Connected) {
       // Звонок был завершен после соединения
-      await _sendCallStatusMessage("Исходящий звонок", true);
-      await _sendCallStatusMessage("Входящий звонок", false);
+      // Для меня: исходящий звонок
+      await _saveCallStatusMessageLocally("Исходящий звонок", true);
+      // Для контакта: входящий звонок
+      await _sendCallStatusMessageToContact("Входящий звонок");
     } else if (currentState == CallState.Incoming) {
       // Входящий звонок был отклонен
-      await _sendCallStatusMessage("Пропущен звонок", false);
+      // Для меня: пропущен звонок
+      await _saveCallStatusMessageLocally("Пропущен звонок", false);
+      // Контакту не нужно отправлять, так как он уже знает, что звонок был отклонен
     } else if (currentState == CallState.Dialing) {
-      // Исходящий звонок был отменен до ответа - отправляем тому, кому звонили
-      await _sendCallStatusMessage("Пропущен звонок", false);
+      // Исходящий звонок был отменен до ответа
+      // Для меня: исходящий звонок (локально)
+      await _saveCallStatusMessageLocally("Исходящий звонок", true);
+      // Для контакта: пропущен звонок
+      await _sendCallStatusMessageToContact("Пропущен звонок");
     }
+    
+    // Помечаем, что сообщения уже отправлены, чтобы не дублировать в dispose
+    _messagesSent = true;
     
     websocketService.sendSignalingMessage(widget.contactPublicKey, signal, {});
     _safePop();
@@ -268,7 +315,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   void _safePop() {
     if (_isDisposed) return;
-    _isDisposed = true;
     // Очищаем буфер кандидатов при завершении звонка
     getAndClearIncomingCallBuffer(widget.contactPublicKey);
     if (mounted && Navigator.canPop(context)) {
@@ -276,8 +322,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
-  // Функция для отправки системного сообщения о звонке в чат
-  Future<void> _sendCallStatusMessage(String messageText, bool isSentByMe) async {
+  // Функция для отправки системного сообщения о звонке в чат (только локально)
+  Future<void> _saveCallStatusMessageLocally(String messageText, bool isSentByMe) async {
     try {
       final callMessage = ChatMessage(
         text: messageText,
@@ -289,18 +335,20 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       // Сохраняем сообщение в локальную БД
       await DatabaseService.instance.addMessage(callMessage, widget.contactPublicKey);
 
-      // Отправляем через WebSocket (зашифрованное)
-      try {
-        final payload = await cryptoService.encrypt(widget.contactPublicKey, messageText);
-        websocketService.sendChatMessage(widget.contactPublicKey, payload);
-      } catch (e) {
-        print("Ошибка отправки системного сообщения о звонке: $e");
-      }
-
       // Обновляем UI чата
       messageUpdateController.add(widget.contactPublicKey);
     } catch (e) {
-      print("Ошибка создания системного сообщения о звонке: $e");
+      print("Ошибка сохранения системного сообщения о звонке: $e");
+    }
+  }
+
+  // Функция для отправки системного сообщения о звонке контакту (через WebSocket)
+  Future<void> _sendCallStatusMessageToContact(String messageText) async {
+    try {
+      final payload = await cryptoService.encrypt(widget.contactPublicKey, messageText);
+      websocketService.sendChatMessage(widget.contactPublicKey, payload);
+    } catch (e) {
+      print("Ошибка отправки системного сообщения о звонке контакту: $e");
     }
   }
 
@@ -319,37 +367,48 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    // Очищаем буфер кандидатов при завершении звонка
+    getAndClearIncomingCallBuffer(widget.contactPublicKey);
+    
+    // Отправляем системные сообщения только если они еще не были отправлены в _endCallButton
+    if (!_messagesSent && !_isDisposed) {
+      final finalState = _callState;
+      
+      if (finalState == CallState.Connected || finalState == CallState.Dialing) {
+        try {
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'hang-up', {});
+          
+          // Отправляем системные сообщения о завершении звонка при dispose
+          if (finalState == CallState.Connected) {
+            // Для меня: исходящий звонок
+            _saveCallStatusMessageLocally("Исходящий звонок", true);
+            // Для контакта: входящий звонок
+            _sendCallStatusMessageToContact("Входящий звонок");
+          } else if (finalState == CallState.Dialing) {
+            // Исходящий звонок был отменен до ответа
+            // Для меня: исходящий звонок (локально)
+            _saveCallStatusMessageLocally("Исходящий звонок", true);
+            // Для контакта: пропущен звонок
+            _sendCallStatusMessageToContact("Пропущен звонок");
+          }
+        } catch (_) {}
+      } else if (finalState == CallState.Incoming) {
+        // Если входящий звонок был закрыт без ответа
+        // Для меня: пропущен звонок
+        _saveCallStatusMessageLocally("Пропущен звонок", false);
+      }
+    }
+    
     _isDisposed = true;
     _pulseController.dispose();
+    _particlesController.dispose();
+    _waveController.dispose();
     _renderer.dispose();
     _stopwatch.stop();
     _durationTimer?.cancel();
     _signalingSubscription?.cancel();
     _webrtcLogSubscription?.cancel();
     SoundService.instance.stopAllSounds();
-
-    // Очищаем буфер кандидатов при завершении звонка
-    getAndClearIncomingCallBuffer(widget.contactPublicKey);
-
-    // Сохраняем состояние перед dispose
-    final finalState = _callState;
-    
-    if (finalState == CallState.Connected || finalState == CallState.Dialing) {
-      try {
-        websocketService.sendSignalingMessage(widget.contactPublicKey, 'hang-up', {});
-        
-        // Отправляем системные сообщения о завершении звонка при dispose
-        if (finalState == CallState.Connected) {
-          _sendCallStatusMessage("Исходящий звонок", true);
-          _sendCallStatusMessage("Входящий звонок", false);
-        } else if (finalState == CallState.Dialing) {
-          _sendCallStatusMessage("Пропущен звонок", false);
-        }
-      } catch (_) {}
-    } else if (finalState == CallState.Incoming) {
-      // Если входящий звонок был закрыт без ответа
-      _sendCallStatusMessage("Пропущен звонок", false);
-    }
 
     _webrtcService.hangUp();
     super.dispose();
@@ -361,15 +420,46 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF1A1A1A), Color(0xFF000000)],
-              ),
-            ),
+          // Анимированный градиентный фон
+          AnimatedBuilder(
+            animation: _particlesController,
+            builder: (context, child) {
+              return Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color.lerp(
+                        const Color(0xFF1A1A1A),
+                        const Color(0xFF0A1A2A),
+                        (0.5 + 0.5 * (0.5 + 0.5 * _particlesController.value)).clamp(0.0, 1.0),
+                      )!,
+                      const Color(0xFF000000),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
+
+          // Анимированные частицы (эффект "звездного неба")
+          CustomPaint(
+            painter: ParticlesPainter(_particlesController.value),
+            child: Container(),
+          ),
+
+          // Концентрические волны вокруг аватара (только при соединении)
+          if (_callState == CallState.Connected)
+            AnimatedBuilder(
+              animation: _waveController,
+              builder: (context, child) {
+                return CustomPaint(
+                  painter: WavePainter(_waveController.value),
+                  child: Container(),
+                );
+              },
+            ),
 
           SizedBox(height: 0, width: 0, child: RTCVideoView(_renderer)),
 
@@ -411,34 +501,80 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
                 const Spacer(),
 
-                // --- АВАТАР ---
+                // --- АВАТАР С УЛУЧШЕННОЙ АНИМАЦИЕЙ ---
                 Stack(
                   alignment: Alignment.center,
                   children: [
+                    // Множественные пульсирующие кольца
                     if (_callState != CallState.Failed && _callState != CallState.Rejected)
-                      ScaleTransition(
-                        scale: Tween(begin: 1.0, end: 1.5).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeOut)),
-                        child: FadeTransition(
-                          opacity: Tween(begin: 0.5, end: 0.0).animate(_pulseController),
-                          child: Container(
-                            width: 150, height: 150,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
+                      ...List.generate(3, (index) {
+                        return ScaleTransition(
+                          scale: Tween(begin: 1.0, end: 1.8 + index * 0.3).animate(
+                            CurvedAnimation(
+                              parent: _pulseController,
+                              curve: Interval(index * 0.2, 1.0, curve: Curves.easeOut),
                             ),
                           ),
-                        ),
+                          child: FadeTransition(
+                            opacity: Tween(begin: 0.4 - index * 0.1, end: 0.0).animate(
+                              CurvedAnimation(
+                                parent: _pulseController,
+                                curve: Interval(index * 0.2, 1.0, curve: Curves.easeOut),
+                              ),
+                            ),
+                            child: Container(
+                              width: 150 + index * 30,
+                              height: 150 + index * 30,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF6AD394).withOpacity(0.3 - index * 0.1),
+                                  width: 2 - index * 0.3,
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    // Главный аватар с эффектом свечения
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: _callState == CallState.Connected
+                            ? [
+                                BoxShadow(
+                                  color: const Color(0xFF6AD394).withOpacity(0.5),
+                                  blurRadius: 30,
+                                  spreadRadius: 5,
+                                ),
+                              ]
+                            : [],
                       ),
-                    CircleAvatar(
-                      radius: 60,
-                      backgroundColor: Colors.grey[800],
-                      child: Text(
-                        _displayName.isNotEmpty ? _displayName[0].toUpperCase() : "?",
-                        style: const TextStyle(fontSize: 40, color: Colors.white),
+                      child: CircleAvatar(
+                        radius: 60,
+                        backgroundColor: _callState == CallState.Connected
+                            ? const Color(0xFF6AD394).withOpacity(0.2)
+                            : Colors.grey[800],
+                        child: Text(
+                          _displayName.isNotEmpty ? _displayName[0].toUpperCase() : "?",
+                          style: TextStyle(
+                            fontSize: 40,
+                            color: _callState == CallState.Connected
+                                ? const Color(0xFF6AD394)
+                                : Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ),
+
+                // Визуализация аудио волн (только при соединении)
+                if (_callState == CallState.Connected) ...[
+                  const SizedBox(height: 30),
+                  _buildAudioVisualizer(),
+                ],
 
                 const Spacer(),
 
@@ -539,17 +675,53 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       children: [
         GestureDetector(
           onTap: onTap,
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isActive ? Colors.white : Colors.white.withOpacity(0.1),
+              color: isActive 
+                  ? Colors.white 
+                  : Colors.white.withOpacity(0.1),
+              border: Border.all(
+                color: isActive 
+                    ? const Color(0xFF6AD394).withOpacity(0.5)
+                    : Colors.white.withOpacity(0.2),
+                width: 2,
+              ),
+              boxShadow: isActive
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFF6AD394).withOpacity(0.4),
+                        blurRadius: 20,
+                        spreadRadius: 2,
+                      ),
+                    ]
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ],
             ),
-            child: Icon(icon, size: 28, color: isActive ? Colors.black : Colors.white),
+            child: Icon(
+              icon,
+              size: 28,
+              color: isActive ? Colors.black : Colors.white,
+            ),
           ),
         ),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12))
+        Text(
+          label,
+          style: TextStyle(
+            color: isActive ? const Color(0xFF6AD394) : Colors.grey,
+            fontSize: 12,
+            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
       ],
     );
   }
@@ -559,18 +731,55 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       children: [
         GestureDetector(
           onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color,
-              boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 15)],
-            ),
-            child: Icon(icon, size: 36, color: Colors.white),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 1.0, end: 1.0),
+            duration: const Duration(milliseconds: 200),
+            builder: (context, scale, child) {
+              return Transform.scale(
+                scale: scale,
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color,
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.3),
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(0.5),
+                        blurRadius: 25,
+                        spreadRadius: 3,
+                      ),
+                      BoxShadow(
+                        color: color.withOpacity(0.3),
+                        blurRadius: 40,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: Icon(icon, size: 36, color: Colors.white),
+                ),
+              );
+            },
           ),
         ),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                color: color.withOpacity(0.5),
+                blurRadius: 10,
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -585,4 +794,98 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       default: return "";
     }
   }
+
+  // Визуализатор аудио волн
+  Widget _buildAudioVisualizer() {
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: List.generate(_audioWaveData.length, (index) {
+          final height = _audioWaveData[index] * 50;
+          return Container(
+            width: 3,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6AD394),
+              borderRadius: BorderRadius.circular(2),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF6AD394).withOpacity(0.5),
+                  blurRadius: 4,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            height: height.clamp(5.0, 50.0),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+// Кастомный painter для анимированных частиц
+class ParticlesPainter extends CustomPainter {
+  final double animationValue;
+
+  ParticlesPainter(this.animationValue);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF6AD394).withOpacity(0.3)
+      ..style = PaintingStyle.fill;
+
+    // Создаем частицы в случайных позициях (детерминированные для производительности)
+    for (int i = 0; i < 30; i++) {
+      final x = (i * 137.5) % size.width;
+      final y = (i * 197.3 + animationValue * 200) % size.height;
+      final radius = 1.5 + (i % 3) * 0.5;
+      
+      canvas.drawCircle(
+        Offset(x, y),
+        radius,
+        paint..color = const Color(0xFF6AD394).withOpacity(0.2 + (i % 3) * 0.1),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+// Кастомный painter для волн
+class WavePainter extends CustomPainter {
+  final double animationValue;
+
+  WavePainter(this.animationValue);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centerX = size.width / 2;
+    final centerY = size.height / 2 - 100; // Примерная позиция аватара
+
+    final paint = Paint()
+      ..color = const Color(0xFF6AD394)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    // Рисуем концентрические волны
+    for (int i = 0; i < 3; i++) {
+      final radius = 80 + (animationValue * 100) + (i * 30);
+      final opacity = (1.0 - animationValue - i * 0.2).clamp(0.0, 0.5);
+      
+      canvas.drawCircle(
+        Offset(centerX, centerY),
+        radius,
+        paint..color = const Color(0xFF6AD394).withOpacity(opacity),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
