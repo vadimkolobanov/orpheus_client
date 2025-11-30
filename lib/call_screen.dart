@@ -5,6 +5,8 @@ import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/crypto_service.dart';
+import 'package:orpheus_project/models/chat_message_model.dart';
 
 enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed }
 
@@ -182,7 +184,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (_isDisposed) return;
     SoundService.instance.stopAllSounds();
     SoundService.instance.playDisconnectedSound();
+    
+    // Сохраняем состояние до изменения
+    final wasConnected = _callState == CallState.Connected;
+    
     if (mounted) setState(() => _callState = CallState.Rejected);
+    
+    // Отправляем системное сообщение о завершении звонка
+    if (wasConnected) {
+      _sendCallStatusMessage("Входящий звонок", false);
+    }
+    
     Future.delayed(const Duration(seconds: 1), _safePop);
   }
 
@@ -230,9 +242,26 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
-  void _endCallButton() {
+  void _endCallButton() async {
     if (_isDisposed) return;
-    String signal = _callState == CallState.Incoming ? 'call-rejected' : 'hang-up';
+    
+    // Сохраняем текущее состояние
+    final currentState = _callState;
+    String signal = currentState == CallState.Incoming ? 'call-rejected' : 'hang-up';
+    
+    // Отправляем системные сообщения о звонке
+    if (currentState == CallState.Connected) {
+      // Звонок был завершен после соединения
+      await _sendCallStatusMessage("Исходящий звонок", true);
+      await _sendCallStatusMessage("Входящий звонок", false);
+    } else if (currentState == CallState.Incoming) {
+      // Входящий звонок был отклонен
+      await _sendCallStatusMessage("Пропущен звонок", false);
+    } else if (currentState == CallState.Dialing) {
+      // Исходящий звонок был отменен до ответа - отправляем тому, кому звонили
+      await _sendCallStatusMessage("Пропущен звонок", false);
+    }
+    
     websocketService.sendSignalingMessage(widget.contactPublicKey, signal, {});
     _safePop();
   }
@@ -244,6 +273,34 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     getAndClearIncomingCallBuffer(widget.contactPublicKey);
     if (mounted && Navigator.canPop(context)) {
       Navigator.pop(context);
+    }
+  }
+
+  // Функция для отправки системного сообщения о звонке в чат
+  Future<void> _sendCallStatusMessage(String messageText, bool isSentByMe) async {
+    try {
+      final callMessage = ChatMessage(
+        text: messageText,
+        isSentByMe: isSentByMe,
+        status: MessageStatus.sent,
+        isRead: true,
+      );
+
+      // Сохраняем сообщение в локальную БД
+      await DatabaseService.instance.addMessage(callMessage, widget.contactPublicKey);
+
+      // Отправляем через WebSocket (зашифрованное)
+      try {
+        final payload = await cryptoService.encrypt(widget.contactPublicKey, messageText);
+        websocketService.sendChatMessage(widget.contactPublicKey, payload);
+      } catch (e) {
+        print("Ошибка отправки системного сообщения о звонке: $e");
+      }
+
+      // Обновляем UI чата
+      messageUpdateController.add(widget.contactPublicKey);
+    } catch (e) {
+      print("Ошибка создания системного сообщения о звонке: $e");
     }
   }
 
@@ -274,10 +331,24 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     // Очищаем буфер кандидатов при завершении звонка
     getAndClearIncomingCallBuffer(widget.contactPublicKey);
 
-    if (_callState == CallState.Connected || _callState == CallState.Dialing) {
+    // Сохраняем состояние перед dispose
+    final finalState = _callState;
+    
+    if (finalState == CallState.Connected || finalState == CallState.Dialing) {
       try {
         websocketService.sendSignalingMessage(widget.contactPublicKey, 'hang-up', {});
+        
+        // Отправляем системные сообщения о завершении звонка при dispose
+        if (finalState == CallState.Connected) {
+          _sendCallStatusMessage("Исходящий звонок", true);
+          _sendCallStatusMessage("Входящий звонок", false);
+        } else if (finalState == CallState.Dialing) {
+          _sendCallStatusMessage("Пропущен звонок", false);
+        }
       } catch (_) {}
+    } else if (finalState == CallState.Incoming) {
+      // Если входящий звонок был закрыт без ответа
+      _sendCallStatusMessage("Пропущен звонок", false);
     }
 
     _webrtcService.hangUp();

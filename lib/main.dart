@@ -94,7 +94,11 @@ void _listenForMessages() {
         }
         // Всегда отправляем в signalingStreamController для активных звонков
         signalingStreamController.add(messageData);
-      } else if (type == 'call-answer' || type == 'hang-up' || type == 'call-rejected') {
+      } else if (type == 'call-answer') {
+        signalingStreamController.add(messageData);
+      } else if (type == 'hang-up' || type == 'call-rejected') {
+        // Очищаем буфер кандидатов при завершении/отклонении звонка
+        _incomingCallBuffers.remove(senderKey);
         signalingStreamController.add(messageData);
       }
 
