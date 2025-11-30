@@ -28,6 +28,15 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final StreamController<String> messageUpdateController = StreamController.broadcast();
 final StreamController<Map<String, dynamic>> signalingStreamController = StreamController.broadcast();
 
+// Буфер для ICE кандидатов входящих звонков (до создания CallScreen)
+final Map<String, List<Map<String, dynamic>>> _incomingCallBuffers = {};
+
+// Функция для получения и очистки буфера кандидатов
+List<Map<String, dynamic>> getAndClearIncomingCallBuffer(String contactPublicKey) {
+  final buffer = _incomingCallBuffers.remove(contactPublicKey) ?? [];
+  return buffer;
+}
+
 // Глобальная переменная: есть ли ключи на старте
 bool _hasKeys = false;
 
@@ -73,10 +82,19 @@ void _listenForMessages() {
       // --- ЗВОНКИ ---
       if (type == 'call-offer') {
         final data = messageData['data'] as Map<String, dynamic>;
+        // Инициализируем буфер для этого звонка
+        _incomingCallBuffers[senderKey] = [];
         navigatorKey.currentState?.push(MaterialPageRoute(
           builder: (context) => CallScreen(contactPublicKey: senderKey, offer: data),
         ));
-      } else if (type == 'call-answer' || type == 'ice-candidate' || type == 'hang-up' || type == 'call-rejected') {
+      } else if (type == 'ice-candidate') {
+        // Если это входящий звонок (есть буфер), сохраняем кандидат
+        if (_incomingCallBuffers.containsKey(senderKey)) {
+          _incomingCallBuffers[senderKey]!.add(messageData);
+        }
+        // Всегда отправляем в signalingStreamController для активных звонков
+        signalingStreamController.add(messageData);
+      } else if (type == 'call-answer' || type == 'hang-up' || type == 'call-rejected') {
         signalingStreamController.add(messageData);
       }
 

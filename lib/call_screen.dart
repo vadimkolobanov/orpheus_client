@@ -142,6 +142,18 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       }
     });
 
+    // Применяем накопленные кандидаты из буфера (для входящих звонков)
+    if (_callState == CallState.Incoming) {
+      final bufferedCandidates = getAndClearIncomingCallBuffer(widget.contactPublicKey);
+      if (bufferedCandidates.isNotEmpty) {
+        _addLog("📦 Применение ${bufferedCandidates.length} накопленных ICE кандидатов");
+        for (final candidateMsg in bufferedCandidates) {
+          final data = candidateMsg['data'] as Map<String, dynamic>;
+          await _webrtcService.addCandidate(data);
+        }
+      }
+    }
+
     if (_callState == CallState.Dialing) {
       SoundService.instance.playDialingSound();
       _startOutgoingCall();
@@ -228,6 +240,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void _safePop() {
     if (_isDisposed) return;
     _isDisposed = true;
+    // Очищаем буфер кандидатов при завершении звонка
+    getAndClearIncomingCallBuffer(widget.contactPublicKey);
     if (mounted && Navigator.canPop(context)) {
       Navigator.pop(context);
     }
@@ -256,6 +270,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _signalingSubscription?.cancel();
     _webrtcLogSubscription?.cancel();
     SoundService.instance.stopAllSounds();
+
+    // Очищаем буфер кандидатов при завершении звонка
+    getAndClearIncomingCallBuffer(widget.contactPublicKey);
 
     if (_callState == CallState.Connected || _callState == CallState.Dialing) {
       try {
