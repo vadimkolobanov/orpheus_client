@@ -188,7 +188,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
                   if (isMyMessage) ...[
                     const SizedBox(width: 4),
-                    Icon(Icons.done_all, size: 14, color: Colors.black), // Черная галочка на светлом фоне
+                    const Icon(Icons.done_all, size: 14, color: Colors.black), // Черная галочка на светлом фоне
                   ]
                 ],
               ),

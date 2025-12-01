@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -95,8 +94,9 @@ class _WebRTCTestScreenState extends State<WebRTCTestScreen> {
       _pc!.onIceCandidate = (candidate) {
         if (candidate.candidate == null) return;
         String type = 'UNKNOWN';
-        if (candidate.candidate!.contains('typ relay')) type = 'RELAY (OK)';
-        else if (candidate.candidate!.contains('typ srflx')) type = 'STUN';
+        if (candidate.candidate!.contains('typ relay')) {
+          type = 'RELAY (OK)';
+        } else if (candidate.candidate!.contains('typ srflx')) type = 'STUN';
         else if (candidate.candidate!.contains('typ host')) type = 'HOST';
 
         _log("✅ КАНДИДАТ: $type");

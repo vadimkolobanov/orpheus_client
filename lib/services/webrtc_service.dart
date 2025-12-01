@@ -50,18 +50,18 @@ class WebRTCService {
     if (statuses[Permission.microphone]!.isGranted) {
       _localStream = await mediaDevices.getUserMedia({
         'audio': {
-          // ВАЖНО: Отключаем аппаратные "улучшайзеры" телефона
-          // Они часто конфликтуют на Xiaomi/Vivo и глушат звук
-          'echoCancellation': false,
-          'noiseSuppression': false,
-          'autoGainControl': false,
-
-          // Включаем программные алгоритмы WebRTC (Google)
-          // Они работают стабильно на всех устройствах
+          // Включаем стандартные параметры обработки аудио для устранения эха и шумов
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+          
+          // Дополнительные параметры для лучшего качества
+          // Google-специфичные параметры как резерв (если стандартные не поддерживаются)
           'googEchoCancellation': true,
           'googNoiseSuppression': true,
           'googHighpassFilter': true,
           'googAutoGainControl': true,
+          'googTypingNoiseDetection': true,
         },
         'video': false
       });
@@ -130,8 +130,9 @@ class WebRTCService {
       if (candidate.candidate == null) return;
 
       String type = 'unknown';
-      if (candidate.candidate!.contains('typ relay')) type = 'RELAY (TURN)';
-      else if (candidate.candidate!.contains('typ srflx')) type = 'STUN';
+      if (candidate.candidate!.contains('typ relay')) {
+        type = 'RELAY (TURN)';
+      } else if (candidate.candidate!.contains('typ srflx')) type = 'STUN';
       else if (candidate.candidate!.contains('typ host')) type = 'LOCAL';
 
       _log("--- [WebRTC] CANDIDATE: $type ---");
@@ -147,6 +148,7 @@ class WebRTCService {
       _log("--- [WebRTC] REMOTE TRACK RECEIVED ---");
       if (event.streams.isNotEmpty) {
         _remoteStream = event.streams[0];
+        _log("--- [WebRTC] Remote stream assigned, tracks: ${_remoteStream!.getAudioTracks().length} audio, ${_remoteStream!.getVideoTracks().length} video ---");
       }
     };
   }
@@ -220,9 +222,15 @@ class WebRTCService {
   Future<void> hangUp() async {
     _log("--- [WebRTC] HANG UP ---");
     try {
+      // Останавливаем и очищаем локальный поток
       _localStream?.getTracks().forEach((track) => track.stop());
       await _localStream?.dispose();
       _localStream = null;
+
+      // Останавливаем и очищаем удалённый поток
+      _remoteStream?.getTracks().forEach((track) => track.stop());
+      await _remoteStream?.dispose();
+      _remoteStream = null;
 
       await _peerConnection?.close();
       _peerConnection = null;

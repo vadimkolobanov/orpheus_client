@@ -8,7 +8,6 @@ import 'package:orpheus_project/chat_screen.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/services/database_service.dart';
-import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/updates_screen.dart';
 import 'package:orpheus_project/qr_scan_screen.dart';

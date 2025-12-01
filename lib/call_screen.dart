@@ -5,7 +5,6 @@ import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
-import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 
 enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed }
@@ -107,7 +106,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         orElse: () => null as dynamic,
       );
 
-      if (found != null && found.toString() != 'null') {
+      if (found.toString() != 'null') {
         if (mounted) {
           setState(() {
             _displayName = found.name;
@@ -131,6 +130,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         if (_callState != CallState.Connected) _onConnected();
       } else if (log.contains("Failed")) {
         if (!_isDisposed) _onError("Сбой (ICE)");
+      }
+      
+      // Привязываем удалённый поток к renderer когда он становится доступным
+      if (log.contains("REMOTE TRACK RECEIVED") || log.contains("Remote stream assigned")) {
+        _attachRemoteStream();
       }
     });
 
@@ -187,6 +191,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (mounted) {
       setState(() => _callState = CallState.Connected);
       _waveController.repeat(); // Запускаем волны при соединении
+      
+      // Привязываем удалённый поток при соединении
+      _attachRemoteStream();
     }
 
     // Симуляция аудио волн во время звонка
@@ -201,6 +208,18 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               (DateTime.now().millisecondsSinceEpoch % 1000) / 1000 * 0.3;
         }
       });
+    });
+    
+    // Периодическая проверка и привязка удалённого потока
+    Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (!mounted || _isDisposed || _callState != CallState.Connected) {
+        timer.cancel();
+        return;
+      }
+      // Проверяем, привязан ли удалённый поток
+      if (_webrtcService.remoteStream != null && _renderer.srcObject != _webrtcService.remoteStream) {
+        _attachRemoteStream();
+      }
     });
 
     _stopwatch.start();
@@ -365,6 +384,33 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
+  // Привязка удалённого аудио потока к renderer для воспроизведения
+  void _attachRemoteStream() {
+    final remoteStream = _webrtcService.remoteStream;
+    if (remoteStream != null && mounted) {
+      try {
+        // Проверяем, не привязан ли уже другой поток
+        if (_renderer.srcObject != remoteStream) {
+          _renderer.srcObject = remoteStream;
+          _addLog("✅ Удалённый аудио поток привязан к renderer");
+        }
+        
+        // Убеждаемся, что локальный поток НЕ воспроизводится (только отправляется)
+        final localStream = _webrtcService.localStream;
+        if (localStream != null) {
+          // Локальный поток должен только отправляться через PeerConnection, не воспроизводиться
+          // Это предотвращает эхо от собственного голоса
+          // В WebRTC локальный поток автоматически не воспроизводится при добавлении через addTrack
+        }
+      } catch (e) {
+        _addLog("❌ Ошибка привязки удалённого потока: $e");
+      }
+    } else if (remoteStream == null && _callState == CallState.Connected) {
+      // Если поток еще не получен, но соединение установлено, попробуем позже
+      _addLog("⏳ Ожидание удалённого потока...");
+    }
+  }
+
   @override
   void dispose() {
     // Очищаем буфер кандидатов при завершении звонка
@@ -403,7 +449,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _pulseController.dispose();
     _particlesController.dispose();
     _waveController.dispose();
+    
+    // Очищаем renderer перед dispose
+    try {
+      _renderer.srcObject = null;
+    } catch (e) {
+      print("Ошибка очистки renderer: $e");
+    }
     _renderer.dispose();
+    
     _stopwatch.stop();
     _durationTimer?.cancel();
     _signalingSubscription?.cancel();
