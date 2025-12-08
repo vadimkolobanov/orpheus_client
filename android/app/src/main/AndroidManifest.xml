@@ -1,14 +1,49 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.orpheus_project"> <!-- УБЕДИСЬ, ЧТО PACKAGE СОВПАДАЕТ С ТВОИМ -->
+
+    <!-- ============================================== -->
+    <!--                ПРАВА ДОСТУПА                   -->
+    <!-- ============================================== -->
+
+    <!-- Сеть и Интернет -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Аудио и Видео (Звонки) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Bluetooth (Гарнитуры) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Биометрия (Вход) -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+
+    <!-- Энергосбережение (Чтобы не гас экран и проц не спал) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- !!! КРИТИЧНО ДЛЯ ФОНОВОЙ РАБОТЫ (ANDROID 14+) !!! -->
+    <!-- Без этих прав приложение упадет при сворачивании звонка -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- ============================================== -->
+    <!--                ПРИЛОЖЕНИЕ                      -->
+    <!-- ============================================== -->
     <application
         android:label="Orpheus"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
 
-        <!-- 1. ОТКЛЮЧЕНИЕ IMPELLER (Это должно быть отдельным тегом внутри application) -->
+        <!-- Отключение Impeller (по твоему запросу, для стабильности на старых GPU) -->
         <meta-data
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
 
+        <!-- ОСНОВНАЯ АКТИВНОСТЬ -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -18,53 +53,47 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
-            <!-- Specifies an Android theme to apply to this Activity as soon as
-                 the Android process has started. This theme is visible to the user
-                 while the Flutter UI initializes. After that, this theme continues
-                 to determine the Window background behind the Flutter UI. -->
 
-            <!-- 2. ТЕМА ЗАГРУЗКИ (Это отдельный тег внутри activity) -->
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
 
+            <!-- Запуск с иконки -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Deep Links (для orpheus://activate/...) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="orpheus" />
+            </intent-filter>
         </activity>
 
-        <!-- Don't delete the meta-data below.
-             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <!-- МЕТА-ДАННЫЕ FLUTTER -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- !!! СЛУЖБА ДЛЯ ФОНОВОЙ РАБОТЫ (FOREGROUND SERVICE) !!! -->
+        <!-- Это то, что держит звонок живым. Обязательно foregroundServiceType -->
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:foregroundServiceType="microphone|connectedDevice"
+            android:exported="true"
+            />
+
     </application>
 
-    <!-- Required to query activities that can process text -->
+    <!-- Разрешаем открывать ссылки и обрабатывать текст -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-    </queries>
-
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
-    <!-- ОБЯЗАТЕЛЬНО ДЛЯ ANDROID 12+ (API 31+) -->
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-
-    <!-- Желательно для переключения динамиков -->
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-
-    <!-- Нужно для определения типа сети (Wi-Fi/LTE) -->
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />

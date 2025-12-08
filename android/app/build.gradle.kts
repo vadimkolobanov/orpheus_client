@@ -12,6 +12,9 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // !!! ВАЖНОЕ ИЗМЕНЕНИЕ 1: Включаем Desugaring
+        isCoreLibraryDesugaringEnabled = true
+
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -29,6 +32,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Рекомендуется включить MultiDex, так как у вас Firebase + Notifications
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -36,6 +42,11 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+
+            // Настройки для релизной сборки (сжатие)
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
         }
     }
 }
@@ -43,7 +54,11 @@ android {
 flutter {
     source = "../.."
 }
+
 dependencies {
+    // !!! ВАЖНОЕ ИЗМЕНЕНИЕ 2: Библиотека Desugaring
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+
     implementation(platform("com.google.firebase:firebase-bom:34.6.0"))
     implementation("com.google.firebase:firebase-analytics")
 }

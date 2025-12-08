@@ -1,18 +1,10 @@
-// lib/contacts_screen.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:local_auth/local_auth.dart';
 import 'package:orpheus_project/chat_screen.dart';
-import 'package:orpheus_project/main.dart';
+import 'package:orpheus_project/main.dart'; // messageUpdateController
 import 'package:orpheus_project/models/contact_model.dart';
-import 'package:orpheus_project/services/database_service.dart';
-import 'package:orpheus_project/services/websocket_service.dart';
-import 'package:orpheus_project/updates_screen.dart';
 import 'package:orpheus_project/qr_scan_screen.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:qr_flutter/qr_flutter.dart';
+import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -29,29 +21,24 @@ class _ContactsScreenState extends State<ContactsScreen> {
   @override
   void initState() {
     super.initState();
-    // Инициализируем Future сразу, чтобы избежать проблем с асинхронностью
     _contactsFuture = _loadContactsWithTimeout();
     _updateSubscription = messageUpdateController.stream.listen((_) {
       _refreshContacts();
     });
 
-    // ---> ЗАПУСК ПРОВЕРКИ ОБНОВЛЕНИЙ <---
+    // Проверка обновлений (оставим здесь при старте)
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
         UpdateService.checkForUpdate(context);
       }
     });
-    // ------------------------------------
   }
-  
+
   Future<List<Contact>> _loadContactsWithTimeout() async {
     try {
       return await DatabaseService.instance.getContacts().timeout(
         const Duration(seconds: 10),
-        onTimeout: () {
-          print("Таймаут загрузки контактов");
-          return <Contact>[];
-        },
+        onTimeout: () => <Contact>[],
       );
     } catch (e) {
       print("Ошибка загрузки контактов: $e");
@@ -73,53 +60,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
   }
 
-  // --- ЭКСПОРТ КЛЮЧА (БИОМЕТРИЯ) ---
-  Future<void> _exportAccount() async {
-    final LocalAuthentication auth = LocalAuthentication();
-    bool canAuth = await auth.canCheckBiometrics || await auth.isDeviceSupported();
-
-    if (!canAuth) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Защита не настроена")));
-      return;
-    }
-
-    try {
-      final bool didAuthenticate = await auth.authenticate(
-        localizedReason: 'Экспорт аккаунта',
-        options: const AuthenticationOptions(stickyAuth: true),
-      );
-
-      if (didAuthenticate) {
-        final privateKey = await cryptoService.getPrivateKeyBase64();
-        if (!mounted) return;
-
-        // Закрываем BottomSheet перед показом алерта, если он открыт
-        if (Navigator.canPop(context)) Navigator.pop(context);
-
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text("ПРИВАТНЫЙ КЛЮЧ", style: TextStyle(color: Colors.red)),
-            content: Container(
-              padding: const EdgeInsets.all(12),
-              color: Colors.red.withOpacity(0.1),
-              child: SelectableText(
-                privateKey,
-                style: const TextStyle(fontFamily: 'monospace', color: Colors.redAccent),
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("ЗАКРЫТЬ")),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      print("Auth error: $e");
-    }
-  }
-
-  // --- ДОБАВЛЕНИЕ КОНТАКТА ---
+  // Диалог добавления
   void _showAddContactDialog() {
     final nameController = TextEditingController();
     final keyController = TextEditingController();
@@ -147,7 +88,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 prefixIcon: const Icon(Icons.vpn_key),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.qr_code_scanner, color: Color(0xFFB0BEC5)),
-                  tooltip: "Сканировать QR",
                   onPressed: () async {
                     final scannedKey = await Navigator.push(
                       context,
@@ -210,215 +150,27 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
-  // --- НИЖНЯЯ ПАНЕЛЬ: МОЯ ВИЗИТКА ---
-  void _showMyIdentitySheet() {
-    final myKey = cryptoService.publicKeyBase64 ?? "Ошибка";
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true, // Разрешаем скролл если экран маленький
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Маркер для свайпа
-            Container(
-              width: 40, height: 4,
-              margin: const EdgeInsets.only(bottom: 20),
-              decoration: BoxDecoration(color: Colors.grey[700], borderRadius: BorderRadius.circular(2)),
-            ),
-
-            const Text(
-              "МОЙ ID",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.white),
-            ),
-            const SizedBox(height: 20),
-
-            // QR КОД
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: QrImageView(
-                data: myKey,
-                version: QrVersions.auto,
-                size: 200.0,
-                backgroundColor: Colors.white,
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // ТЕКСТОВЫЙ КЛЮЧ
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.white10)
-              ),
-              child: SelectableText(
-                myKey,
-                style: const TextStyle(fontFamily: 'monospace', color: Color(0xFFECEFF1), fontSize: 12),
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // КНОПКИ
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.copy, size: 18),
-                    label: const Text("КОПИРОВАТЬ"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF37474F),
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: myKey));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("ID скопирован")));
-                      Navigator.pop(context);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.share, size: 18),
-                    label: const Text("ОТПРАВИТЬ"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Colors.black,
-                    ),
-                    onPressed: () {
-                      try {
-                        Share.share("Привет! Добавь меня в Orpheus.\nМой ключ:\n$myKey");
-                      } catch (e) {
-                        Clipboard.setData(ClipboardData(text: myKey));
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            // КНОПКА БЕЗОПАСНОСТИ (ЭКСПОРТ)
-            SizedBox(
-              width: double.infinity,
-              child: TextButton.icon(
-                icon: const Icon(Icons.shield, size: 16, color: Colors.redAccent),
-                label: const Text("ЭКСПОРТ АККАУНТА", style: TextStyle(color: Colors.redAccent)),
-                onPressed: _exportAccount,
-              ),
-            ),
-
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ORPHEUS'),
-        leading: IconButton(
-          icon: const Icon(Icons.info_outline),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const UpdatesScreen())),
-        ),
-        actions: [
-          // Индикатор сети
-          StreamBuilder<ConnectionStatus>(
-            stream: websocketService.status,
-            initialData: ConnectionStatus.Disconnected,
-            builder: (context, snapshot) {
-              final color = snapshot.data == ConnectionStatus.Connected ? const Color(0xFF6AD394) : Colors.redAccent;
-              return Padding(
-                padding: const EdgeInsets.only(right: 12.0),
-                child: Icon(Icons.circle, color: color, size: 10),
-              );
-            },
-          ),
-          // ГЛАВНАЯ КНОПКА ВИЗИТКИ (ВМЕСТО ОГРОМНОЙ КАРТОЧКИ)
-          IconButton(
-            icon: const Icon(Icons.badge_outlined, size: 28), // Иконка ID карты
-            tooltip: "Мой ID",
-            color: Theme.of(context).colorScheme.primary,
-            onPressed: _showMyIdentitySheet, // Вызывает шторку снизу
-          ),
-          const SizedBox(width: 8),
-        ],
+        title: const Text('КОНТАКТЫ'),
+        centerTitle: false,
+        automaticallyImplyLeading: false, // Убираем кнопку назад
       ),
       body: FutureBuilder<List<Contact>>(
         future: _contactsFuture,
         builder: (context, snapshot) {
-          // Показываем загрузку только если действительно идет загрузка
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text(
-                    "Загрузка контактов...",
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ],
-              ),
-            );
+            return const Center(child: CircularProgressIndicator());
           }
 
-          // Обработка ошибок
           if (snapshot.hasError) {
-            print("FutureBuilder error: ${snapshot.error}");
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 60, color: Colors.red[300]),
-                  const SizedBox(height: 16),
-                  Text(
-                    "Ошибка загрузки",
-                    style: TextStyle(color: Colors.red[300], fontSize: 18),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(
-                      snapshot.error.toString(),
-                      style: const TextStyle(color: Colors.grey, fontSize: 12),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _refreshContacts,
-                    child: const Text("ПОВТОРИТЬ"),
-                  ),
-                ],
-              ),
-            );
+            return Center(child: Text("Ошибка: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
           }
 
-          // Если данные есть (даже пустой список), показываем их
           final contacts = snapshot.data ?? [];
 
-          // --- ЕСЛИ НЕТ КОНТАКТОВ ---
           if (contacts.isEmpty) {
             return Center(
               child: Padding(
@@ -434,7 +186,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      "Нажмите +, чтобы добавить друга.\nОбменяйтесь ключами любым способом.",
+                      "Нажмите +, чтобы добавить собеседника.",
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.grey),
                     ),
@@ -444,7 +196,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
             );
           }
 
-          // --- СПИСОК КОНТАКТОВ ---
           return ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             itemCount: contacts.length,
@@ -473,7 +224,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         ),
                       ),
                       subtitle: Text(
-                        'ID: ...${contact.publicKey.length > 8 ? contact.publicKey.substring(contact.publicKey.length - 8) : ""}',
+                        '...${contact.publicKey.length > 8 ? contact.publicKey.substring(contact.publicKey.length - 8) : ""}',
                         style: TextStyle(color: Colors.grey[700], fontSize: 12, fontFamily: 'monospace'),
                       ),
                       trailing: unreadCount > 0
@@ -483,8 +234,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         child: Text(unreadCount.toString(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                       )
                           : const Icon(Icons.chevron_right, color: Colors.grey),
-
-                      // ЗВОНКИ НЕ ТРОГАЛИ, ПЕРЕХОД В ЧАТ РАБОТАЕТ
                       onTap: () async {
                         await Navigator.push(context, MaterialPageRoute(builder: (context) => ChatScreen(contact: contact)));
                         _refreshContacts();
@@ -501,7 +250,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddContactDialog,
         backgroundColor: Theme.of(context).colorScheme.primary,
-        child: const Icon(Icons.add, color: Colors.black, size: 32), // Кнопка "+"
+        child: const Icon(Icons.add, color: Colors.black, size: 32),
       ),
     );
   }

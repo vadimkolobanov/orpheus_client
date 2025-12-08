@@ -1,5 +1,3 @@
-// lib/main.dart
-
 import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
@@ -9,58 +7,51 @@ import 'package:orpheus_project/call_screen.dart';
 import 'package:orpheus_project/contacts_screen.dart';
 import 'package:orpheus_project/license_screen.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
+import 'package:orpheus_project/services/background_call_service.dart'; // НОВОЕ
 import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/theme/app_theme.dart';
-import 'package:orpheus_project/welcome_screen.dart'; // Экран входа/восстановления
-
-// --- Глобальные сервисы ---
+import 'package:orpheus_project/welcome_screen.dart';
+import 'package:orpheus_project/screens/home_screen.dart';
 final cryptoService = CryptoService();
 final websocketService = WebSocketService();
 final notificationService = NotificationService();
 
-// Глобальный ключ навигации
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// Контроллеры потоков
 final StreamController<String> messageUpdateController = StreamController.broadcast();
 final StreamController<Map<String, dynamic>> signalingStreamController = StreamController.broadcast();
 
-// Буфер для ICE кандидатов входящих звонков (до создания CallScreen)
+// --- ГЛОБАЛЬНЫЙ БУФЕР ДЛЯ ВХОДЯЩИХ ЗВОНКОВ ---
 final Map<String, List<Map<String, dynamic>>> _incomingCallBuffers = {};
 
-// Функция для получения и очистки буфера кандидатов
 List<Map<String, dynamic>> getAndClearIncomingCallBuffer(String contactPublicKey) {
   final buffer = _incomingCallBuffers.remove(contactPublicKey) ?? [];
+  print("MAIN: Из буфера извлечено ${buffer.length} кандидатов для $contactPublicKey");
   return buffer;
 }
 
-// Глобальная переменная: есть ли ключи на старте
 bool _hasKeys = false;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Инициализация Firebase
   try {
     await Firebase.initializeApp();
-    // Регистрация фонового обработчика
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    // Инициализация сервиса уведомлений
     await notificationService.init();
+
+    // ИНИЦИАЛИЗАЦИЯ ФОНОВОГО СЕРВИСА
+    await BackgroundCallService.initialize();
   } catch (e) {
-    print("FIREBASE ERROR: $e");
+    print("INIT ERROR: $e");
   }
 
-  // 2. Инициализация криптографии (возвращает true, если ключи уже есть)
   _hasKeys = await cryptoService.init();
-
-  // 3. Запуск слушателя сообщений
   _listenForMessages();
 
-  // 4. Если ключи есть сразу - подключаемся. Если нет - ждем прохождения WelcomeScreen
   if (_hasKeys && cryptoService.publicKeyBase64 != null) {
     websocketService.connect(cryptoService.publicKeyBase64!);
   }
@@ -73,33 +64,35 @@ void _listenForMessages() {
     try {
       final messageData = json.decode(messageJson) as Map<String, dynamic>;
       final type = messageData['type'] as String?;
-
-      if (type == 'error' || type == 'payment-confirmed' || type == 'license-status') return;
-
       final senderKey = messageData['sender_pubkey'] as String?;
-      if (senderKey == null) return;
 
-      // --- ЗВОНКИ ---
+      if (type == 'error' || type == 'payment-confirmed' || type == 'license-status' || senderKey == null) return;
+
+      // --- ЛОГИКА ЗВОНКОВ ---
       if (type == 'call-offer') {
         final data = messageData['data'] as Map<String, dynamic>;
-        // Очищаем старый буфер, если он есть (на случай если приложение было свернуто)
+
+        // Сброс буфера для нового звонка
         _incomingCallBuffers.remove(senderKey);
-        // Инициализируем новый буфер для этого звонка
         _incomingCallBuffers[senderKey] = [];
+
         navigatorKey.currentState?.push(MaterialPageRoute(
           builder: (context) => CallScreen(contactPublicKey: senderKey, offer: data),
         ));
-      } else if (type == 'ice-candidate') {
-        // Если это входящий звонок (есть буфер), сохраняем кандидат
+      }
+      else if (type == 'ice-candidate') {
+        // Если экран звонка еще не готов (в буфере есть ключ), сохраняем туда
         if (_incomingCallBuffers.containsKey(senderKey)) {
+          print("MAIN: Кандидат сохранен в глобальный буфер");
           _incomingCallBuffers[senderKey]!.add(messageData);
         }
-        // Всегда отправляем в signalingStreamController для активных звонков
+        // Отправляем в поток (для активного CallScreen)
         signalingStreamController.add(messageData);
-      } else if (type == 'call-answer') {
+      }
+      else if (type == 'call-answer') {
         signalingStreamController.add(messageData);
-      } else if (type == 'hang-up' || type == 'call-rejected') {
-        // Очищаем буфер кандидатов при завершении/отклонении звонка
+      }
+      else if (type == 'hang-up' || type == 'call-rejected') {
         _incomingCallBuffers.remove(senderKey);
         signalingStreamController.add(messageData);
       }
@@ -110,31 +103,27 @@ void _listenForMessages() {
         if (payload != null) {
           try {
             final decryptedMessage = await cryptoService.decrypt(senderKey, payload);
-
             final receivedMessage = ChatMessage(
                 text: decryptedMessage,
                 isSentByMe: false,
                 status: MessageStatus.delivered,
                 isRead: false
             );
-
             await DatabaseService.instance.addMessage(receivedMessage, senderKey);
             messageUpdateController.add(senderKey);
-
           } catch (e) {
-            print("Ошибка расшифровки: $e");
+            print("Decryption Error: $e");
           }
         }
       }
     } catch (e) {
-      print("Ошибка обработки: $e");
+      print("Message Handler Error: $e");
     }
   });
 }
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
-
   @override
   State<MyApp> createState() => _MyAppState();
 }
@@ -142,16 +131,13 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _isLicensed = false;
   bool _isCheckCompleted = false;
-
-  // Локальное состояние наличия ключей (чтобы обновить UI после создания аккаунта)
   late bool _keysExist;
+
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    // Инициализируем состояние из глобальной переменной
     _keysExist = _hasKeys;
 
     websocketService.stream.listen((message) {
@@ -172,12 +158,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     });
   }
 
-  // Коллбэк, который вызывается из WelcomeScreen после успешного создания/импорта
   void _onAuthComplete() {
-    setState(() {
-      _keysExist = true;
-    });
-    // Сразу подключаемся к серверу
+    setState(() => _keysExist = true);
     if (cryptoService.publicKeyBase64 != null) {
       websocketService.connect(cryptoService.publicKeyBase64!);
     }
@@ -192,6 +174,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // Принудительный реконнект при разворачивании
       if (cryptoService.publicKeyBase64 != null) {
         websocketService.connect(cryptoService.publicKeyBase64!);
       }
@@ -202,11 +185,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Orpheus',
-
-      // ВКЛЮЧАЕМ ТЕМНУЮ ТЕМУ
       theme: AppTheme.darkTheme,
-      themeMode: ThemeMode.dark, // Принудительно темная
-
+      themeMode: ThemeMode.dark,
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       home: !_keysExist
@@ -214,8 +194,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           : !_isCheckCompleted
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : _isLicensed
-          ? const ContactsScreen()
+          ? const HomeScreen() // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
           : LicenseScreen(onLicenseConfirmed: () => setState(() => _isLicensed = true)),
     );
-  }
-}
+  }}

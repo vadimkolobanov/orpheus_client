@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-// --- ФИНАЛЬНАЯ КОНФИГУРАЦИЯ ---
 const Map<String, dynamic> rtcConfiguration = {
   'iceServers': [
     {
@@ -31,7 +30,7 @@ class WebRTCService {
   final _debugLogController = StreamController<String>.broadcast();
   Stream<String> get onDebugLog => _debugLogController.stream;
 
-  // Очередь теперь хранит кандидатов даже до создания PeerConnection
+  // Внутренняя очередь кандидатов (для решения Race Condition)
   final List<RTCIceCandidate> _queuedRemoteCandidates = [];
   bool _remoteDescriptionSet = false;
 
@@ -50,18 +49,12 @@ class WebRTCService {
     if (statuses[Permission.microphone]!.isGranted) {
       _localStream = await mediaDevices.getUserMedia({
         'audio': {
-          // Включаем стандартные параметры обработки аудио для устранения эха и шумов
           'echoCancellation': true,
           'noiseSuppression': true,
           'autoGainControl': true,
-          
-          // Дополнительные параметры для лучшего качества
-          // Google-специфичные параметры как резерв (если стандартные не поддерживаются)
           'googEchoCancellation': true,
           'googNoiseSuppression': true,
           'googHighpassFilter': true,
-          'googAutoGainControl': true,
-          'googTypingNoiseDetection': true,
         },
         'video': false
       });
@@ -99,8 +92,6 @@ class WebRTCService {
     });
 
     await _peerConnection!.setLocalDescription(offer);
-    _log("--- [WebRTC] Local Description Set (Offer) ---");
-
     onOfferCreated({'sdp': offer.sdp, 'type': offer.type});
   }
 
@@ -113,7 +104,6 @@ class WebRTCService {
     if (_localStream == null) await initialize();
 
     _peerConnection = await _createPeerConnection(onCandidateCreated);
-
     await handleOffer(offer, onAnswerCreated: onAnswerCreated);
   }
 
@@ -121,82 +111,63 @@ class WebRTCService {
     pc.onConnectionState = (RTCPeerConnectionState state) {
       _log('--- [WebRTC] Connection State: $state ---');
     };
-
-    pc.onIceConnectionState = (RTCIceConnectionState state) {
-      _log('--- [WebRTC] ICE State: $state ---');
-    };
-
     pc.onIceCandidate = (RTCIceCandidate candidate) {
       if (candidate.candidate == null) return;
-
-      String type = 'unknown';
-      if (candidate.candidate!.contains('typ relay')) {
-        type = 'RELAY (TURN)';
-      } else if (candidate.candidate!.contains('typ srflx')) type = 'STUN';
-      else if (candidate.candidate!.contains('typ host')) type = 'LOCAL';
-
-      _log("--- [WebRTC] CANDIDATE: $type ---");
-
       onCandidateCreated({
         'candidate': candidate.candidate,
         'sdpMid': candidate.sdpMid,
         'sdpMLineIndex': candidate.sdpMLineIndex
       });
     };
-
     pc.onTrack = (RTCTrackEvent event) {
-      _log("--- [WebRTC] REMOTE TRACK RECEIVED ---");
       if (event.streams.isNotEmpty) {
         _remoteStream = event.streams[0];
-        _log("--- [WebRTC] Remote stream assigned, tracks: ${_remoteStream!.getAudioTracks().length} audio, ${_remoteStream!.getVideoTracks().length} video ---");
+        _log("--- [WebRTC] REMOTE TRACK RECEIVED ---");
       }
     };
   }
 
-  Future<void> handleOffer(Map<String, dynamic> offerData, { required Function(Map<String, dynamic> answer) onAnswerCreated, }) async {
+  Future<void> handleOffer(Map<String, dynamic> offerData, { required Function(Map<String, dynamic> answer) onAnswerCreated }) async {
     if (_peerConnection == null) return;
 
-    _log("--- [WebRTC] Handling Remote Offer ---");
     final offer = RTCSessionDescription(offerData['sdp'], offerData['type']);
     await _peerConnection!.setRemoteDescription(offer);
 
+    // ВАЖНО: Устанавливаем флаг и применяем очередь
     _remoteDescriptionSet = true;
-    // Вот здесь мы применим всех кандидатов, которые накопились пока телефон звонил
     await _drainCandidateQueue();
 
     final answer = await _peerConnection!.createAnswer();
     await _peerConnection!.setLocalDescription(answer);
-    _log("--- [WebRTC] Local Description Set (Answer) ---");
 
     onAnswerCreated({'sdp': answer.sdp, 'type': answer.type});
   }
 
   Future<void> handleAnswer(Map<String, dynamic> answerData) async {
     if (_peerConnection == null) return;
-    _log("--- [WebRTC] Handling Remote Answer ---");
+
     final answer = RTCSessionDescription(answerData['sdp'], answerData['type']);
     await _peerConnection!.setRemoteDescription(answer);
 
+    // ВАЖНО: Устанавливаем флаг и применяем очередь
     _remoteDescriptionSet = true;
     await _drainCandidateQueue();
   }
 
-  // --- ИСПРАВЛЕННЫЙ МЕТОД: БУФЕРИЗАЦИЯ ДО СОЗДАНИЯ PC ---
+  // БЕЗОПАСНОЕ ДОБАВЛЕНИЕ КАНДИДАТА
   Future<void> addCandidate(Map<String, dynamic> candidateData) async {
     try {
-      final String candidateStr = candidateData['candidate'];
-      final String? sdpMid = candidateData['sdpMid'];
-      final int sdpMLineIndex = (candidateData['sdpMLineIndex'] as num).toInt();
+      final candidate = RTCIceCandidate(
+          candidateData['candidate'],
+          candidateData['sdpMid'],
+          (candidateData['sdpMLineIndex'] as num).toInt()
+      );
 
-      final candidate = RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex);
-
-      // ВАЖНО: Если PC еще нет (звонок идет, но не отвечен) ИЛИ RemoteDesc не установлен
-      // Мы ВСЕ РАВНО сохраняем кандидата в очередь.
       if (_peerConnection != null && _remoteDescriptionSet) {
         await _peerConnection!.addCandidate(candidate);
-        _log("✅ ICE Added: ${candidateStr.substring(0, 15)}...");
+        _log("✅ ICE Added immediately");
       } else {
-        _log("⏳ ICE Queued (Waiting for Answer): ${candidateStr.substring(0, 15)}...");
+        _log("⏳ ICE Queued (Waiting for SDP)");
         _queuedRemoteCandidates.add(candidate);
       }
     } catch (e) {
@@ -210,7 +181,6 @@ class WebRTCService {
       try {
         if (_peerConnection != null) {
           await _peerConnection!.addCandidate(candidate);
-          _log("✅ ICE Added (from queue)");
         }
       } catch (e) {
         _log("❌ ICE Queue Error: $e");
@@ -220,23 +190,18 @@ class WebRTCService {
   }
 
   Future<void> hangUp() async {
-    _log("--- [WebRTC] HANG UP ---");
-    try {
-      // Останавливаем и очищаем локальный поток
-      _localStream?.getTracks().forEach((track) => track.stop());
-      await _localStream?.dispose();
-      _localStream = null;
+    _localStream?.getTracks().forEach((track) => track.stop());
+    await _localStream?.dispose();
+    _localStream = null;
 
-      // Останавливаем и очищаем удалённый поток
-      _remoteStream?.getTracks().forEach((track) => track.stop());
-      await _remoteStream?.dispose();
-      _remoteStream = null;
+    _remoteStream?.getTracks().forEach((track) => track.stop());
+    await _remoteStream?.dispose();
+    _remoteStream = null;
 
-      await _peerConnection?.close();
-      _peerConnection = null;
+    await _peerConnection?.close();
+    _peerConnection = null;
 
-      _remoteDescriptionSet = false;
-      _queuedRemoteCandidates.clear();
-    } catch (e) { _log("Error hangUp: $e"); }
+    _remoteDescriptionSet = false;
+    _queuedRemoteCandidates.clear();
   }
 }
