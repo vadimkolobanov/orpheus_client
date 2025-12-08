@@ -10,6 +10,11 @@ class DatabaseService {
   static Database? _database;
   DatabaseService._init();
 
+  // Метод для тестов: инициализация с готовой БД
+  void initWithDatabase(Database db) {
+    _database = db;
+  }
+
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDB('orpheus.db');
@@ -182,7 +187,9 @@ class DatabaseService {
   }
 
   Future close() async {
-    final db = await instance.database;
-    db.close();
+    if (_database != null) {
+      await _database!.close();
+      _database = null;
+    }
   }
 }

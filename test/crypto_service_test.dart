@@ -9,16 +9,19 @@ void main() {
 
   setUp(() {
     // Имитируем SecureStorage (чтобы не лезть в реальный Keystore устройства)
-    const MethodChannel('plugins.it_nomads.com/flutter_secure_storage')
-        .setMockMethodCallHandler((MethodCall methodCall) async {
-      if (methodCall.method == 'read') {
-        return null; // Имитируем, что ключей пока нет
-      }
-      if (methodCall.method == 'write') {
-        return null; // Успешная запись
-      }
-      return null;
-    });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+      (MethodCall methodCall) async {
+        if (methodCall.method == 'read') {
+          return null; // Имитируем, что ключей пока нет
+        }
+        if (methodCall.method == 'write') {
+          return null; // Успешная запись
+        }
+        return null;
+      },
+    );
 
     cryptoService = CryptoService();
   });
@@ -33,6 +36,16 @@ void main() {
 
       final privKey = await cryptoService.getPrivateKeyBase64();
       expect(privKey, isNotNull);
+      expect(privKey.length, greaterThan(10));
+    });
+
+    test('Публичный ключ доступен только после генерации', () async {
+      // До генерации ключей
+      expect(cryptoService.publicKeyBase64, isNull);
+
+      // После генерации
+      await cryptoService.generateNewKeys();
+      expect(cryptoService.publicKeyBase64, isNotNull);
     });
 
     test('Полный цикл: Шифрование -> Дешифровка (через Isolate)', () async {
@@ -64,6 +77,79 @@ void main() {
       final decryptedText = await otherService.decrypt(myPub, encryptedJson);
 
       expect(decryptedText, equals(originalText));
+    });
+
+    test('Шифрование пустого сообщения', () async {
+      await cryptoService.generateNewKeys();
+      final otherService = CryptoService();
+      await otherService.generateNewKeys();
+      final otherPub = otherService.publicKeyBase64!;
+
+      const emptyText = "";
+
+      final encryptedJson = await cryptoService.encrypt(otherPub, emptyText);
+      expect(encryptedJson, isNotEmpty);
+
+      final decryptedText = await otherService.decrypt(cryptoService.publicKeyBase64!, encryptedJson);
+      expect(decryptedText, equals(emptyText));
+    });
+
+    test('Шифрование длинного сообщения', () async {
+      await cryptoService.generateNewKeys();
+      final otherService = CryptoService();
+      await otherService.generateNewKeys();
+      final otherPub = otherService.publicKeyBase64!;
+
+      final longText = "A" * 10000;
+
+      final encryptedJson = await cryptoService.encrypt(otherPub, longText);
+      expect(encryptedJson, isNotEmpty);
+
+      final decryptedText = await otherService.decrypt(cryptoService.publicKeyBase64!, encryptedJson);
+      expect(decryptedText, equals(longText));
+      expect(decryptedText.length, 10000);
+    });
+
+    test('Шифрование сообщения с эмодзи и спецсимволами', () async {
+      await cryptoService.generateNewKeys();
+      final otherService = CryptoService();
+      await otherService.generateNewKeys();
+      final otherPub = otherService.publicKeyBase64!;
+
+      final specialText = "Привет! 🚀 Hello @#\$%^&*() 中文 العربية";
+
+      final encryptedJson = await cryptoService.encrypt(otherPub, specialText);
+      final decryptedText = await otherService.decrypt(cryptoService.publicKeyBase64!, encryptedJson);
+
+      expect(decryptedText, equals(specialText));
+    });
+
+    test('Ошибка при шифровании без инициализации ключей', () async {
+      final uninitializedService = CryptoService();
+      final otherService = CryptoService();
+      await otherService.generateNewKeys();
+      final otherPub = otherService.publicKeyBase64!;
+
+      expect(() async {
+        await uninitializedService.encrypt(otherPub, "test");
+      }, throwsA(anything));
+    });
+
+    test('Ошибка при дешифровании с неверным ключом', () async {
+      await cryptoService.generateNewKeys();
+      final otherService = CryptoService();
+      await otherService.generateNewKeys();
+      final otherPub = otherService.publicKeyBase64!;
+
+      final encryptedJson = await cryptoService.encrypt(otherPub, "test");
+
+      // Пытаемся дешифровать с неправильным ключом
+      final wrongService = CryptoService();
+      await wrongService.generateNewKeys();
+
+      expect(() async {
+        await wrongService.decrypt(cryptoService.publicKeyBase64!, encryptedJson);
+      }, throwsA(anything));
     });
   });
 }
