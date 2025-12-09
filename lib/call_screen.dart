@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart'; // Доступ к глобальным сервисам и буферу
 import 'package:orpheus_project/services/background_call_service.dart';
+import 'package:orpheus_project/services/notification_foreground_service.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
@@ -391,7 +392,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     // 2. Чистим буфер
     getAndClearIncomingCallBuffer(widget.contactPublicKey);
 
-    // 3. Отправляем HangUp, если закрыли свайпом/назад и не было явного завершения
+    // 3. Удаляем отметку о звонке из сервиса
+    NotificationForegroundService.removeCallFromMain(widget.contactPublicKey);
+
+    // 4. Отправляем HangUp, если закрыли свайпом/назад и не было явного завершения
     if (!_messagesSent && !_isDisposed) {
       final finalState = _callState;
       if (finalState == CallState.Connected || finalState == CallState.Dialing) {

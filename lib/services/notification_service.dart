@@ -60,6 +60,9 @@ class NotificationService {
   
   // Callback для отправки FCM токена на сервер при его обновлении
   static VoidCallback? onTokenUpdated;
+  
+  // Хранилище данных оффера для входящих звонков (ключ: callerKey, значение: offerData)
+  static final Map<String, Map<String, dynamic>> pendingOffers = {};
 
   Future<void> init() async {
     print('🔔🔔🔔 FIREBASE INIT НАЧАЛО 🔔🔔🔔');
@@ -253,19 +256,37 @@ class NotificationService {
       // Для звонков: если FCM уже покажет уведомление, не показываем локальное
       // чтобы избежать дублирования. FCM уведомление будет без кнопок, но это лучше чем дублирование.
       // В идеале на сервере нужно отправлять только data payload для звонков, без notification.
+      // Извлекаем данные оффера из сообщения
+      Map<String, dynamic>? offerData;
+      if (data['offer_data'] != null) {
+        try {
+          offerData = json.decode(data['offer_data']);
+          print("🔔 Offer data получен в background: ${offerData != null}");
+        } catch (e) {
+          print("🔔 ОШИБКА декодирования offer_data в background: $e");
+        }
+      }
+      
       if (!hasFcmNotification) {
         print("🔔 Показываем локальное уведомление о звонке от: $callerName (FCM notification: $hasFcmNotification)");
         try {
           await _showCallNotification(
             callerKey: callerKey,
             callerName: callerName,
+            offerData: offerData,
           );
           print("🔔 Уведомление о звонке показано успешно");
         } catch (e) {
           print("🔔 ОШИБКА показа уведомления о звонке: $e");
         }
       } else {
-        print("🔔 FCM уже покажет уведомление о звонке, пропускаем локальное (чтобы избежать дублирования)");
+        // Даже если FCM покажет уведомление, сохраняем данные оффера на случай если пользователь откроет приложение
+        if (offerData != null) {
+          pendingOffers[callerKey] = offerData;
+          print("🔔 FCM покажет уведомление, но сохранили offer data для: $callerKey");
+        } else {
+          print("🔔 FCM уже покажет уведомление о звонке, пропускаем локальное (чтобы избежать дублирования)");
+        }
       }
     } else if (type == 'new_message') {
       final senderKey = data['sender_key'] ?? '';
@@ -308,6 +329,7 @@ class NotificationService {
   static Future<void> _showCallNotification({
     required String callerKey,
     required String callerName,
+    Map<String, dynamic>? offerData,
   }) async {
     print("🔔 Showing CALL notification for: $callerName");
 
@@ -362,6 +384,12 @@ class NotificationService {
       ],
     );
 
+    // Сохраняем данные оффера для последующего использования при принятии
+    if (offerData != null) {
+      pendingOffers[callerKey] = offerData;
+      print("🔔 Saved offer data for caller: ${callerKey.substring(0, 8)}...");
+    }
+    
     await _localNotifications.show(
       _callNotificationId,
       '📞 Входящий звонок',
@@ -369,6 +397,15 @@ class NotificationService {
       NotificationDetails(android: androidDetails),
       payload: 'call:$callerKey',
     );
+  }
+  
+  /// Получить и удалить данные оффера для звонка
+  static Map<String, dynamic>? getAndRemoveOffer(String callerKey) {
+    final offer = pendingOffers.remove(callerKey);
+    if (offer != null) {
+      print("🔔 Retrieved offer data for caller: ${callerKey.substring(0, 8)}...");
+    }
+    return offer;
   }
 
   /// Показ уведомления о новом сообщении
@@ -427,21 +464,23 @@ class NotificationService {
       
       print('🔔 FOREGROUND: Обработка входящего звонка: $callerName ($callerKey)');
       
-      // Всегда показываем локальное уведомление с кнопками в foreground
-      _showCallNotification(
-        callerKey: callerKey,
-        callerName: callerName,
-      );
-      
+      // Извлекаем данные оффера из сообщения
       Map<String, dynamic>? offerData;
       if (data['offer_data'] != null) {
         try {
           offerData = json.decode(data['offer_data']);
-          print('🔔 Offer data получен: ${offerData != null}');
+          print('🔔 Offer data получен в foreground: ${offerData != null}');
         } catch (e) {
-          print('🔔 ОШИБКА декодирования offer_data: $e');
+          print('🔔 ОШИБКА декодирования offer_data в foreground: $e');
         }
       }
+      
+      // Всегда показываем локальное уведомление с кнопками в foreground
+      _showCallNotification(
+        callerKey: callerKey,
+        callerName: callerName,
+        offerData: offerData,
+      );
       
       // Вызываем callback если зарегистрирован
       if (onIncomingCall != null && callerKey.isNotEmpty) {
@@ -505,10 +544,11 @@ class NotificationService {
       final callerKey = payload.substring(5);
       
       if (actionId == 'accept_call') {
-        // Принять звонок
+        // Принять звонок - получаем сохраненные данные оффера
         print('🔔 Принятие звонка от: $callerKey');
+        final offerData = getAndRemoveOffer(callerKey);
         if (onIncomingCall != null) {
-          onIncomingCall!(callerKey, null);
+          onIncomingCall!(callerKey, offerData);
         }
       } else if (actionId == 'decline_call') {
         // Отклонить звонок - отправляем hang-up на сервер
@@ -519,9 +559,10 @@ class NotificationService {
           print('🔔 WARN: onDeclineCall не зарегистрирован');
         }
       } else {
-        // Просто клик по уведомлению - открываем звонок
+        // Просто клик по уведомлению - открываем звонок с данными оффера
+        final offerData = getAndRemoveOffer(callerKey);
         if (onIncomingCall != null) {
-          onIncomingCall!(callerKey, null);
+          onIncomingCall!(callerKey, offerData);
         }
       }
     } else if (payload.startsWith('chat:')) {
@@ -564,6 +605,8 @@ class NotificationService {
   /// Отмена уведомления о звонке
   static Future<void> cancelCallNotification() async {
     await _localNotifications.cancel(_callNotificationId);
+    // Очищаем все сохраненные офферы при отмене уведомления
+    pendingOffers.clear();
   }
 
   /// Отмена уведомления о сообщении от конкретного пользователя
@@ -632,10 +675,12 @@ class NotificationService {
   static Future<void> showCallNotification({
     required String callerKey,
     required String callerName,
+    Map<String, dynamic>? offerData,
   }) async {
     await _showCallNotification(
       callerKey: callerKey,
       callerName: callerName,
+      offerData: offerData,
     );
   }
 

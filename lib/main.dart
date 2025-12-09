@@ -76,8 +76,20 @@ void _setupNotificationCallbacks() {
   NotificationService.onIncomingCall = (String callerKey, Map<String, dynamic>? offerData) {
     print("📞 FCM: Incoming call from $callerKey");
     
+    // Проверяем, не обрабатывается ли уже этот звонок
+    // Если звонок уже обрабатывается в main.dart, не открываем новый экран
+    if (NotificationForegroundService.isCallHandledInMain(callerKey)) {
+      print("📞 Call already being handled, skipping duplicate screen");
+      // Отменяем уведомление
+      NotificationService.cancelCallNotification();
+      return;
+    }
+    
     // Отменяем уведомление
     NotificationService.cancelCallNotification();
+    
+    // Уведомляем сервис, что звонок обрабатывается в main isolate
+    NotificationForegroundService.markCallHandledInMain(callerKey);
     
     // Открываем экран звонка (если навигатор готов)
     if (navigatorKey.currentState != null) {
@@ -149,6 +161,14 @@ void _listenForMessages() {
           return;
         }
         final data = rawData;
+
+        // Сохраняем данные оффера для использования при принятии из уведомления
+        NotificationService.pendingOffers[senderKey] = data;
+        print("📞 Saved offer data for incoming call from: ${senderKey.substring(0, 8)}...");
+
+        // Уведомляем сервис, что звонок обрабатывается в main isolate
+        // Это предотвратит показ уведомления в сервисе
+        NotificationForegroundService.markCallHandledInMain(senderKey);
 
         // Сброс буфера для нового звонка
         _incomingCallBuffers.remove(senderKey);
