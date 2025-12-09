@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:orpheus_project/main.dart'; // Доступ к глобальным сервисам и буферу
+import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/background_call_service.dart';
-import 'package:orpheus_project/services/notification_foreground_service.dart';
+import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
@@ -64,7 +64,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Timer? _durationTimer;
   final Stopwatch _stopwatch = Stopwatch();
 
-  // Визуализация аудио (симуляция амплитуды)
+  // Визуализация аудио
   final List<double> _audioWaveData = List.generate(20, (_) => 0.0);
   Timer? _waveTimer;
 
@@ -77,10 +77,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
     _callState = widget.offer != null ? CallState.Incoming : CallState.Dialing;
 
-    // 1. Запуск Foreground Service (чтобы не убило при сворачивании)
+    // 1. Запуск foreground service для звонка
     _startBackgroundMode();
 
-    // 2. Инициализация контроллеров анимации
+    // 2. Скрываем уведомление о входящем звонке (экран уже открыт)
+    NotificationService.hideCallNotification();
+
+    // 3. Анимации
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -96,7 +99,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 1500),
     );
 
-    // 3. Старт логики WebRTC
+    // 4. Старт WebRTC
     _initCallSequence();
   }
 
@@ -108,7 +111,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     try {
       final contacts = await DatabaseService.instance.getContacts();
       final found = contacts.firstWhere(
-            (c) => c.publicKey == widget.contactPublicKey,
+        (c) => c.publicKey == widget.contactPublicKey,
         orElse: () => null as dynamic,
       );
 
@@ -117,15 +120,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           _displayName = found.name;
         });
       }
-    } catch (_) {
-      // Игнорируем ошибки поиска контакта, оставляем "Аноним" или ID
-    }
+    } catch (_) {}
   }
 
   Future<void> _initCallSequence() async {
     await _renderer.initialize();
 
-    // Подписка на логи WebRTC (из сервиса)
+    // Подписка на логи WebRTC
     _webrtcLogSubscription = _webrtcService.onDebugLog.listen((log) {
       _addLog(log);
 
@@ -140,7 +141,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       }
     });
 
-    // Подписка на Сигналы (WebSocket)
+    // Подписка на сигналы WebSocket
     _signalingSubscription = signalingStreamController.stream.listen((signal) async {
       if (_isDisposed || signal['sender_pubkey'] != widget.contactPublicKey) {
         return;
@@ -158,15 +159,16 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       } else if (type == 'ice-candidate') {
         await _webrtcService.addCandidate(data);
       } else if (type == 'hang-up' || type == 'call-rejected') {
+        _addLog("📞 Получен $type - завершаем звонок");
         _onRemoteHangup();
       }
     });
 
-    // ПРОВЕРКА БУФЕРА КАНДИДАТОВ (Fix Race Condition)
+    // Применяем буферизованные ICE кандидаты
     if (_callState == CallState.Incoming) {
       final bufferedCandidates = getAndClearIncomingCallBuffer(widget.contactPublicKey);
       if (bufferedCandidates.isNotEmpty) {
-        _addLog("📦 BUFFER: Применение ${bufferedCandidates.length} накопленных кандидатов");
+        _addLog("📦 Применение ${bufferedCandidates.length} буферизованных кандидатов");
         for (final candidateMsg in bufferedCandidates) {
           final data = candidateMsg['data'] as Map<String, dynamic>;
           await _webrtcService.addCandidate(data);
@@ -188,11 +190,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     try {
       await _webrtcService.initiateCall(
         onOfferCreated: (offer) {
-          _addLog("📤 OUT: call-offer");
+          _addLog("📤 call-offer");
           websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-offer', offer);
         },
         onCandidateCreated: (cand) {
-          _addLog("📤 OUT: ice-candidate");
+          _addLog("📤 ice-candidate");
           websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
         },
       );
@@ -210,11 +212,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       await _webrtcService.answerCall(
         offer: widget.offer!,
         onAnswerCreated: (ans) {
-          _addLog("📤 OUT: call-answer");
+          _addLog("📤 call-answer");
           websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', ans);
         },
         onCandidateCreated: (cand) {
-          _addLog("📤 OUT: ice-candidate");
+          _addLog("📤 ice-candidate");
           websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
         },
       );
@@ -224,24 +226,30 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _endCallButton() async {
-    if (_isDisposed) return;
+    if (_messagesSent) return;  // Предотвращаем повторные вызовы
+    _messagesSent = true;
 
     final currentState = _callState;
     String signal = currentState == CallState.Incoming ? 'call-rejected' : 'hang-up';
 
+    // СНАЧАЛА отправляем hang-up сигнал
+    print("📞 Отправка $signal к ${widget.contactPublicKey.substring(0, 8)}...");
+    websocketService.sendSignalingMessage(widget.contactPublicKey, signal, {});
+
+    // Небольшая задержка чтобы WebSocket успел отправить сообщение
+    await Future.delayed(const Duration(milliseconds: 100));
+
     // Системные сообщения в чат
     if (currentState == CallState.Connected) {
-      await _saveCallStatusMessageLocally("Исходящий звонок", true);
-      await _sendCallStatusMessageToContact("Входящий звонок");
+      _saveCallStatusMessageLocally("Исходящий звонок", true);
+      _sendCallStatusMessageToContact("Входящий звонок");
     } else if (currentState == CallState.Incoming) {
-      await _saveCallStatusMessageLocally("Пропущен звонок", false);
+      _saveCallStatusMessageLocally("Пропущен звонок", false);
     } else if (currentState == CallState.Dialing) {
-      await _saveCallStatusMessageLocally("Исходящий звонок", true);
-      await _sendCallStatusMessageToContact("Пропущен звонок");
+      _saveCallStatusMessageLocally("Исходящий звонок", true);
+      _sendCallStatusMessageToContact("Пропущен звонок");
     }
 
-    _messagesSent = true;
-    websocketService.sendSignalingMessage(widget.contactPublicKey, signal, {});
     _safePop();
   }
 
@@ -253,7 +261,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     final wasConnected = _callState == CallState.Connected;
     if (mounted) setState(() => _callState = CallState.Rejected);
 
-    // Сохранение в историю чата
     if (wasConnected) {
       _saveCallStatusMessageLocally("Входящий звонок", false);
       _sendCallStatusMessageToContact("Исходящий звонок");
@@ -273,7 +280,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       _attachRemoteStream();
     }
 
-    // Запуск анимации волн (симуляция)
+    // Анимация волн
     _waveTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       if (!mounted || _isDisposed || _callState != CallState.Connected) {
         timer.cancel();
@@ -281,14 +288,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       }
       setState(() {
         for (int i = 0; i < _audioWaveData.length; i++) {
-          // Генерация случайных значений для эффекта "живого" голоса
           _audioWaveData[i] = (0.2 + (i % 3) * 0.1) +
               (DateTime.now().millisecondsSinceEpoch % 1000) / 1000 * 0.3;
         }
       });
     });
 
-    // Запуск таймера длительности
+    // Таймер длительности
     _stopwatch.start();
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
@@ -296,6 +302,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       final min = elapsed.inMinutes.toString().padLeft(2, '0');
       final sec = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
       setState(() => _durationText = "$min:$sec");
+      
+      // Обновляем уведомление foreground service
+      BackgroundCallService.updateCallDuration(_durationText, _displayName);
     });
   }
 
@@ -306,7 +315,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _safePop() {
-    if (_isDisposed) return;
     getAndClearIncomingCallBuffer(widget.contactPublicKey);
     if (mounted && Navigator.canPop(context)) {
       Navigator.pop(context);
@@ -349,14 +357,18 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       );
       await DatabaseService.instance.addMessage(callMessage, widget.contactPublicKey);
       messageUpdateController.add(widget.contactPublicKey);
-    } catch (e) { print("Error saving local msg: $e"); }
+    } catch (e) {
+      print("Error saving local msg: $e");
+    }
   }
 
   Future<void> _sendCallStatusMessageToContact(String messageText) async {
     try {
       final payload = await cryptoService.encrypt(widget.contactPublicKey, messageText);
       websocketService.sendChatMessage(widget.contactPublicKey, payload);
-    } catch (e) { print("Error sending remote msg: $e"); }
+    } catch (e) {
+      print("Error sending remote msg: $e");
+    }
   }
 
   void _addLog(String message) {
@@ -375,29 +387,34 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   String _getStatusText() {
     switch (_callState) {
-      case CallState.Dialing: return "Вызов...";
-      case CallState.Incoming: return "Входящий звонок";
-      case CallState.Connecting: return "Соединение...";
-      case CallState.Rejected: return "Завершен";
-      case CallState.Failed: return "Сбой";
-      default: return "";
+      case CallState.Dialing:
+        return "Вызов...";
+      case CallState.Incoming:
+        return "Входящий звонок";
+      case CallState.Connecting:
+        return "Соединение...";
+      case CallState.Rejected:
+        return "Завершен";
+      case CallState.Failed:
+        return "Сбой";
+      default:
+        return "";
     }
   }
 
   @override
   void dispose() {
-    // 1. Останавливаем сервис
+    // 1. Останавливаем foreground service
     BackgroundCallService.stopCallService();
 
     // 2. Чистим буфер
     getAndClearIncomingCallBuffer(widget.contactPublicKey);
 
-    // 3. Удаляем отметку о звонке из сервиса
-    NotificationForegroundService.removeCallFromMain(widget.contactPublicKey);
-
-    // 4. Отправляем HangUp, если закрыли свайпом/назад и не было явного завершения
-    if (!_messagesSent && !_isDisposed) {
+    // 3. Отправляем HangUp если закрыли свайпом (не через кнопку)
+    if (!_messagesSent) {
       final finalState = _callState;
+      print("📞 Dispose: отправка hang-up (state=$finalState)");
+      
       if (finalState == CallState.Connected || finalState == CallState.Dialing) {
         websocketService.sendSignalingMessage(widget.contactPublicKey, 'hang-up', {});
 
@@ -409,6 +426,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           _sendCallStatusMessageToContact("Пропущен звонок");
         }
       } else if (finalState == CallState.Incoming) {
+        websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-rejected', {});
         _saveCallStatusMessageLocally("Пропущен звонок", false);
       }
     }
@@ -455,7 +473,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               ),
             ),
 
-          // Скрытый VideoView (нужен для корректной работы Audio Track на некоторых Android)
+          // Скрытый VideoView для аудио
           SizedBox(height: 0, width: 0, child: RTCVideoView(_renderer)),
 
           SafeArea(
@@ -466,14 +484,25 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                 // Скрытая кнопка логов
                 GestureDetector(
                   onTap: () => setState(() => _showDebugLogs = !_showDebugLogs),
-                  child: const Text("Secure Call", style: TextStyle(color: Colors.white54, fontSize: 14, decoration: TextDecoration.underline)),
+                  child: const Text(
+                    "Secure Call",
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 14,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 10),
 
                 // Имя контакта
                 Text(
                   _displayName,
-                  style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
@@ -482,7 +511,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                 if (_callState == CallState.Connected)
                   Text(
                     _durationText,
-                    style: const TextStyle(color: Color(0xFF6AD394), fontSize: 24, fontFamily: "monospace"),
+                    style: const TextStyle(
+                      color: Color(0xFF6AD394),
+                      fontSize: 24,
+                      fontFamily: "monospace",
+                    ),
                   )
                 else
                   Column(
@@ -540,12 +573,12 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                         shape: BoxShape.circle,
                         boxShadow: _callState == CallState.Connected
                             ? [
-                          BoxShadow(
-                            color: const Color(0xFF6AD394).withOpacity(0.5),
-                            blurRadius: 30,
-                            spreadRadius: 5,
-                          ),
-                        ]
+                                BoxShadow(
+                                  color: const Color(0xFF6AD394).withOpacity(0.5),
+                                  blurRadius: 30,
+                                  spreadRadius: 5,
+                                ),
+                              ]
                             : [],
                       ),
                       child: CircleAvatar(
@@ -568,7 +601,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                   ],
                 ),
 
-                // Визуализатор звука (только если Connected)
+                // Визуализатор звука
                 if (_callState == CallState.Connected) ...[
                   const SizedBox(height: 30),
                   Container(
@@ -595,7 +628,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
                 const Spacer(),
 
-                // Панель управления (Вынесенный виджет)
+                // Панель управления
                 CallControlPanel(
                   isIncoming: _callState == CallState.Incoming,
                   isMicMuted: _isMicMuted,
@@ -622,7 +655,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text("DEBUG LOGS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                        const Text(
+                          "DEBUG LOGS",
+                          style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                        ),
                         IconButton(
                           icon: const Icon(Icons.close, color: Colors.white),
                           onPressed: () => setState(() => _showDebugLogs = false),
@@ -638,7 +674,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                             padding: const EdgeInsets.symmetric(vertical: 2),
                             child: Text(
                               _debugLogs[index],
-                              style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace'),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontFamily: 'monospace',
+                              ),
                             ),
                           );
                         },

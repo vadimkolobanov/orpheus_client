@@ -4,138 +4,85 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:orpheus_project/call_screen.dart';
-import 'package:orpheus_project/contacts_screen.dart';
 import 'package:orpheus_project/license_screen.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
-import 'package:orpheus_project/services/background_call_service.dart'; // НОВОЕ
-import 'package:orpheus_project/services/notification_foreground_service.dart'; // НОВОЕ - постоянный сервис
+import 'package:orpheus_project/services/background_call_service.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
-import 'package:orpheus_project/services/pending_actions_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/theme/app_theme.dart';
 import 'package:orpheus_project/welcome_screen.dart';
 import 'package:orpheus_project/screens/home_screen.dart';
+
+// Глобальные сервисы
 final cryptoService = CryptoService();
 final websocketService = WebSocketService();
 final notificationService = NotificationService();
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+// Потоки для обновлений UI
 final StreamController<String> messageUpdateController = StreamController.broadcast();
 final StreamController<Map<String, dynamic>> signalingStreamController = StreamController.broadcast();
 
-// --- ГЛОБАЛЬНЫЙ БУФЕР ДЛЯ ВХОДЯЩИХ ЗВОНКОВ ---
+// Буфер для входящих ICE кандидатов (race condition fix)
 final Map<String, List<Map<String, dynamic>>> _incomingCallBuffers = {};
 
 List<Map<String, dynamic>> getAndClearIncomingCallBuffer(String contactPublicKey) {
   final buffer = _incomingCallBuffers.remove(contactPublicKey) ?? [];
-  print("MAIN: Из буфера извлечено ${buffer.length} кандидатов для $contactPublicKey");
+  print("MAIN: Извлечено ${buffer.length} буферизованных кандидатов для ${contactPublicKey.substring(0, 8)}...");
   return buffer;
 }
 
 bool _hasKeys = false;
 
+/// Глобальный флаг: приложение в foreground (активно)?
+bool isAppInForeground = true;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  DebugLogger.info('APP', '🚀 Orpheus запускается...');
 
   try {
+    // 1. Firebase
+    DebugLogger.info('APP', 'Инициализация Firebase...');
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    DebugLogger.success('APP', 'Firebase инициализирован');
+    
+    // 2. Уведомления (простая инициализация)
+    DebugLogger.info('APP', 'Инициализация уведомлений...');
     await notificationService.init();
+    DebugLogger.success('APP', 'Уведомления инициализированы');
 
-    // ИНИЦИАЛИЗАЦИЯ ФОНОВЫХ СЕРВИСОВ
-    // ВАЖНО: NotificationForegroundService должен инициализироваться первым,
-    // так как он настраивает общий сервис. BackgroundCallService только создает канал уведомлений.
-    await NotificationForegroundService.initialize(); // Постоянный сервис для уведомлений
-    await BackgroundCallService.initialize(); // Создает канал уведомлений для звонков
-    
-    // Запуск постоянного сервиса уведомлений
-    await NotificationForegroundService.start();
-    
-    // Регистрация callback'ов для FCM уведомлений
-    _setupNotificationCallbacks();
+    // 3. BackgroundCallService (только инициализация, не запуск)
+    DebugLogger.info('APP', 'Инициализация BackgroundCallService...');
+    await BackgroundCallService.initialize();
+    DebugLogger.success('APP', 'BackgroundCallService инициализирован');
   } catch (e) {
     print("INIT ERROR: $e");
+    DebugLogger.error('APP', 'INIT ERROR: $e');
   }
 
+  // 4. Криптография
+  DebugLogger.info('APP', 'Инициализация криптографии...');
   _hasKeys = await cryptoService.init();
-  _listenForMessages();
+  DebugLogger.info('APP', 'Ключи: ${_hasKeys ? "ЕСТЬ" : "НЕТ"}');
 
+  // 5. WebSocket подключение
   if (_hasKeys && cryptoService.publicKeyBase64 != null) {
+    DebugLogger.info('APP', 'Подключение WebSocket...');
     websocketService.connect(cryptoService.publicKeyBase64!);
   }
 
+  // 6. Слушаем сообщения
+  _listenForMessages();
+
+  DebugLogger.success('APP', '✅ Приложение запущено');
   runApp(const MyApp());
-}
-
-/// Настройка callback'ов для обработки FCM уведомлений
-void _setupNotificationCallbacks() {
-  // Callback для входящих звонков из push-уведомления
-  NotificationService.onIncomingCall = (String callerKey, Map<String, dynamic>? offerData) {
-    print("📞 FCM: Incoming call from $callerKey");
-    
-    // Проверяем, не обрабатывается ли уже этот звонок
-    // Если звонок уже обрабатывается в main.dart, не открываем новый экран
-    if (NotificationForegroundService.isCallHandledInMain(callerKey)) {
-      print("📞 Call already being handled, skipping duplicate screen");
-      // Отменяем уведомление
-      NotificationService.cancelCallNotification();
-      return;
-    }
-    
-    // Отменяем уведомление
-    NotificationService.cancelCallNotification();
-    
-    // Уведомляем сервис, что звонок обрабатывается в main isolate
-    NotificationForegroundService.markCallHandledInMain(callerKey);
-    
-    // Открываем экран звонка (если навигатор готов)
-    if (navigatorKey.currentState != null) {
-      navigatorKey.currentState!.push(MaterialPageRoute(
-        builder: (context) => CallScreen(
-          contactPublicKey: callerKey,
-          offer: offerData,
-        ),
-      ));
-    }
-  };
-
-  // Callback для новых сообщений из push-уведомления
-  NotificationService.onNewMessage = (String senderKey) {
-    print("📨 FCM: New message from $senderKey");
-    
-    // Отменяем уведомление
-    NotificationService.cancelMessageNotification(senderKey);
-    
-    // Обновляем UI чата
-    messageUpdateController.add(senderKey);
-  };
-
-  // Callback для отклонения звонка (отправка hang-up на сервер)
-  NotificationService.onDeclineCall = (String callerKey) async {
-    print("📞 Отклонение звонка от: $callerKey");
-    // Отменяем уведомление сразу
-    NotificationService.cancelCallNotification();
-    
-    // Проверяем подключение WebSocket перед отправкой
-    if (websocketService.currentStatus == ConnectionStatus.Connected) {
-      // Отправляем hang-up на сервер
-      websocketService.sendSignalingMessage(callerKey, 'call-rejected', {});
-      print("📞 Hang-up отправлен на сервер");
-    } else {
-      print("📞 WARN: WebSocket не подключен, сохраняем отклонение для последующей отправки");
-      // Сохраняем отклонение локально для отправки при следующем подключении
-      await PendingActionsService.addPendingRejection(callerKey);
-    }
-  };
-
-  // Callback для отправки FCM токена на сервер при его обновлении
-  NotificationService.onTokenUpdated = () {
-    print("🔔 FCM: Токен обновлен, отправка на сервер...");
-    websocketService.sendFcmToken();
-  };
 }
 
 void _listenForMessages() {
@@ -145,86 +92,126 @@ void _listenForMessages() {
       final type = messageData['type'] as String?;
       final senderKey = messageData['sender_pubkey'] as String?;
 
-      // Логируем все входящие сообщения для отладки
-      print("📨 WS RECEIVED: type=$type, sender=${senderKey?.substring(0, 8) ?? 'null'}...");
+      print("📨 WS: type=$type, sender=${senderKey?.substring(0, 8) ?? 'null'}...");
 
-      if (type == 'error' || type == 'payment-confirmed' || type == 'license-status' || senderKey == null) return;
+      // Пропускаем служебные сообщения
+      if (type == 'error' || type == 'payment-confirmed' || type == 'license-status' || type == 'pong' || senderKey == null) {
+        return;
+      }
 
-      // --- ЛОГИКА ЗВОНКОВ ---
+      // Логируем все входящие сигнальные сообщения
+      DebugLogger.info('MAIN', '📨 IN: $type от ${senderKey.substring(0, 8)}...');
+
+      // === ЗВОНКИ ===
       if (type == 'call-offer') {
-        print("📞 INCOMING CALL from: ${senderKey.substring(0, 8)}...");
-        
-        // Безопасное получение данных оффера
-        final rawData = messageData['data'];
-        if (rawData == null || rawData is! Map<String, dynamic>) {
-          print("❌ ERROR: call-offer data is null or invalid: $rawData");
-          return;
-        }
-        final data = rawData;
-
-        // Сохраняем данные оффера для использования при принятии из уведомления
-        NotificationService.pendingOffers[senderKey] = data;
-        print("📞 Saved offer data for incoming call from: ${senderKey.substring(0, 8)}...");
-
-        // Уведомляем сервис, что звонок обрабатывается в main isolate
-        // Это предотвратит показ уведомления в сервисе
-        NotificationForegroundService.markCallHandledInMain(senderKey);
+        final data = messageData['data'] as Map<String, dynamic>;
+        DebugLogger.success('CALL', '📞 Входящий звонок от ${senderKey.substring(0, 8)}...');
 
         // Сброс буфера для нового звонка
         _incomingCallBuffers.remove(senderKey);
         _incomingCallBuffers[senderKey] = [];
 
-        // Проверяем, готов ли Navigator
-        if (navigatorKey.currentState != null) {
-          print("📞 Opening CallScreen...");
-          navigatorKey.currentState!.push(MaterialPageRoute(
-            builder: (context) => CallScreen(contactPublicKey: senderKey, offer: data),
-          ));
-        } else {
-          print("❌ ERROR: Navigator not ready! Cannot open CallScreen.");
-        }
+        // Показываем уведомление о звонке
+        final contactName = await _getContactName(senderKey);
+        await NotificationService.showCallNotification(callerName: contactName);
+
+        // Открываем экран звонка
+        DebugLogger.info('CALL', 'Открытие CallScreen...');
+        navigatorKey.currentState?.push(MaterialPageRoute(
+          builder: (context) => CallScreen(contactPublicKey: senderKey, offer: data),
+        ));
       }
       else if (type == 'ice-candidate') {
-        // Если экран звонка еще не готов (в буфере есть ключ), сохраняем туда
+        // Буферизуем если экран звонка ещё не готов
         if (_incomingCallBuffers.containsKey(senderKey)) {
-          print("MAIN: Кандидат сохранен в глобальный буфер");
           _incomingCallBuffers[senderKey]!.add(messageData);
+          DebugLogger.info('ICE', 'Кандидат буферизован (всего: ${_incomingCallBuffers[senderKey]!.length})');
         }
-        // Отправляем в поток (для активного CallScreen)
         signalingStreamController.add(messageData);
       }
       else if (type == 'call-answer') {
+        DebugLogger.success('CALL', '📞 Получен answer от ${senderKey.substring(0, 8)}...');
         signalingStreamController.add(messageData);
       }
       else if (type == 'hang-up' || type == 'call-rejected') {
+        DebugLogger.warn('CALL', '📞 Получен $type от ${senderKey.substring(0, 8)}...');
         _incomingCallBuffers.remove(senderKey);
+        
+        // ВАЖНО: Сначала отправляем сигнал в CallScreen (до hideCallNotification)
+        // чтобы ошибка ProGuard не блокировала завершение звонка
         signalingStreamController.add(messageData);
+        DebugLogger.info('CALL', '✅ Сигнал $type отправлен в CallScreen');
+        
+        // Теперь безопасно скрываем уведомление
+        try {
+          await NotificationService.hideCallNotification();
+        } catch (e) {
+          DebugLogger.error('NOTIF', 'Ошибка hideCallNotification: $e');
+        }
+        
+        print("📞 MAIN: Получен $type от ${senderKey.substring(0, 8)}...");
       }
 
-      // --- ЧАТ ---
+      // === ЧАТ ===
       else if (type == 'chat') {
         final payload = messageData['payload'] as String?;
         if (payload != null) {
           try {
             final decryptedMessage = await cryptoService.decrypt(senderKey, payload);
+            DebugLogger.info('CHAT', '💬 Сообщение от ${senderKey.substring(0, 8)}...');
             final receivedMessage = ChatMessage(
-                text: decryptedMessage,
-                isSentByMe: false,
-                status: MessageStatus.delivered,
-                isRead: false
+              text: decryptedMessage,
+              isSentByMe: false,
+              status: MessageStatus.delivered,
+              isRead: false,
             );
             await DatabaseService.instance.addMessage(receivedMessage, senderKey);
             messageUpdateController.add(senderKey);
+
+            // Показываем уведомление только если:
+            // 1. Приложение в фоне (не активно)
+            // 2. Это не системное сообщение о звонке
+            final isCallStatusMessage = _isCallStatusMessage(decryptedMessage);
+            if (!isAppInForeground && !isCallStatusMessage) {
+              final contactName = await _getContactName(senderKey);
+              DebugLogger.info('CHAT', 'Показ уведомления (app in background)');
+              // Не показываем содержимое сообщения - только имя отправителя
+              await NotificationService.showMessageNotification(
+                senderName: contactName,
+              );
+            }
           } catch (e) {
             print("Decryption Error: $e");
+            DebugLogger.error('CHAT', 'Ошибка расшифровки: $e');
           }
         }
       }
-    } catch (e, stackTrace) {
-      print("❌ Message Handler Error: $e");
-      print("Stack trace: $stackTrace");
+    } catch (e) {
+      print("Message Handler Error: $e");
+      DebugLogger.error('MAIN', 'Message Handler Error: $e');
     }
   });
+}
+
+/// Получить имя контакта по публичному ключу
+Future<String> _getContactName(String publicKey) async {
+  try {
+    final contact = await DatabaseService.instance.getContact(publicKey);
+    if (contact != null && contact.name.isNotEmpty) {
+      return contact.name;
+    }
+  } catch (_) {}
+  return publicKey.substring(0, 8);
+}
+
+/// Проверка является ли сообщение системным сообщением о звонке
+bool _isCallStatusMessage(String message) {
+  const callStatusMessages = [
+    'Исходящий звонок',
+    'Входящий звонок',
+    'Пропущен звонок',
+  ];
+  return callStatusMessages.contains(message);
 }
 
 class MyApp extends StatefulWidget {
@@ -238,28 +225,43 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _isCheckCompleted = false;
   late bool _keysExist;
 
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _keysExist = _hasKeys;
+    print("🔑 Keys exist: $_keysExist | Public key: ${cryptoService.publicKeyBase64?.substring(0, 20) ?? 'NULL'}...");
 
+    // Слушаем статус лицензии
     websocketService.stream.listen((message) {
       try {
         final data = json.decode(message);
         if (data['type'] == 'license-status') {
+          print("📋 License status received: ${data['status']}");
           setState(() {
             _isLicensed = (data['status'] == 'active');
             _isCheckCompleted = true;
           });
         } else if (data['type'] == 'payment-confirmed') {
+          print("💳 Payment confirmed!");
           setState(() {
             _isLicensed = true;
             _isCheckCompleted = true;
           });
         }
       } catch (_) {}
+    });
+
+    // Таймаут на проверку лицензии (10 секунд)
+    // Если за это время не получили ответ — показываем экран лицензии
+    Future.delayed(const Duration(seconds: 10), () {
+      if (mounted && !_isCheckCompleted) {
+        print("⚠️ License check timeout - showing license screen");
+        setState(() {
+          _isCheckCompleted = true;
+          _isLicensed = false;
+        });
+      }
     });
   }
 
@@ -278,11 +280,20 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Логируем изменение состояния
+    DebugLogger.info('LIFECYCLE', 'State: $state');
+    
+    // Обновляем глобальный флаг состояния приложения
+    isAppInForeground = (state == AppLifecycleState.resumed);
+    
     if (state == AppLifecycleState.resumed) {
-      // Принудительный реконнект при разворачивании
+      DebugLogger.info('LIFECYCLE', 'Приложение в foreground, переподключение WS...');
+      // Переподключение WebSocket при возврате в приложение
       if (cryptoService.publicKeyBase64 != null) {
         websocketService.connect(cryptoService.publicKeyBase64!);
       }
+    } else if (state == AppLifecycleState.paused) {
+      DebugLogger.info('LIFECYCLE', 'Приложение в background');
     }
   }
 
@@ -297,9 +308,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       home: !_keysExist
           ? WelcomeScreen(onAuthComplete: _onAuthComplete)
           : !_isCheckCompleted
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : _isLicensed
-          ? const HomeScreen() // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
-          : LicenseScreen(onLicenseConfirmed: () => setState(() => _isLicensed = true)),
+              ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+              : _isLicensed
+                  ? const HomeScreen()
+                  : LicenseScreen(onLicenseConfirmed: () => setState(() => _isLicensed = true)),
     );
-  }}
+  }
+}

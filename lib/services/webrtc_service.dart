@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 const Map<String, dynamic> rtcConfiguration = {
@@ -37,6 +38,14 @@ class WebRTCService {
   void _log(String msg) {
     print(msg);
     _debugLogController.add(msg);
+    // Также логируем в глобальный debug logger
+    if (msg.contains('ERROR') || msg.contains('❌')) {
+      DebugLogger.error('RTC', msg);
+    } else if (msg.contains('✅') || msg.contains('TRACK') || msg.contains('Connected')) {
+      DebugLogger.success('RTC', msg);
+    } else {
+      DebugLogger.info('RTC', msg);
+    }
   }
 
   Future<void> initialize() async {

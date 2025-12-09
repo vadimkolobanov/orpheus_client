@@ -1,65 +1,35 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.orpheus_project"> <!-- УБЕДИСЬ, ЧТО PACKAGE СОВПАДАЕТ С ТВОИМ -->
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.example.orpheus_project">
 
-    <!-- ============================================== -->
-    <!--                ПРАВА ДОСТУПА                   -->
-    <!-- ============================================== -->
-
-    <!-- Сеть и Интернет -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- Аудио и Видео (Звонки) -->
+    <!-- Базовые permissions -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    
+    <!-- Звонки -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-
-    <!-- Bluetooth (Гарнитуры) -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-
-    <!-- Биометрия (Вход) -->
-    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
-
-    <!-- Энергосбережение (Чтобы не гас экран и проц не спал) -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <!-- Вибрация для уведомлений -->
+    
+    <!-- Уведомления -->
     <uses-permission android:name="android.permission.VIBRATE" />
-
-    <!-- Full-Screen Intent для входящих звонков (показ над экраном блокировки) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     
-    <!-- Игнорирование оптимизации батареи (критично для Xiaomi/Vivo) -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    
-    <!-- Автозапуск после перезагрузки -->
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    
-    <!-- Отключение DND для важных уведомлений (Android 13+) -->
-    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
-
-    <!-- !!! КРИТИЧНО ДЛЯ ФОНОВОЙ РАБОТЫ (ANDROID 14+) !!! -->
-    <!-- Без этих прав приложение упадет при сворачивании звонка -->
+    <!-- Foreground service для активных звонков -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
-    <!-- ============================================== -->
-    <!--                ПРИЛОЖЕНИЕ                      -->
-    <!-- ============================================== -->
     <application
         android:label="Orpheus"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/ic_launcher">
 
-        <!-- Отключение Impeller (по твоему запросу, для стабильности на старых GPU) -->
         <meta-data
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
 
-        <!-- ОСНОВНАЯ АКТИВНОСТЬ -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -68,7 +38,9 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true">
 
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
@@ -80,7 +52,13 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <!-- Deep Links (для orpheus://activate/...) -->
+            <!-- Клики по пушам -->
+            <intent-filter>
+                <action android:name="FLUTTER_NOTIFICATION_CLICK" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <!-- Deep Links -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -89,41 +67,20 @@
             </intent-filter>
         </activity>
 
-        <!-- МЕТА-ДАННЫЕ FLUTTER -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- !!! СЛУЖБА ДЛЯ ФОНОВОЙ РАБОТЫ (FOREGROUND SERVICE) !!! -->
-        <!-- Это то, что держит звонок живым. Обязательно foregroundServiceType -->
-        <!-- 
-            flutter_background_service использует один сервис для всех конфигураций.
-            Тип сервиса определяется в коде через AndroidConfiguration.
-            Для NotificationForegroundService используется dataSync,
-            для BackgroundCallService - microphone|connectedDevice.
-        -->
+        <!-- Foreground service для активных звонков -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="microphone|connectedDevice|dataSync"
+            android:foregroundServiceType="microphone"
             android:exported="true"
+            tools:replace="android:exported,android:foregroundServiceType"
             />
-
-        <!-- Ресивер для автозапуска после перезагрузки -->
-        <receiver
-            android:name=".BootReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <!-- Для Xiaomi -->
-                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
-            </intent-filter>
-        </receiver>
 
     </application>
 
-    <!-- Разрешаем открывать ссылки и обрабатывать текст -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>

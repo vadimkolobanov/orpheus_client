@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:orpheus_project/config.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
-import 'package:orpheus_project/services/pending_actions_service.dart';
 import 'package:rxdart/rxdart.dart';
 
 enum ConnectionStatus { Disconnected, Connecting, Connected }
@@ -18,8 +19,6 @@ class WebSocketService {
 
   final _statusController = BehaviorSubject<ConnectionStatus>.seeded(ConnectionStatus.Disconnected);
   Stream<ConnectionStatus> get status => _statusController.stream;
-  
-  /// Получить текущее значение статуса соединения
   ConnectionStatus get currentStatus => _statusController.value;
 
   String? _currentPublicKey;
@@ -45,6 +44,7 @@ class WebSocketService {
     final uri = Uri.parse(AppConfig.webSocketUrl(_currentPublicKey!));
     _statusController.add(ConnectionStatus.Connecting);
     print("WS: Попытка подключения к $uri...");
+    DebugLogger.info('WS', 'Попытка подключения к $uri');
 
     try {
       WebSocket.connect(uri.toString()).then((ws) {
@@ -53,102 +53,77 @@ class WebSocketService {
         _channel = IOWebSocketChannel(ws);
         _statusController.add(ConnectionStatus.Connected);
         print("WS: Соединение установлено!");
+        DebugLogger.success('WS', 'Соединение установлено!');
 
         _sendFcmToken();
-        _sendPendingRejections();
         _startPingPong();
 
         _channel!.stream.listen(
               (message) {
             _socketResponseController.add(message);
+            // Логируем входящие сообщения (кроме pong)
+            try {
+              final data = json.decode(message);
+              final type = data['type'] ?? 'unknown';
+              if (type != 'pong') {
+                DebugLogger.info('WS', '📨 IN: $type');
+              }
+            } catch (_) {}
           },
           onDone: () {
             print("WS: Соединение закрыто (onDone).");
+            DebugLogger.warn('WS', 'Соединение закрыто (onDone)');
             _handleDisconnect();
           },
           onError: (error) {
             print("WS ERROR: Ошибка сокета: $error");
+            DebugLogger.error('WS', 'Ошибка сокета: $error');
             _handleDisconnect();
           },
         );
       }).catchError((e) {
         print("WS FATAL: Не удалось подключиться: $e");
+        DebugLogger.error('WS', 'FATAL: Не удалось подключиться: $e');
         _handleDisconnect();
       });
     } catch (e) {
       print("WS EXCEPTION: $e");
+      DebugLogger.error('WS', 'EXCEPTION: $e');
       _handleDisconnect();
     }
   }
 
   void _sendFcmToken() {
-    sendFcmToken();
-  }
-
-  /// Публичный метод для отправки FCM токена (можно вызвать извне при обновлении токена)
-  void sendFcmToken() {
     final token = NotificationService().fcmToken;
-    if (token != null && _channel != null && _statusController.value == ConnectionStatus.Connected) {
+    if (token != null) {
       print("WS: Отправка FCM токена на сервер...");
+      DebugLogger.info('WS', 'Отправка FCM токена: ${token.substring(0, 20)}...');
       final msg = json.encode({
         "type": "register-fcm",
         "token": token
       });
-      _channel!.sink.add(msg);
+      _channel?.sink.add(msg);
     } else {
-      if (token == null) {
-        print("WS WARN: FCM токен не готов, пропускаем отправку.");
-      } else if (_statusController.value != ConnectionStatus.Connected) {
-        print("WS WARN: WebSocket не подключен, токен будет отправлен при следующем подключении.");
-      }
-    }
-  }
-
-  /// Отправка всех pending rejections при подключении
-  Future<void> _sendPendingRejections() async {
-    if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
-      return;
-    }
-
-    try {
-      final pendingRejections = await PendingActionsService.getPendingRejections();
-      if (pendingRejections.isEmpty) {
-        return;
-      }
-
-      print("WS: Отправка ${pendingRejections.length} pending rejections...");
-      
-      for (final callerKey in pendingRejections) {
-        try {
-          sendSignalingMessage(callerKey, 'call-rejected', {});
-          await PendingActionsService.removePendingRejection(callerKey);
-          print("WS: Pending rejection отправлен для: $callerKey");
-          
-          // Небольшая задержка между отправками
-          await Future.delayed(const Duration(milliseconds: 100));
-        } catch (e) {
-          print("WS ERROR: Не удалось отправить pending rejection для $callerKey: $e");
-        }
-      }
-      
-      print("WS: Все pending rejections обработаны");
-    } catch (e) {
-      print("WS ERROR: Ошибка при отправке pending rejections: $e");
+      print("WS WARN: FCM токен не готов, пропускаем отправку.");
+      DebugLogger.warn('WS', 'FCM токен не готов, пропускаем отправку');
     }
   }
 
   void _handleDisconnect() {
     if (_statusController.value != ConnectionStatus.Disconnected) {
       _statusController.add(ConnectionStatus.Disconnected);
+      DebugLogger.warn('WS', 'Статус изменён на Disconnected');
     }
 
     _stopPingPong();
 
     if (!_isDisconnectingIntentional) {
       print("WS: Планирование переподключения через 3 сек...");
+      DebugLogger.info('WS', 'Планирование переподключения через 3 сек...');
       _reconnectTimer?.cancel();
       _reconnectTimer = Timer(const Duration(seconds: 3), () {
         print("WS: Попытка реконнекта...");
+        DebugLogger.info('WS', 'Попытка реконнекта...');
         _initConnection();
       });
     }
@@ -188,15 +163,68 @@ class WebSocketService {
     _sendMessage({"recipient_pubkey": recipientPublicKey, "type": "chat", "payload": payload});
   }
 
-  // --- ДИАГНОСТИКА: ЛОГИРОВАНИЕ ОТПРАВКИ СИГНАЛОВ ---
+  // --- ОТПРАВКА СИГНАЛОВ С HTTP FALLBACK ---
   void sendSignalingMessage(String recipientPublicKey, String type, Map<String, dynamic> data) {
     final msg = {
       "recipient_pubkey": recipientPublicKey,
       "type": type,
       "data": data
     };
-    print("📤 WS SEND $type → ${recipientPublicKey.substring(0, 8)}... Size: ${data.toString().length}");
+    
+    // Важные сигналы (hang-up, call-rejected) - используем HTTP fallback если WS недоступен
+    final isImportant = type == 'hang-up' || type == 'call-rejected';
+    final statusStr = currentStatus.toString().split('.').last;
+    
+    if (isImportant) {
+      print("📤📞 WS SEND [$type] → ${recipientPublicKey.substring(0, 8)}... | Status: $statusStr | Channel: ${_channel != null ? 'OK' : 'NULL'}");
+      DebugLogger.info('SIGNAL', '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}... | Status: $statusStr | Ch: ${_channel != null ? 'OK' : 'NULL'}');
+      
+      // Если WebSocket недоступен - сразу HTTP
+      if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
+        print("⚠️ WS недоступен для [$type] - используем HTTP fallback");
+        DebugLogger.warn('SIGNAL', 'WS недоступен для [$type] - используем HTTP fallback');
+        _sendSignalViaHttp(recipientPublicKey, type);
+        return;
+      }
+    } else {
+      print("📤 WS SEND $type → ${recipientPublicKey.substring(0, 8)}... Size: ${data.toString().length}");
+      DebugLogger.info('SIGNAL', '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}...');
+    }
+    
     _sendMessage(msg);
+    
+    // Для важных сигналов ВСЕГДА отправляем также через HTTP как гарантию доставки
+    if (isImportant) {
+      _sendSignalViaHttp(recipientPublicKey, type);
+    }
+  }
+
+  /// HTTP fallback для гарантированной доставки hang-up/call-rejected
+  Future<void> _sendSignalViaHttp(String recipientPublicKey, String signalType) async {
+    DebugLogger.info('HTTP', 'Отправка $signalType через HTTP fallback...');
+    try {
+      final url = AppConfig.httpUrl('/api/signal');
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'sender_pubkey': _currentPublicKey,
+          'recipient_pubkey': recipientPublicKey,
+          'signal_type': signalType,
+        }),
+      ).timeout(const Duration(seconds: 5));
+      
+      if (response.statusCode == 200) {
+        print("✅ HTTP: [$signalType] успешно отправлен");
+        DebugLogger.success('HTTP', '[$signalType] успешно отправлен (${response.statusCode})');
+      } else {
+        print("⚠️ HTTP: [$signalType] ошибка ${response.statusCode}");
+        DebugLogger.error('HTTP', '[$signalType] ошибка ${response.statusCode}');
+      }
+    } catch (e) {
+      print("❌ HTTP: [$signalType] исключение: $e");
+      DebugLogger.error('HTTP', '[$signalType] исключение: $e');
+    }
   }
 
   void sendRawMessage(String jsonString) {
@@ -204,11 +232,22 @@ class WebSocketService {
   }
 
   void _sendMessage(Map<String, dynamic> map) {
+    final type = map['type'] as String?;
+    final isImportant = type == 'hang-up' || type == 'call-rejected';
+    
     if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
-      print("❌ WS ERROR: Нет соединения для отправки сообщения type=${map['type']}");
+      if (isImportant) {
+        print("⚠️ WS ERROR: Не удалось отправить [$type] - нет соединения! Status: ${_statusController.value}");
+      } else {
+        print("WS ERROR: Нет соединения для отправки сообщения.");
+      }
       return;
     }
-    print("✅ WS SENDING: type=${map['type']}");
+    
     _channel!.sink.add(json.encode(map));
+    
+    if (isImportant) {
+      print("✅ WS: [$type] успешно отправлен в канал");
+    }
   }
 }

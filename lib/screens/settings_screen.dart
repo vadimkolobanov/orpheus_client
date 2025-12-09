@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:orpheus_project/main.dart'; // cryptoService
+import 'package:orpheus_project/screens/debug_logs_screen.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/updates_screen.dart';
@@ -16,6 +18,31 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  // Счётчик тапов для скрытого меню отладки
+  int _secretTapCount = 0;
+  DateTime? _lastTapTime;
+
+  /// Обработчик секретного тапа для открытия логов
+  void _handleSecretTap() {
+    final now = DateTime.now();
+    
+    // Сбрасываем счётчик если прошло больше 2 секунд
+    if (_lastTapTime != null && now.difference(_lastTapTime!).inSeconds > 2) {
+      _secretTapCount = 0;
+    }
+    
+    _lastTapTime = now;
+    _secretTapCount++;
+    
+    if (_secretTapCount >= 5) {
+      _secretTapCount = 0;
+      DebugLogger.info('UI', 'Debug logs screen opened via secret tap');
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const DebugLogsScreen()),
+      );
+    }
+  }
   // Экспорт приватного ключа с биометрией
   Future<void> _exportAccount() async {
     final LocalAuthentication auth = LocalAuthentication();
@@ -114,7 +141,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("ПРОФИЛЬ"),
+        title: GestureDetector(
+          onTap: _handleSecretTap,
+          child: const Text("ПРОФИЛЬ"),
+        ),
         centerTitle: false,
         automaticallyImplyLeading: false,
       ),
