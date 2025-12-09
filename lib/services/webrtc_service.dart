@@ -82,17 +82,23 @@ class WebRTCService {
     required Function(Map<String, dynamic> candidate) onCandidateCreated,
   }) async {
     _log("--- [WebRTC] INITIATING CALL (OFFER) ---");
-    if (_localStream == null) await initialize();
+    try {
+      if (_localStream == null) await initialize();
 
-    _peerConnection = await _createPeerConnection(onCandidateCreated);
+      _peerConnection = await _createPeerConnection(onCandidateCreated);
 
-    RTCSessionDescription offer = await _peerConnection!.createOffer({
-      'offerToReceiveAudio': true,
-      'offerToReceiveVideo': false,
-    });
+      RTCSessionDescription offer = await _peerConnection!.createOffer({
+        'offerToReceiveAudio': true,
+        'offerToReceiveVideo': false,
+      });
 
-    await _peerConnection!.setLocalDescription(offer);
-    onOfferCreated({'sdp': offer.sdp, 'type': offer.type});
+      await _peerConnection!.setLocalDescription(offer);
+      _log("--- [WebRTC] Offer created successfully ---");
+      onOfferCreated({'sdp': offer.sdp, 'type': offer.type});
+    } catch (e) {
+      _log("--- [WebRTC] ERROR in initiateCall: $e ---");
+      rethrow;
+    }
   }
 
   Future<void> answerCall({
@@ -101,10 +107,16 @@ class WebRTCService {
     required Function(Map<String, dynamic> candidate) onCandidateCreated,
   }) async {
     _log("--- [WebRTC] ANSWERING CALL ---");
-    if (_localStream == null) await initialize();
+    try {
+      if (_localStream == null) await initialize();
 
-    _peerConnection = await _createPeerConnection(onCandidateCreated);
-    await handleOffer(offer, onAnswerCreated: onAnswerCreated);
+      _peerConnection = await _createPeerConnection(onCandidateCreated);
+      await handleOffer(offer, onAnswerCreated: onAnswerCreated);
+      _log("--- [WebRTC] Answer sent successfully ---");
+    } catch (e) {
+      _log("--- [WebRTC] ERROR in answerCall: $e ---");
+      rethrow;
+    }
   }
 
   void _registerPeerConnectionListeners(RTCPeerConnection pc, Function(Map<String, dynamic> candidate) onCandidateCreated) {

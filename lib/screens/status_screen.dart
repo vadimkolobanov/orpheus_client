@@ -18,7 +18,8 @@ class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMix
   late AnimationController _scannerController;
 
   // График заполнен "шумом" 80%, чтобы не было пустоты при старте
-  final List<double> _signalHistory = List.filled(40, 0.85);
+  // Используем обычный список вместо List.filled, чтобы можно было удалять элементы
+  final List<double> _signalHistory = List.generate(40, (_) => 0.85);
 
   final Random _rnd = Random();
   Timer? _updateTimer;

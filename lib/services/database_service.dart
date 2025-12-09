@@ -122,6 +122,32 @@ class DatabaseService {
     });
   }
 
+  /// Получить контакт по publicKey
+  Future<Contact?> getContact(String publicKey) async {
+    try {
+      final db = await instance.database;
+      final maps = await db.query(
+        'contacts',
+        where: 'publicKey = ?',
+        whereArgs: [publicKey],
+        limit: 1,
+      );
+      
+      if (maps.isEmpty) {
+        return null;
+      }
+      
+      return Contact(
+        id: maps[0]['id'] as int,
+        name: maps[0]['name'] as String,
+        publicKey: maps[0]['publicKey'] as String,
+      );
+    } catch (e) {
+      print("DB ERROR: Failed to get contact by publicKey: $e");
+      return null;
+    }
+  }
+
   Future<void> deleteContact(int id, String publicKey) async {
     final db = await instance.database;
     await db.transaction((txn) async {

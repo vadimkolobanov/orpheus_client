@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:orpheus_project/main.dart'; // cryptoService
+import 'package:orpheus_project/services/device_settings_service.dart';
+import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/updates_screen.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
@@ -205,6 +207,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 40),
 
             // МЕНЮ НАСТРОЕК
+            _buildSettingsItem(
+              icon: Icons.notifications_active_outlined,
+              title: "Настройка уведомлений",
+              subtitle: "Помощь для Android (Vivo, Xiaomi и др.)",
+              onTap: () => DeviceSettingsService.showSetupDialog(context),
+            ),
+            
+            _buildSettingsItem(
+              icon: Icons.bug_report_outlined,
+              title: "Тест уведомлений",
+              subtitle: "Проверить работу FCM",
+              onTap: () async {
+                final service = NotificationService();
+                final token = service.fcmToken;
+                
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    backgroundColor: const Color(0xFF1E1E1E),
+                    title: const Text("Диагностика FCM", style: TextStyle(color: Colors.white)),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("FCM Token: ${token ?? 'НЕ ПОЛУЧЕН'}", 
+                          style: const TextStyle(color: Colors.white70, fontSize: 12, fontFamily: 'monospace')),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: () async {
+                            // Тестовое локальное уведомление
+                            await NotificationService.showTestNotification();
+                            if (context.mounted) Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Тестовое уведомление отправлено")),
+                            );
+                          },
+                          child: const Text("Отправить тестовое уведомление"),
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Закрыть"),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            
             _buildSettingsItem(
               icon: Icons.history,
               title: "История обновлений",

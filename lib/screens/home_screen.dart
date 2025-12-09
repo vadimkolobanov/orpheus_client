@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:orpheus_project/contacts_screen.dart';
 import 'package:orpheus_project/screens/settings_screen.dart';
 import 'package:orpheus_project/screens/status_screen.dart';
+import 'package:orpheus_project/services/device_settings_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,6 +13,30 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 1; // По умолчанию открываем Контакты (индекс 1)
+  
+  @override
+  void initState() {
+    super.initState();
+    // Проверяем настройки устройства при первом запуске
+    _checkDeviceSettings();
+  }
+  
+  /// Проверка настроек устройства и показ диалога при необходимости
+  Future<void> _checkDeviceSettings() async {
+    // Небольшая задержка, чтобы экран успел отрисоваться
+    await Future.delayed(const Duration(seconds: 2));
+    
+    if (!mounted) return;
+    
+    // Проверяем, не скрыл ли пользователь этот диалог
+    final isDismissed = await DeviceSettingsService.isSetupDialogDismissed();
+    if (isDismissed) return;
+    
+    final needsSetup = await DeviceSettingsService.needsManualSetup();
+    if (needsSetup && mounted) {
+      DeviceSettingsService.showSetupDialog(context);
+    }
+  }
 
   // Список экранов для табов
   final List<Widget> _screens = [
