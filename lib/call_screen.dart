@@ -126,6 +126,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   Future<void> _initCallSequence() async {
     await _renderer.initialize();
 
+    // Явно выключаем громкую связь при старте звонка
+    // чтобы синхронизировать состояние UI (_isSpeakerOn = false) с реальным устройством
+    Helper.setSpeakerphoneOn(false);
+
     // Подписка на логи WebRTC
     _webrtcLogSubscription = _webrtcService.onDebugLog.listen((log) {
       _addLog(log);

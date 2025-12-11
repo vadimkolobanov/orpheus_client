@@ -218,4 +218,42 @@ class DatabaseService {
       _database = null;
     }
   }
+
+  // --- Статистика для профиля ---
+
+  /// Получить общее количество контактов
+  Future<int> getTotalContactsCount() async {
+    final db = await instance.database;
+    final result = await db.rawQuery('SELECT COUNT(*) FROM contacts');
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Получить общее количество сообщений
+  Future<int> getTotalMessagesCount() async {
+    final db = await instance.database;
+    final result = await db.rawQuery('SELECT COUNT(*) FROM messages');
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Получить количество отправленных сообщений
+  Future<int> getSentMessagesCount() async {
+    final db = await instance.database;
+    final result = await db.rawQuery('SELECT COUNT(*) FROM messages WHERE isSentByMe = 1');
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Получить полную статистику профиля
+  Future<Map<String, int>> getProfileStats() async {
+    final db = await instance.database;
+    
+    final contactsResult = await db.rawQuery('SELECT COUNT(*) FROM contacts');
+    final messagesResult = await db.rawQuery('SELECT COUNT(*) FROM messages');
+    final sentResult = await db.rawQuery('SELECT COUNT(*) FROM messages WHERE isSentByMe = 1');
+    
+    return {
+      'contacts': Sqflite.firstIntValue(contactsResult) ?? 0,
+      'messages': Sqflite.firstIntValue(messagesResult) ?? 0,
+      'sent': Sqflite.firstIntValue(sentResult) ?? 0,
+    };
+  }
 }

@@ -10,6 +10,7 @@ class CryptoService {
 
   static const _privateKeyStoreKey = 'orpheus_private_key_data';
   static const _publicKeyStoreKey = 'orpheus_public_key_data';
+  static const _registrationDateKey = 'orpheus_registration_date';
 
   // Алгоритмы (используются в основном потоке для генерации ключей)
   final keyExchangeAlgorithm = X25519();
@@ -17,14 +18,17 @@ class CryptoService {
   // Храним ключи в памяти
   SimpleKeyPair? _keyPair;
   SimplePublicKey? _publicKey;
+  DateTime? _registrationDate;
 
   String? get publicKeyBase64 => _publicKey != null ? base64.encode(_publicKey!.bytes) : null;
+  DateTime? get registrationDate => _registrationDate;
 
   // --- ИНИЦИАЛИЗАЦИЯ И УПРАВЛЕНИЕ КЛЮЧАМИ ---
 
   Future<bool> init() async {
     final privateKeyB64 = await _secureStorage.read(key: _privateKeyStoreKey);
     final publicKeyB64 = await _secureStorage.read(key: _publicKeyStoreKey);
+    final registrationDateStr = await _secureStorage.read(key: _registrationDateKey);
 
     if (privateKeyB64 != null && publicKeyB64 != null) {
       final privateKeyBytes = base64.decode(privateKeyB64);
@@ -36,6 +40,12 @@ class CryptoService {
         publicKey: _publicKey!,
         type: KeyPairType.x25519,
       );
+      
+      // Загружаем дату регистрации
+      if (registrationDateStr != null) {
+        _registrationDate = DateTime.tryParse(registrationDateStr);
+      }
+      
       print("Ключи загружены.");
       return true;
     }
@@ -46,6 +56,13 @@ class CryptoService {
     _keyPair = await keyExchangeAlgorithm.newKeyPair();
     final privateKeyData = await _keyPair!.extract();
     _publicKey = await _keyPair!.extractPublicKey();
+
+    // Сохраняем дату создания аккаунта
+    _registrationDate = DateTime.now();
+    await _secureStorage.write(
+      key: _registrationDateKey, 
+      value: _registrationDate!.toIso8601String(),
+    );
 
     await _saveKeys(privateKeyData.bytes, _publicKey!.bytes);
     print("Новые ключи сгенерированы.");
@@ -75,6 +92,19 @@ class CryptoService {
   Future<void> _saveKeys(List<int> privateBytes, List<int> publicBytes) async {
     await _secureStorage.write(key: _privateKeyStoreKey, value: base64.encode(privateBytes));
     await _secureStorage.write(key: _publicKeyStoreKey, value: base64.encode(publicBytes));
+  }
+
+  /// Полное удаление аккаунта - удаляет все ключи и данные
+  Future<void> deleteAccount() async {
+    await _secureStorage.delete(key: _privateKeyStoreKey);
+    await _secureStorage.delete(key: _publicKeyStoreKey);
+    await _secureStorage.delete(key: _registrationDateKey);
+    
+    _keyPair = null;
+    _publicKey = null;
+    _registrationDate = null;
+    
+    print("Аккаунт удалён.");
   }
 
   // --- ШИФРОВАНИЕ (В ИЗОЛЯТАХ) ---
