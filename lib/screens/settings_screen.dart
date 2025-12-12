@@ -11,6 +11,7 @@ import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
 import 'package:orpheus_project/updates_screen.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -38,6 +39,9 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
   
   // Статистика
   Map<String, int> _stats = {'contacts': 0, 'messages': 0, 'sent': 0};
+
+  // App info (реальная версия/билд из платформы)
+  String? _appVersionLabel;
 
   @override
   void initState() {
@@ -74,6 +78,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
     );
     
     _loadStats();
+    _loadAppInfo();
   }
   
   Future<void> _loadStats() async {
@@ -83,6 +88,20 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
         _stats = stats;
       });
       _statsCounterController.forward();
+    }
+  }
+
+  Future<void> _loadAppInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        // Пример: 1.0.0+5
+        _appVersionLabel = '${info.version}+${info.buildNumber}';
+      });
+    } catch (e) {
+      // Не критично — просто остаёмся на fallback версии из AppConfig
+      DebugLogger.warn('APPINFO', 'Не удалось получить версию приложения: $e');
     }
   }
 
@@ -308,7 +327,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "Orpheus ${AppConfig.appVersion}",
+                        "Orpheus ${_appVersionLabel ?? AppConfig.appVersion}",
                         style: TextStyle(
                           color: Colors.grey.shade400,
                           fontSize: 13,

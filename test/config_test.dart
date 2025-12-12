@@ -5,7 +5,8 @@ void main() {
   group('AppConfig Tests', () {
     test('Версия приложения определена', () {
       expect(AppConfig.appVersion, isNotEmpty);
-      expect(AppConfig.appVersion, contains('0.9'));
+      // Должна быть похожа на SemVer, допускаем префикс 'v' (например: v1.0.0)
+      expect(AppConfig.appVersion, matches(RegExp(r'^v?\d+\.\d+\.\d+.*$')));
     });
 
     test('Генерация WebSocket URL', () {

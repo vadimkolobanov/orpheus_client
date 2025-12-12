@@ -29,4 +29,15 @@
   - `flutter pub get`
   - `flutter test` / `.\test_runner.ps1`
 
+## 2025-12-12
+- Time: 15:44 local
+- Task: Профиль — показывать реальную версию приложения
+- Changes:
+  - В экране профиля версия теперь берётся из `package_info_plus` (реальные `version+buildNumber`) с fallback на `AppConfig.appVersion`.
+  - Обновлён тест версии `AppConfig` (SemVer/`v`-префикс).
+- Files:
+  - `lib/screens/settings_screen.dart`
+  - `CHANGELOG.md`
+  - `test/config_test.dart`
+
 

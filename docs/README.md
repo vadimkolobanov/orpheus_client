@@ -43,4 +43,8 @@ flutter run
 
 Чтобы это не забывалось, включите git hooks (см. `scripts/install-hooks.ps1`).
 
+## Версия приложения
+
+В профиле/настройках версия отображается как `version+buildNumber` (из платформы через `package_info_plus`).
+
 
