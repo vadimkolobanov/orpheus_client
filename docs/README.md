@@ -47,4 +47,16 @@ flutter run
 
 В профиле/настройках версия отображается как `version+buildNumber` (из платформы через `package_info_plus`).
 
+## Android splash / иконки (важно для одинакового результата на разных ПК)
+
+- Android < 12: используется `android/app/src/main/res/drawable*/launch_background.xml`, который показывает `@drawable/splash`.
+- Android 12+ (API 31+): используется `android/app/src/main/res/values*-v31/styles.xml` и иконка `@drawable/android12splash`.
+
+Чтобы на другом компьютере было так же, **эти файлы должны быть в git**. Если после обновления всё равно видите старый splash:
+
+```powershell
+flutter clean
+flutter pub get
+```
+
 
