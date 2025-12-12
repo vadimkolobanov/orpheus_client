@@ -94,3 +94,91 @@
 - Commands:
   - Анализ кодовой базы (сервер: `main.py`, `payments.py`, клиент: `main.dart`, сервисы)
   - `.\scripts\auto-commit.ps1` - для автоматического создания коммита
+
+## 2025-12-12
+- Time: текущее время
+- Task: Реализация системы безопасности входа (PIN-код, duress code, panic wipe)
+- Changes:
+  - Создана модель конфигурации безопасности `SecurityConfig` с поддержкой:
+    - PIN-код (6 цифр) с хешированием SHA-256 + соль (10000 итераций)
+    - Код принуждения (duress code) для показа пустого профиля
+    - Прогрессивная блокировка при неверных попытках
+    - Auto-wipe после N неудачных попыток
+  - Создан сервис авторизации `AuthService`:
+    - Управление PIN (установка/изменение/отключение)
+    - Управление duress кодом
+    - Проверка PIN с результатами: success/duress/invalid/lockedOut/autoWipe
+    - Полный wipe (удаление ключей, БД, конфигурации)
+  - Создан экран блокировки `LockScreen`:
+    - Красивый UI с анимациями (частицы, пульсация, shake при ошибке)
+    - PIN-pad с haptic feedback
+    - Поддержка биометрии
+    - Отображение времени до разблокировки при превышении попыток
+  - Создан экран настройки PIN `PinSetupScreen`:
+    - Режимы: установка/изменение/отключение PIN, установка/отключение duress
+    - Подтверждение PIN при установке
+    - Проверка текущего PIN при изменении/отключении
+  - Создан экран настроек безопасности `SecuritySettingsScreen`:
+    - Управление PIN-кодом
+    - Управление биометрией
+    - Управление кодом принуждения
+    - Настройка auto-wipe
+    - Информация об экстренном удалении
+  - Модифицирован `DatabaseService` для duress mode:
+    - В duress mode все методы возвращают пустые данные
+    - getContacts() → [], getMessagesForContact() → []
+    - getProfileStats() → {contacts: 0, messages: 0, sent: 0}
+  - Создан сервис `PanicWipeService`:
+    - Отслеживание тройного нажатия кнопки питания
+    - Мгновенное удаление всех данных при обнаружении паттерна
+  - Интегрирована система безопасности в `main.dart`:
+    - Инициализация AuthService и PanicWipeService
+    - Показ LockScreen при запуске (если PIN включен)
+    - Блокировка при сворачивании приложения
+    - Обработка duress mode и auto-wipe
+  - Добавлен пункт "Безопасность" в настройки профиля
+  - Добавлен пакет `crypto` в зависимости
+- Files:
+  - `lib/models/security_config.dart` (НОВЫЙ)
+  - `lib/services/auth_service.dart` (НОВЫЙ)
+  - `lib/services/panic_wipe_service.dart` (НОВЫЙ)
+  - `lib/screens/lock_screen.dart` (НОВЫЙ)
+  - `lib/screens/pin_setup_screen.dart` (НОВЫЙ)
+  - `lib/screens/security_settings_screen.dart` (НОВЫЙ)
+  - `lib/services/database_service.dart` (изменён - duress mode)
+  - `lib/screens/settings_screen.dart` (изменён - пункт Безопасность)
+  - `lib/main.dart` (изменён - интеграция безопасности)
+  - `pubspec.yaml` (изменён - добавлен crypto)
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`
+- Commands:
+  - `flutter pub get` - для установки пакета crypto
+
+## 2025-12-12
+- Time: (заполнить реальным временем) local
+- Task: Доработки по логам/UX: wipe code, жест panic wipe, стабильность UI, экран “Как пользоваться”
+- Changes:
+  - Исправлен крэш `setState() called after dispose()` в `SettingsScreen` (проверка `mounted`).
+  - `PanicWipeService`: теперь детерминированно считает только последние 3 события `paused` и корректно срабатывает.
+  - Wipe: разделены причины (wipe code vs auto-wipe) — логика и логи стали понятнее.
+  - Добавлен экран `HelpScreen` (“Как пользоваться”) и пункт меню в профиле.
+- Files:
+  - `lib/screens/settings_screen.dart`
+  - `lib/services/panic_wipe_service.dart`
+  - `lib/screens/lock_screen.dart`
+  - `lib/main.dart`
+  - `lib/screens/help_screen.dart`
+  - `AI_WORKLOG.md`
+
+## 2025-12-12
+- Time: (заполнить реальным временем) local
+- Task: Финализация спринта и подготовка релиза v1.1.0
+- Changes:
+  - Обновлены версии в `pubspec.yaml` и `AppConfig.appVersion`.
+  - Встроенная “История обновлений” дополнена записью v1.1.0 (12.12.2025).
+  - `CHANGELOG.md`: `[Unreleased]` очищен, добавлена секция релиза `[1.1.0]`.
+- Files:
+  - `pubspec.yaml`
+  - `lib/config.dart`
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`

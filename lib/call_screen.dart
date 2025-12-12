@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/background_call_service.dart';
+import 'package:orpheus_project/services/call_state_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
@@ -71,6 +72,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+
+    // Гарантия: пока открыт CallScreen, автолок приложения не должен мешать ответу/разговору.
+    CallStateService.instance.setCallActive(true);
 
     _displayName = widget.contactPublicKey.substring(0, 8);
     _resolveContactName();
@@ -408,6 +412,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    CallStateService.instance.setCallActive(false);
+
     // 1. Останавливаем foreground service
     BackgroundCallService.stopCallService();
 

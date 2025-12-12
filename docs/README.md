@@ -34,6 +34,8 @@ curl http://localhost:8000/docs
 - Перед коммитом: `git status` убедиться, что changelog/worklog в коммите
 
 ## Hooks
+## Отчёты
+- `docs/REPORT_SINCE_2025-12-06.md` — сводка изменений с версии 0.9.0 (с 06.12.2025).
 Включить локально (требует git):
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install-hooks.ps1

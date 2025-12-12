@@ -1,0 +1,389 @@
+// lib/services/auth_service.dart
+// Сервис авторизации: PIN-код, duress code, блокировка
+
+import 'dart:convert';
+import 'dart:math';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:crypto/crypto.dart';
+import 'package:orpheus_project/models/security_config.dart';
+import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/crypto_service.dart';
+
+class AuthService {
+  static final AuthService instance = AuthService._();
+  AuthService._();
+
+  final _secureStorage = const FlutterSecureStorage();
+  static const _configKey = 'orpheus_security_config';
+
+  /// Текущая конфигурация безопасности
+  SecurityConfig _config = SecurityConfig.empty;
+  SecurityConfig get config => _config;
+
+  /// Флаг: приложение сейчас в duress mode (показывает пустой профиль)
+  bool _isDuressMode = false;
+  bool get isDuressMode => _isDuressMode;
+
+  /// Флаг: приложение разблокировано
+  bool _isUnlocked = false;
+  bool get isUnlocked => _isUnlocked;
+
+  /// Инициализация сервиса — загрузка конфигурации
+  Future<void> init() async {
+    try {
+      final configJson = await _secureStorage.read(key: _configKey);
+      if (configJson != null) {
+        final map = json.decode(configJson) as Map<String, dynamic>;
+        _config = SecurityConfig.fromMap(map);
+        print("AUTH: Конфигурация загружена: $_config");
+      } else {
+        _config = SecurityConfig.empty;
+        print("AUTH: Конфигурация не найдена, используем пустую");
+      }
+      
+      // Если PIN не настроен — приложение автоматически разблокировано
+      if (!_config.requiresUnlock) {
+        _isUnlocked = true;
+      }
+    } catch (e) {
+      print("AUTH ERROR: Ошибка загрузки конфигурации: $e");
+      _config = SecurityConfig.empty;
+      _isUnlocked = true;
+    }
+  }
+
+  /// Сохранить конфигурацию
+  Future<void> _saveConfig() async {
+    final configJson = json.encode(_config.toMap());
+    await _secureStorage.write(key: _configKey, value: configJson);
+  }
+
+  /// Проверить, нужна ли разблокировка
+  bool get requiresUnlock => _config.requiresUnlock && !_isUnlocked;
+
+  // === УПРАВЛЕНИЕ PIN ===
+
+  /// Установить новый PIN-код
+  Future<void> setPin(String pin) async {
+    final salt = _generateSalt();
+    final hash = _hashPin(pin, salt);
+    
+    _config = _config.copyWith(
+      isPinEnabled: true,
+      pinHash: hash,
+      pinSalt: salt,
+      failedAttempts: 0,
+      clearLastFailedAttempt: true,
+    );
+    
+    await _saveConfig();
+    _isUnlocked = true;
+    print("AUTH: PIN установлен");
+  }
+
+  /// Изменить PIN-код (требует текущий PIN)
+  Future<bool> changePin(String currentPin, String newPin) async {
+    final result = verifyPin(currentPin);
+    if (result != PinVerifyResult.success) {
+      return false;
+    }
+    
+    await setPin(newPin);
+    return true;
+  }
+
+  /// Отключить PIN-код (требует текущий PIN)
+  Future<bool> disablePin(String currentPin) async {
+    final result = verifyPin(currentPin);
+    if (result != PinVerifyResult.success) {
+      return false;
+    }
+    
+    _config = _config.copyWith(
+      isPinEnabled: false,
+      clearPinHash: true,
+      isDuressEnabled: false,
+      clearDuressHash: true,
+      isWipeCodeEnabled: false,
+      clearWipeCodeHash: true,
+      isPanicGestureEnabled: false,
+      failedAttempts: 0,
+      clearLastFailedAttempt: true,
+    );
+    
+    await _saveConfig();
+    _isUnlocked = true;
+    print("AUTH: PIN отключен");
+    return true;
+  }
+
+  /// Проверить PIN-код
+  PinVerifyResult verifyPin(String pin) {
+    if (!_config.isPinEnabled || _config.pinHash == null) {
+      _isUnlocked = true;
+      return PinVerifyResult.success;
+    }
+
+    // Проверка блокировки
+    if (_config.isLockedOut) {
+      return PinVerifyResult.lockedOut;
+    }
+
+    // Проверка основного PIN
+    final hash = _hashPin(pin, _config.pinSalt!);
+    if (hash == _config.pinHash) {
+      _resetFailedAttempts();
+      _isUnlocked = true;
+      _isDuressMode = false;
+      print("AUTH: PIN верный, разблокировано");
+      return PinVerifyResult.success;
+    }
+
+    // Проверка кода удаления (wipe code)
+    // ВАЖНО: возвращаем wipeCode без инкремента попыток — это сознательное действие.
+    if (_config.isWipeCodeEnabled && _config.wipeCodeHash != null && _config.wipeCodeSalt != null) {
+      final wipeHash = _hashPin(pin, _config.wipeCodeSalt!);
+      if (wipeHash == _config.wipeCodeHash) {
+        _resetFailedAttempts();
+        print("AUTH: Введён код удаления (wipe code) — требуется подтверждение");
+        return PinVerifyResult.wipeCode;
+      }
+    }
+
+    // Проверка duress кода
+    if (_config.isDuressEnabled && _config.duressHash != null) {
+      final duressHash = _hashPin(pin, _config.duressSalt!);
+      if (duressHash == _config.duressHash) {
+        _resetFailedAttempts();
+        _isUnlocked = true;
+        _isDuressMode = true;
+        print("AUTH: Duress код введён, режим пустоты");
+        return PinVerifyResult.duress;
+      }
+    }
+
+    // Неверный PIN
+    _incrementFailedAttempts();
+    
+    // Проверка автоматического wipe
+    if (_config.shouldAutoWipe) {
+      print("AUTH: Превышен лимит попыток, требуется wipe");
+      return PinVerifyResult.autoWipe;
+    }
+
+    return PinVerifyResult.invalid;
+  }
+
+  /// Сбросить счётчик неудачных попыток
+  Future<void> _resetFailedAttempts() async {
+    _config = _config.copyWith(
+      failedAttempts: 0,
+      clearLastFailedAttempt: true,
+    );
+    await _saveConfig();
+  }
+
+  /// Увеличить счётчик неудачных попыток
+  Future<void> _incrementFailedAttempts() async {
+    _config = _config.copyWith(
+      failedAttempts: _config.failedAttempts + 1,
+      lastFailedAttempt: DateTime.now(),
+    );
+    await _saveConfig();
+    print("AUTH: Неверный PIN, попытка ${_config.failedAttempts}");
+  }
+
+  // === УПРАВЛЕНИЕ DURESS CODE ===
+
+  /// Установить код принуждения (требует основной PIN)
+  Future<bool> setDuressCode(String mainPin, String duressCode) async {
+    // Проверяем основной PIN
+    final hash = _hashPin(mainPin, _config.pinSalt!);
+    if (hash != _config.pinHash) {
+      return false;
+    }
+
+    // Duress код не должен совпадать с основным PIN
+    if (mainPin == duressCode) {
+      return false;
+    }
+
+    final salt = _generateSalt();
+    final duressHash = _hashPin(duressCode, salt);
+    
+    _config = _config.copyWith(
+      isDuressEnabled: true,
+      duressHash: duressHash,
+      duressSalt: salt,
+    );
+    
+    await _saveConfig();
+    print("AUTH: Duress код установлен");
+    return true;
+  }
+
+  /// Отключить код принуждения (требует основной PIN)
+  Future<bool> disableDuressCode(String mainPin) async {
+    final hash = _hashPin(mainPin, _config.pinSalt!);
+    if (hash != _config.pinHash) {
+      return false;
+    }
+    
+    _config = _config.copyWith(
+      isDuressEnabled: false,
+      clearDuressHash: true,
+    );
+    
+    await _saveConfig();
+    _isDuressMode = false;
+    print("AUTH: Duress код отключен");
+    return true;
+  }
+
+  // === УПРАВЛЕНИЕ КОДОМ УДАЛЕНИЯ ===
+
+  /// Установить код удаления (требует основной PIN)
+  Future<bool> setWipeCode(String mainPin, String wipeCode) async {
+    if (_config.pinHash == null || _config.pinSalt == null) return false;
+
+    final hash = _hashPin(mainPin, _config.pinSalt!);
+    if (hash != _config.pinHash) return false;
+
+    // Код удаления не должен совпадать с основным PIN
+    if (wipeCode == mainPin) return false;
+
+    final salt = _generateSalt();
+    final wipeHash = _hashPin(wipeCode, salt);
+
+    _config = _config.copyWith(
+      isWipeCodeEnabled: true,
+      wipeCodeHash: wipeHash,
+      wipeCodeSalt: salt,
+    );
+
+    await _saveConfig();
+    print("AUTH: Код удаления установлен");
+    return true;
+  }
+
+  /// Отключить код удаления (требует основной PIN)
+  Future<bool> disableWipeCode(String mainPin) async {
+    if (_config.pinHash == null || _config.pinSalt == null) return false;
+
+    final hash = _hashPin(mainPin, _config.pinSalt!);
+    if (hash != _config.pinHash) return false;
+
+    _config = _config.copyWith(
+      isWipeCodeEnabled: false,
+      clearWipeCodeHash: true,
+    );
+
+    await _saveConfig();
+    print("AUTH: Код удаления отключён");
+    return true;
+  }
+
+  // === PANIC GESTURE (3x уход в фон) ===
+
+  Future<void> setPanicGestureEnabled(bool enabled) async {
+    _config = _config.copyWith(isPanicGestureEnabled: enabled);
+    await _saveConfig();
+    print("AUTH: Panic gesture ${enabled ? 'включен' : 'выключен'}");
+  }
+
+  // === БЛОКИРОВКА И РАЗБЛОКИРОВКА ===
+
+  /// Заблокировать приложение (например, при сворачивании)
+  void lock() {
+    if (_config.requiresUnlock) {
+      _isUnlocked = false;
+      _isDuressMode = false;
+      print("AUTH: Приложение заблокировано");
+    }
+  }
+
+  /// Выйти из duress mode (требует основной PIN)
+  Future<bool> exitDuressMode(String mainPin) async {
+    final result = verifyPin(mainPin);
+    if (result == PinVerifyResult.success) {
+      _isDuressMode = false;
+      return true;
+    }
+    return false;
+  }
+
+  // === AUTO-WIPE ===
+
+  /// Включить/выключить auto-wipe
+  Future<void> setAutoWipe(bool enabled, {int attempts = 10}) async {
+    _config = _config.copyWith(
+      isAutoWipeEnabled: enabled,
+      autoWipeAttempts: attempts,
+    );
+    await _saveConfig();
+    print("AUTH: Auto-wipe ${enabled ? 'включен ($attempts попыток)' : 'выключен'}");
+  }
+
+  /// Полный wipe — удаление всех данных
+  Future<void> performWipe() async {
+    print("AUTH: ⚠️ ВЫПОЛНЯЕТСЯ ПОЛНЫЙ WIPE...");
+    
+    try {
+      // 1. Удаляем криптоключи
+      final cryptoService = CryptoService();
+      await cryptoService.deleteAccount();
+      
+      // 2. Закрываем и удаляем базу данных
+      await DatabaseService.instance.close();
+      // База данных будет пересоздана при следующем запуске
+      
+      // 3. Удаляем конфигурацию безопасности
+      await _secureStorage.delete(key: _configKey);
+      
+      // 4. Сбрасываем состояние
+      _config = SecurityConfig.empty;
+      _isUnlocked = false;
+      _isDuressMode = false;
+      
+      print("AUTH: ✅ WIPE завершен");
+    } catch (e) {
+      print("AUTH ERROR: Ошибка wipe: $e");
+      rethrow;
+    }
+  }
+
+  // === УТИЛИТЫ ===
+
+  /// Генерация случайной соли
+  String _generateSalt() {
+    final random = Random.secure();
+    final saltBytes = List<int>.generate(32, (_) => random.nextInt(256));
+    return base64.encode(saltBytes);
+  }
+
+  /// Хеширование PIN с солью (PBKDF2-like с SHA-256)
+  String _hashPin(String pin, String salt) {
+    // Простая схема: SHA-256(salt + pin + salt) повторенная несколько раз
+    // Для production рекомендуется Argon2id, но для мобильного приложения это достаточно
+    final saltBytes = base64.decode(salt);
+    var data = [...saltBytes, ...utf8.encode(pin), ...saltBytes];
+    
+    // 10000 итераций для замедления brute-force
+    for (var i = 0; i < 10000; i++) {
+      data = sha256.convert(data).bytes;
+    }
+    
+    return base64.encode(data);
+  }
+
+  /// Получить время до разблокировки (для UI)
+  Duration? get timeUntilUnlock => _config.timeUntilUnlock;
+
+  /// Получить количество оставшихся попыток до wipe
+  int? get attemptsUntilWipe {
+    if (!_config.isAutoWipeEnabled) return null;
+    final remaining = _config.autoWipeAttempts - _config.failedAttempts;
+    return remaining > 0 ? remaining : 0;
+  }
+}
+

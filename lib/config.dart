@@ -1,6 +1,6 @@
 class AppConfig {
   // ФИНАЛЬНЫЙ РЕЛИЗ 1.0.0
-  static const String appVersion = "v1.0.0";
+  static const String appVersion = "v1.1.0";
 
   // IP сервера
   static const String serverIp = 'vadimkolobanov-orpheus-d95e.twc1.net';
@@ -18,6 +18,18 @@ class AppConfig {
 
   // --- История обновлений (Changelog) ---
   static const List<Map<String, dynamic>> changelogData = [
+    {
+      'version': '1.1.0',
+      'date': '12.12.2025',
+      'changes': [
+        'SECURITY: PIN-код (6 цифр) — опциональная защита входа.',
+        'SECURITY: Duress code — второй PIN, показывающий пустой профиль.',
+        'SECURITY: Код удаления (wipe code) — подтверждение удержанием, защита от случайного удаления.',
+        'SECURITY: Auto-wipe после N неверных попыток (опционально).',
+        'UI: Экран «Как пользоваться» — простая инструкция по функциям и рискам.',
+        'FIX: Стабилизация поведения во время звонка: блокировка не мешает ответу/разговору.',
+      ]
+    },
     {
       'version': '1.0.0',
       'date': '09.12.2025',

@@ -4,11 +4,15 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
+import 'package:orpheus_project/services/auth_service.dart';
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
   static Database? _database;
   DatabaseService._init();
+
+  /// Проверка: находимся ли мы в duress mode (показываем пустой профиль)
+  bool get _isDuressMode => AuthService.instance.isDuressMode;
 
   // Метод для тестов: инициализация с готовой БД
   void initWithDatabase(Database db) {
@@ -106,11 +110,17 @@ class DatabaseService {
 
   // --- Контакты ---
   Future<void> addContact(Contact contact) async {
+    // В duress mode не добавляем контакты
+    if (_isDuressMode) return;
+    
     final db = await instance.database;
     await db.insert('contacts', contact.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<List<Contact>> getContacts() async {
+    // В duress mode возвращаем пустой список
+    if (_isDuressMode) return [];
+    
     final db = await instance.database;
     final maps = await db.query('contacts', orderBy: 'name');
     return List.generate(maps.length, (i) {
@@ -124,6 +134,9 @@ class DatabaseService {
 
   /// Получить контакт по publicKey
   Future<Contact?> getContact(String publicKey) async {
+    // В duress mode контакты "не существуют"
+    if (_isDuressMode) return null;
+    
     try {
       final db = await instance.database;
       final maps = await db.query(
@@ -160,12 +173,18 @@ class DatabaseService {
 
   // Сохранить сообщение
   Future<void> addMessage(ChatMessage message, String contactKey) async {
+    // В duress mode сообщения НЕ показываем, но входящие всё равно сохраняем,
+    // чтобы пользователь не терял данные.
+    
     final db = await instance.database;
     await db.insert('messages', message.toMap(contactKey));
   }
 
   // Получить сообщения (с маппингом новых полей)
   Future<List<ChatMessage>> getMessagesForContact(String contactKey) async {
+    // В duress mode возвращаем пустой список
+    if (_isDuressMode) return [];
+    
     final db = await instance.database;
     final maps = await db.query(
       'messages',
@@ -223,6 +242,9 @@ class DatabaseService {
 
   /// Получить общее количество контактов
   Future<int> getTotalContactsCount() async {
+    // В duress mode — 0
+    if (_isDuressMode) return 0;
+    
     final db = await instance.database;
     final result = await db.rawQuery('SELECT COUNT(*) FROM contacts');
     return Sqflite.firstIntValue(result) ?? 0;
@@ -230,6 +252,9 @@ class DatabaseService {
 
   /// Получить общее количество сообщений
   Future<int> getTotalMessagesCount() async {
+    // В duress mode — 0
+    if (_isDuressMode) return 0;
+    
     final db = await instance.database;
     final result = await db.rawQuery('SELECT COUNT(*) FROM messages');
     return Sqflite.firstIntValue(result) ?? 0;
@@ -237,6 +262,9 @@ class DatabaseService {
 
   /// Получить количество отправленных сообщений
   Future<int> getSentMessagesCount() async {
+    // В duress mode — 0
+    if (_isDuressMode) return 0;
+    
     final db = await instance.database;
     final result = await db.rawQuery('SELECT COUNT(*) FROM messages WHERE isSentByMe = 1');
     return Sqflite.firstIntValue(result) ?? 0;
@@ -244,6 +272,11 @@ class DatabaseService {
 
   /// Получить полную статистику профиля
   Future<Map<String, int>> getProfileStats() async {
+    // В duress mode — всё по нулям
+    if (_isDuressMode) {
+      return {'contacts': 0, 'messages': 0, 'sent': 0};
+    }
+    
     final db = await instance.database;
     
     final contactsResult = await db.rawQuery('SELECT COUNT(*) FROM contacts');

@@ -6,6 +6,9 @@ import 'package:local_auth/local_auth.dart';
 import 'package:orpheus_project/config.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/screens/debug_logs_screen.dart';
+import 'package:orpheus_project/screens/help_screen.dart';
+import 'package:orpheus_project/screens/security_settings_screen.dart';
+import 'package:orpheus_project/services/auth_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
@@ -255,6 +258,39 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
             _buildAnimatedSettingsItem(
               index: 0,
               delay: 0.4,
+              icon: Icons.security,
+              title: "Безопасность",
+              subtitle: AuthService.instance.config.isPinEnabled 
+                  ? "PIN-код включен" 
+                  : "PIN-код не установлен",
+              onTap: () => Navigator.push(
+                context,
+                _createPageRoute(const SecuritySettingsScreen()),
+              ).then((_) {
+                if (!mounted) return;
+                setState(() {});
+              }),
+              accentColor: AuthService.instance.config.isPinEnabled 
+                  ? const Color(0xFF6AD394) 
+                  : Colors.orange,
+            ),
+
+            _buildAnimatedSettingsItem(
+              index: 1,
+              delay: 0.45,
+              icon: Icons.help_outline,
+              title: "Как пользоваться",
+              subtitle: "Краткая инструкция по функциям",
+              onTap: () => Navigator.push(
+                context,
+                _createPageRoute(const HelpScreen()),
+              ),
+              isSubtle: true,
+            ),
+
+            _buildAnimatedSettingsItem(
+              index: 2,
+              delay: 0.5,
               icon: Icons.history,
               title: "История обновлений",
               onTap: () => Navigator.push(
@@ -264,8 +300,8 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
             ),
 
             _buildAnimatedSettingsItem(
-              index: 1,
-              delay: 0.45,
+              index: 3,
+              delay: 0.55,
               icon: Icons.shield_outlined,
               title: "Экспорт аккаунта",
               subtitle: "Показать Приватный ключ",
@@ -274,8 +310,8 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
             ),
             
             _buildAnimatedSettingsItem(
-              index: 2,
-              delay: 0.5,
+              index: 4,
+              delay: 0.6,
               icon: Icons.notifications_none,
               title: "Настройка уведомлений",
               subtitle: "Для Android (Vivo, Xiaomi и др.)",
@@ -777,12 +813,13 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
     required VoidCallback onTap,
     bool isDestructive = false,
     bool isSubtle = false,
+    Color? accentColor,
   }) {
-    final accentColor = isDestructive 
+    final effectiveColor = accentColor ?? (isDestructive 
         ? Colors.red.shade400 
         : isSubtle 
             ? Colors.grey.shade600 
-            : const Color(0xFFB0BEC5);
+            : const Color(0xFFB0BEC5));
     
     return AnimatedBuilder(
       animation: Listenable.merge([_revealController, _qrGlowController]),
@@ -816,10 +853,10 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: accentColor.withOpacity(0.1),
+                            color: effectiveColor.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(icon, color: accentColor.withOpacity(0.8), size: 20),
+                          child: Icon(icon, color: effectiveColor.withOpacity(0.8), size: 20),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
