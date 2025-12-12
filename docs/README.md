@@ -1,73 +1,42 @@
-# Документация клиента (Flutter)
+# Orpheus Server (Backend)
 
 ## Быстрый старт
 
 ### Предусловия
-- Flutter SDK (см. `environment` в `pubspec.yaml`)
-- Android SDK / Android Studio (если запускаете на Android)
+- Python 3.10+
+- Установлен `pip`
 
-### Установка зависимостей
-
-```powershell
-flutter pub get
+### Установка
+```bash
+python -m venv .venv
+.\.venv\Scripts\activate           # Windows
+pip install -r requirements.txt
 ```
 
-### Запуск
-
-```powershell
-flutter run
+### Запуск (локально)
+```bash
+uvicorn main:app --reload --port 8000
 ```
 
-## Тесты и отчёты
-
-См. `QUICK_START_TESTS.md` и `TEST_REPORTS_GUIDE.md`.
-
-- Запуск тестов + отчёт:
-
-```powershell
-.\test_runner.ps1
+### Быстрая проверка
+```bash
+curl http://localhost:8000/docs
 ```
+Откроется Swagger UI (проверка, что сервер поднялся).
 
-- Быстрый прогон (без файлов):
-
-```powershell
-.\quick_test.ps1
-```
+### Тесты
+Тестов в репозитории нет. Если добавите — опишите команды здесь.
 
 ## Процесс изменений (обязательно)
+- Обновить `CHANGELOG.md` (секция Unreleased)
+- Добавить запись в `AI_WORKLOG.md`
+- При необходимости обновить `docs/*`
+- Перед коммитом: `git status` убедиться, что changelog/worklog в коммите
 
-При любых изменениях кода/поведения:
-- обновить `CHANGELOG.md` → `## [Unreleased]`
-- добавить запись в `AI_WORKLOG.md`
-- при необходимости обновить документацию в `docs/`
-
-Чтобы это не забывалось, включите git hooks (см. `scripts/install-hooks.ps1`).
-
-## Версия приложения
-
-В профиле/настройках версия отображается как `version+buildNumber` (из платформы через `package_info_plus`).
-
-## Android splash / иконки (важно для одинакового результата на разных ПК)
-
-- Android < 12: используется `android/app/src/main/res/drawable*/launch_background.xml`, который показывает `@drawable/splash`.
-- Android 12+ (API 31+): используется `android/app/src/main/res/values*-v31/styles.xml` и иконка `@drawable/android12splash`.
-
-### Источник сплэша
-
-Актуальный брендированный сплэш (щит + надпись ORPHEUS) берётся из:
-- `assets/images/logo.png`
-
-Генерация Android ресурсов под разные плотности выполняется скриптом:
-
+## Hooks
+Включить локально (требует git):
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\update-android-splash.ps1
-```
-
-Чтобы на другом компьютере было так же, **эти файлы должны быть в git**. Если после обновления всё равно видите старый splash:
-
-```powershell
-flutter clean
-flutter pub get
+powershell -ExecutionPolicy Bypass -File .\scripts\install-hooks.ps1
 ```
 
 

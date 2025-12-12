@@ -1,18 +1,16 @@
-# AI_WORKLOG
+﻿# AI_WORKLOG
 
-Журнал действий ИИ/агента в этом репозитории.
-
-Правило: если меняется код/конфиги/поведение — добавляй запись сюда **и** обновляй `CHANGELOG.md` (секция `Unreleased`).
+Р–СѓСЂРЅР°Р» РґРµР№СЃС‚РІРёР№ РР/Р°РіРµРЅС‚Р° РІ СЌС‚РѕРј СЂРµРїРѕР·РёС‚РѕСЂРёРё (РєР»РёРµРЅС‚).
 
 ---
 
 ## 2025-12-12
 - Time: 00:00 local
-- Task: Инициализация процесса разработки (Cursor rules/commands, docs, hooks)
+- Task: РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ РїСЂРѕС†РµСЃСЃР° СЂР°Р·СЂР°Р±РѕС‚РєРё (Cursor rules/commands, docs, hooks)
 - Changes:
-  - Добавлены шаблоны документации и журналов.
-  - Добавлены правила/команды Cursor для дисциплины артефактов.
-  - Добавлен git hook, который не даст забыть обновить `CHANGELOG.md`/`AI_WORKLOG.md`.
+  - Р”РѕР±Р°РІР»РµРЅС‹ С€Р°Р±Р»РѕРЅС‹ РґРѕРєСѓРјРµРЅС‚Р°С†РёРё Рё Р¶СѓСЂРЅР°Р»РѕРІ.
+  - Р”РѕР±Р°РІР»РµРЅС‹ РїСЂР°РІРёР»Р°/РєРѕРјР°РЅРґС‹ Cursor РґР»СЏ РґРёСЃС†РёРїР»РёРЅС‹ Р°СЂС‚РµС„Р°РєС‚РѕРІ.
+  - Р”РѕР±Р°РІР»РµРЅ git hook, РєРѕС‚РѕСЂС‹Р№ РЅРµ РґР°СЃС‚ Р·Р°Р±С‹С‚СЊ РѕР±РЅРѕРІРёС‚СЊ `CHANGELOG.md`/`AI_WORKLOG.md`.
 - Files:
   - `CHANGELOG.md`
   - `AI_WORKLOG.md`
@@ -25,16 +23,16 @@
   - `scripts/install-hooks.ps1`
   - `.gitignore`
 - Commands:
-  - `powershell -ExecutionPolicy Bypass -File .\\scripts\\install-hooks.ps1`
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\install-hooks.ps1`
   - `flutter pub get`
   - `flutter test` / `.\test_runner.ps1`
 
 ## 2025-12-12
 - Time: 15:44 local
-- Task: Профиль — показывать реальную версию приложения
+- Task: РџСЂРѕС„РёР»СЊ вЂ” РїРѕРєР°Р·С‹РІР°С‚СЊ СЂРµР°Р»СЊРЅСѓСЋ РІРµСЂСЃРёСЋ РїСЂРёР»РѕР¶РµРЅРёСЏ
 - Changes:
-  - В экране профиля версия теперь берётся из `package_info_plus` (реальные `version+buildNumber`) с fallback на `AppConfig.appVersion`.
-  - Обновлён тест версии `AppConfig` (SemVer/`v`-префикс).
+  - Р’ СЌРєСЂР°РЅРµ РїСЂРѕС„РёР»СЏ РІРµСЂСЃРёСЏ С‚РµРїРµСЂСЊ Р±РµСЂС‘С‚СЃСЏ РёР· `package_info_plus` (СЂРµР°Р»СЊРЅС‹Рµ `version+buildNumber`) СЃ fallback РЅР° `AppConfig.appVersion`.
+  - РћР±РЅРѕРІР»С‘РЅ С‚РµСЃС‚ РІРµСЂСЃРёРё `AppConfig` (SemVer/`v`-РїСЂРµС„РёРєСЃ).
 - Files:
   - `lib/screens/settings_screen.dart`
   - `CHANGELOG.md`
@@ -42,13 +40,13 @@
 
 ## 2025-12-12
 - Time: 15:44 local
-- Task: Android — splash + BootReceiver
+- Task: Android вЂ” splash + BootReceiver
 - Changes:
-  - Android < 12: `launch_background.xml` переключён на `@drawable/splash`.
-  - Android < 12: `launch_background.xml` теперь масштабирует `@drawable/splash`, чтобы картинка не выходила за границы.
-  - Android 12+: добавлены ресурсы `android12splash` и стили `values-v31`.
-  - Добавлен `BootReceiver` и регистрация в `AndroidManifest.xml` (+ `RECEIVE_BOOT_COMPLETED`).
-  - Android splash: `splash.png`/`android12splash.png` обновлены из `assets/images/logo.png` (щит + ORPHEUS).
+  - Android < 12: `launch_background.xml` РїРµСЂРµРєР»СЋС‡С‘РЅ РЅР° `@drawable/splash`.
+  - Android < 12: `launch_background.xml` С‚РµРїРµСЂСЊ РјР°СЃС€С‚Р°Р±РёСЂСѓРµС‚ `@drawable/splash`, С‡С‚РѕР±С‹ РєР°СЂС‚РёРЅРєР° РЅРµ РІС‹С…РѕРґРёР»Р° Р·Р° РіСЂР°РЅРёС†С‹.
+  - Android 12+: РґРѕР±Р°РІР»РµРЅС‹ СЂРµСЃСѓСЂСЃС‹ `android12splash` Рё СЃС‚РёР»Рё `values-v31`.
+  - Android splash: `splash.png`/`android12splash.png` РѕР±РЅРѕРІР»РµРЅС‹ РёР· `assets/images/logo.png` (С‰РёС‚ + ORPHEUS).
+  - Р”РѕР±Р°РІР»РµРЅ `BootReceiver` Рё СЂРµРіРёСЃС‚СЂР°С†РёСЏ РІ `AndroidManifest.xml` (+ `RECEIVE_BOOT_COMPLETED`).
 - Files:
   - `android/app/src/main/AndroidManifest.xml`
   - `android/app/src/main/kotlin/com/example/orpheus_project/BootReceiver.kt`
@@ -59,5 +57,3 @@
   - `android/app/src/main/res/values-night-v31/styles.xml`
   - `docs/README.md`
   - `CHANGELOG.md`
-
-

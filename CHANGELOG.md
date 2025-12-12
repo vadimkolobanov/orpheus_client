@@ -1,22 +1,18 @@
-# CHANGELOG
+﻿# CHANGELOG
 
-Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/)  
-Версионирование: SemVer (привязка к `pubspec.yaml` при релизе)
+Р¤РѕСЂРјР°С‚: [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/)  
+Р’РµСЂСЃРёРѕРЅРёСЂРѕРІР°РЅРёРµ: SemVer (РїСЂРёРІСЏР·РєР° Рє `pubspec.yaml` РїСЂРё СЂРµР»РёР·Рµ)
 
 ## [Unreleased]
 ### Added
-- Процесс: единые артефакты разработки (docs, worklog, hooks).
+- РџСЂРѕС†РµСЃСЃ: РµРґРёРЅС‹Рµ Р°СЂС‚РµС„Р°РєС‚С‹ СЂР°Р·СЂР°Р±РѕС‚РєРё (docs, worklog, hooks).
+- Android: РґРѕР±Р°РІР»РµРЅ `BootReceiver` (Р°РІС‚РѕР·Р°РїСѓСЃРє РїРѕСЃР»Рµ РїРµСЂРµР·Р°РіСЂСѓР·РєРё) Рё СЂРµСЃСѓСЂСЃС‹ splash РґР»СЏ Android 12+.
 
 ### Changed
-- Профиль: строка версии приложения теперь берётся из платформы (реальные `version+buildNumber`), а не только из хардкода.
-
-### Added
-- Android: добавлен `BootReceiver` (автозапуск после перезагрузки) и ресурсы splash для Android 12+.
+- РџСЂРѕС„РёР»СЊ: СЃС‚СЂРѕРєР° РІРµСЂСЃРёРё РїСЂРёР»РѕР¶РµРЅРёСЏ С‚РµРїРµСЂСЊ Р±РµСЂС‘С‚СЃСЏ РёР· РїР»Р°С‚С„РѕСЂРјС‹ (СЂРµР°Р»СЊРЅС‹Рµ `version+buildNumber`), Р° РЅРµ С‚РѕР»СЊРєРѕ РёР· С…Р°СЂРґРєРѕРґР°.
 
 ### Fixed
-- Android splash (до Android 12): `launch_background.xml` теперь масштабирует картинку, чтобы она не “вылазила” за экран.
-- Android splash: обновлены `splash.png`/`android12splash.png` на брендированный логотип (щит + ORPHEUS).
+- Android splash (РґРѕ Android 12): `launch_background.xml` С‚РµРїРµСЂСЊ РјР°СЃС€С‚Р°Р±РёСЂСѓРµС‚ РєР°СЂС‚РёРЅРєСѓ, С‡С‚РѕР±С‹ РѕРЅР° РЅРµ вЂњРІС‹Р»Р°Р·РёР»Р°вЂќ Р·Р° СЌРєСЂР°РЅ.
+- Android splash: РѕР±РЅРѕРІР»РµРЅС‹ `splash.png`/`android12splash.png` РЅР° Р±СЂРµРЅРґРёСЂРѕРІР°РЅРЅС‹Р№ Р»РѕРіРѕС‚РёРї (С‰РёС‚ + ORPHEUS).
 
 ### Removed
-
-
