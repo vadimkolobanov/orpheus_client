@@ -1,16 +1,16 @@
 ﻿# AI_WORKLOG
 
-Р–СѓСЂРЅР°Р» РґРµР№СЃС‚РІРёР№ РР/Р°РіРµРЅС‚Р° РІ СЌС‚РѕРј СЂРµРїРѕР·РёС‚РѕСЂРёРё (РєР»РёРµРЅС‚).
+Журнал действий ИИ/агента в этом репозитории (клиент).
 
 ---
 
 ## 2025-12-12
 - Time: 00:00 local
-- Task: РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ РїСЂРѕС†РµСЃСЃР° СЂР°Р·СЂР°Р±РѕС‚РєРё (Cursor rules/commands, docs, hooks)
+- Task: Инициализация процесса разработки (Cursor rules/commands, docs, hooks)
 - Changes:
-  - Р”РѕР±Р°РІР»РµРЅС‹ С€Р°Р±Р»РѕРЅС‹ РґРѕРєСѓРјРµРЅС‚Р°С†РёРё Рё Р¶СѓСЂРЅР°Р»РѕРІ.
-  - Р”РѕР±Р°РІР»РµРЅС‹ РїСЂР°РІРёР»Р°/РєРѕРјР°РЅРґС‹ Cursor РґР»СЏ РґРёСЃС†РёРїР»РёРЅС‹ Р°СЂС‚РµС„Р°РєС‚РѕРІ.
-  - Р”РѕР±Р°РІР»РµРЅ git hook, РєРѕС‚РѕСЂС‹Р№ РЅРµ РґР°СЃС‚ Р·Р°Р±С‹С‚СЊ РѕР±РЅРѕРІРёС‚СЊ `CHANGELOG.md`/`AI_WORKLOG.md`.
+  - Добавлены шаблоны документации и журналов.
+  - Добавлены правила/команды Cursor для дисциплины артефактов.
+  - Добавлен git hook, который не даст забыть обновить `CHANGELOG.md`/`AI_WORKLOG.md`.
 - Files:
   - `CHANGELOG.md`
   - `AI_WORKLOG.md`
@@ -29,10 +29,10 @@
 
 ## 2025-12-12
 - Time: 15:44 local
-- Task: РџСЂРѕС„РёР»СЊ вЂ” РїРѕРєР°Р·С‹РІР°С‚СЊ СЂРµР°Р»СЊРЅСѓСЋ РІРµСЂСЃРёСЋ РїСЂРёР»РѕР¶РµРЅРёСЏ
+- Task: Профиль — показывать реальную версию приложения
 - Changes:
-  - Р’ СЌРєСЂР°РЅРµ РїСЂРѕС„РёР»СЏ РІРµСЂСЃРёСЏ С‚РµРїРµСЂСЊ Р±РµСЂС‘С‚СЃСЏ РёР· `package_info_plus` (СЂРµР°Р»СЊРЅС‹Рµ `version+buildNumber`) СЃ fallback РЅР° `AppConfig.appVersion`.
-  - РћР±РЅРѕРІР»С‘РЅ С‚РµСЃС‚ РІРµСЂСЃРёРё `AppConfig` (SemVer/`v`-РїСЂРµС„РёРєСЃ).
+  - В экране профиля версия теперь берётся из `package_info_plus` (реальные `version+buildNumber`) с fallback на `AppConfig.appVersion`.
+  - Обновлён тест версии `AppConfig` (SemVer/`v`-префикс).
 - Files:
   - `lib/screens/settings_screen.dart`
   - `CHANGELOG.md`
@@ -40,13 +40,13 @@
 
 ## 2025-12-12
 - Time: 15:44 local
-- Task: Android вЂ” splash + BootReceiver
+- Task: Android — splash + BootReceiver
 - Changes:
-  - Android < 12: `launch_background.xml` РїРµСЂРµРєР»СЋС‡С‘РЅ РЅР° `@drawable/splash`.
-  - Android < 12: `launch_background.xml` С‚РµРїРµСЂСЊ РјР°СЃС€С‚Р°Р±РёСЂСѓРµС‚ `@drawable/splash`, С‡С‚РѕР±С‹ РєР°СЂС‚РёРЅРєР° РЅРµ РІС‹С…РѕРґРёР»Р° Р·Р° РіСЂР°РЅРёС†С‹.
-  - Android 12+: РґРѕР±Р°РІР»РµРЅС‹ СЂРµСЃСѓСЂСЃС‹ `android12splash` Рё СЃС‚РёР»Рё `values-v31`.
-  - Android splash: `splash.png`/`android12splash.png` РѕР±РЅРѕРІР»РµРЅС‹ РёР· `assets/images/logo.png` (С‰РёС‚ + ORPHEUS).
-  - Р”РѕР±Р°РІР»РµРЅ `BootReceiver` Рё СЂРµРіРёСЃС‚СЂР°С†РёСЏ РІ `AndroidManifest.xml` (+ `RECEIVE_BOOT_COMPLETED`).
+  - Android < 12: `launch_background.xml` переключён на `@drawable/splash`.
+  - Android < 12: `launch_background.xml` теперь масштабирует `@drawable/splash`, чтобы картинка не выходила за границы.
+  - Android 12+: добавлены ресурсы `android12splash` и стили `values-v31`.
+  - Android splash: `splash.png`/`android12splash.png` обновлены из `assets/images/logo.png` (щит + ORPHEUS).
+  - Добавлен `BootReceiver` и регистрация в `AndroidManifest.xml` (+ `RECEIVE_BOOT_COMPLETED`).
 - Files:
   - `android/app/src/main/AndroidManifest.xml`
   - `android/app/src/main/kotlin/com/example/orpheus_project/BootReceiver.kt`
@@ -57,3 +57,40 @@
   - `android/app/src/main/res/values-night-v31/styles.xml`
   - `docs/README.md`
   - `CHANGELOG.md`
+
+## 2025-12-12
+- Time: текущее время
+- Task: Исправление кодировки CHANGELOG, анализ Redis, восстановление авто коммита и создание инструкции по постановке задач
+- Changes:
+  - Исправлена кодировка в `CHANGELOG.md` (была Windows-1251, теперь UTF-8).
+  - Исправлена кодировка в `AI_WORKLOG.md` (была Windows-1251, теперь UTF-8).
+  - Создан документ `docs/DECISIONS/0002-redis-integration-plan.md` с анализом использования Redis в проекте.
+  - Проанализированы узкие места текущей архитектуры (WebSocket соединения в памяти, проверки лицензий через PostgreSQL, офлайн-сообщения).
+  - Определены 7 областей где Redis может улучшить проект:
+    1. Управление WebSocket соединениями (приоритет: ВЫСОКИЙ)
+    2. Кэширование проверок лицензий (приоритет: ВЫСОКИЙ)
+    3. Офлайн-сообщения через Redis (приоритет: СРЕДНИЙ)
+    4. Кэширование FCM токенов (приоритет: СРЕДНИЙ)
+    5. Rate Limiting (приоритет: ВЫСОКИЙ)
+    6. Кэширование статусов платежей (приоритет: НИЗКИЙ)
+    7. Pub/Sub для масштабирования (приоритет: СРЕДНИЙ)
+  - Создан план внедрения в 3 фазы (v1.1.0, v1.2.0, v1.3.0+).
+  - Восстановлен скрипт автоматического коммита `scripts/auto-commit.ps1` с проверкой артефактов.
+  - Создан документ `docs/COMMIT_PROCESS.md` с описанием процесса коммита и формата сообщений.
+  - Создано правило `.cursor/rules/20-auto-commit.md` для автоматического коммита после изменений.
+  - Создан документ `docs/HOW_TO_GIVE_TASKS.md` с инструкцией, как ставить задачи ИИ для автоматической работы с документацией.
+  - Исправлена проблема с неотслеживаемыми файлами: создано правило `.cursor/rules/15-git-files.md` и обновлены правила для обязательного добавления всех файлов в git через `git add .`.
+- Files:
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`
+  - `docs/DECISIONS/0002-redis-integration-plan.md`
+  - `docs/COMMIT_PROCESS.md`
+  - `docs/HOW_TO_GIVE_TASKS.md`
+  - `.cursor/rules/20-auto-commit.md`
+  - `.cursor/rules/15-git-files.md`
+  - `.cursor/rules/10-artifacts.md`
+  - `scripts/auto-commit.ps1`
+  - `README.md`
+- Commands:
+  - Анализ кодовой базы (сервер: `main.py`, `payments.py`, клиент: `main.dart`, сервисы)
+  - `.\scripts\auto-commit.ps1` - для автоматического создания коммита
