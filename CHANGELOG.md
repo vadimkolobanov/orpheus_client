@@ -14,6 +14,7 @@
 - Android: добавлен `BootReceiver` (автозапуск после перезагрузки) и ресурсы splash для Android 12+.
 
 ### Fixed
+- Android splash (до Android 12): `launch_background.xml` теперь масштабирует картинку, чтобы она не “вылазила” за экран.
 
 ### Removed
 
