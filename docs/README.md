@@ -52,6 +52,17 @@ flutter run
 - Android < 12: используется `android/app/src/main/res/drawable*/launch_background.xml`, который показывает `@drawable/splash`.
 - Android 12+ (API 31+): используется `android/app/src/main/res/values*-v31/styles.xml` и иконка `@drawable/android12splash`.
 
+### Источник сплэша
+
+Актуальный брендированный сплэш (щит + надпись ORPHEUS) берётся из:
+- `assets/images/logo.png`
+
+Генерация Android ресурсов под разные плотности выполняется скриптом:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\update-android-splash.ps1
+```
+
 Чтобы на другом компьютере было так же, **эти файлы должны быть в git**. Если после обновления всё равно видите старый splash:
 
 ```powershell

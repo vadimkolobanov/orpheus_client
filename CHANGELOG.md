@@ -15,6 +15,7 @@
 
 ### Fixed
 - Android splash (до Android 12): `launch_background.xml` теперь масштабирует картинку, чтобы она не “вылазила” за экран.
+- Android splash: обновлены `splash.png`/`android12splash.png` на брендированный логотип (щит + ORPHEUS).
 
 ### Removed
 

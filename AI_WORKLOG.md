@@ -48,6 +48,7 @@
   - Android < 12: `launch_background.xml` теперь масштабирует `@drawable/splash`, чтобы картинка не выходила за границы.
   - Android 12+: добавлены ресурсы `android12splash` и стили `values-v31`.
   - Добавлен `BootReceiver` и регистрация в `AndroidManifest.xml` (+ `RECEIVE_BOOT_COMPLETED`).
+  - Android splash: `splash.png`/`android12splash.png` обновлены из `assets/images/logo.png` (щит + ORPHEUS).
 - Files:
   - `android/app/src/main/AndroidManifest.xml`
   - `android/app/src/main/kotlin/com/example/orpheus_project/BootReceiver.kt`
