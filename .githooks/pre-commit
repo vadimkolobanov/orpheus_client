@@ -1,0 +1,33 @@
+#!/bin/sh
+set -e
+
+# Skip during merge commits
+if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+  exit 0
+fi
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+requires_artifacts=0
+echo "$staged" | grep -E '^(lib/|android/|assets/|test/|pubspec\.yaml|pubspec\.lock|analysis_options\.yaml)' >/dev/null 2>&1 && requires_artifacts=1 || true
+
+if [ "$requires_artifacts" -eq 1 ]; then
+  echo "$staged" | grep -qx 'CHANGELOG.md' || {
+    echo "ERROR: Обновите CHANGELOG.md (секция Unreleased) в этом же коммите."
+    echo "Подсказка: используйте Cursor команду: update-changelog / update-artifacts"
+    exit 1
+  }
+  echo "$staged" | grep -qx 'AI_WORKLOG.md' || {
+    echo "ERROR: Добавьте запись в AI_WORKLOG.md в этом же коммите."
+    echo "Подсказка: используйте Cursor команду: log-work / update-artifacts"
+    exit 1
+  }
+fi
+
+exit 0
+
+

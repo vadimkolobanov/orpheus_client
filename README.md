@@ -1,16 +1,64 @@
-# orpheus_project
+# Orpheus Client (Flutter)
 
-A new Flutter project.
+Клиентское приложение на Flutter для проекта Orpheus.
 
-## Getting Started
+## Быстрый старт
 
-This project is a starting point for a Flutter application.
+### Требования
+- Flutter SDK (см. `environment` в `pubspec.yaml`)
+- Android SDK / Android Studio (для Android)
 
-A few resources to get you started if this is your first Flutter project:
+### Установка зависимостей
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+```powershell
+flutter pub get
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### Запуск
+
+```powershell
+flutter run
+```
+
+## Тесты и отчёты
+
+См.:
+- `QUICK_START_TESTS.md`
+- `TEST_REPORTS_GUIDE.md`
+
+Основные команды:
+
+```powershell
+flutter test
+```
+
+Или с генерацией отчётов:
+
+```powershell
+.\test_runner.ps1
+```
+
+## Документация
+
+Основная документация клиента: `docs/README.md`  
+Архитектурный обзор: `docs/ARCHITECTURE.md`  
+Решения (ADR): `docs/DECISIONS/`
+
+## Процесс изменений (чтобы ИИ не забывал)
+
+При изменениях кода/поведения **всегда**:
+- обновить `CHANGELOG.md` (секция `Unreleased`)
+- добавить запись в `AI_WORKLOG.md`
+- обновить `docs/*` при необходимости
+
+### Cursor
+Правила проекта: `.cursor/rules/`  
+Команды-шаблоны: `.cursor/commands/` (например: `update-artifacts`, `update-changelog`, `log-work`, `commit-ready`)
+
+### Git hooks (рекомендуется)
+Чтобы коммит нельзя было сделать без `CHANGELOG.md` и `AI_WORKLOG.md`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-hooks.ps1
+```
+

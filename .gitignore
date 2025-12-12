@@ -1,5 +1,34 @@
-# ... existing code ...
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
 
-# Test reports
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Android/Gradle (local/cache)
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/key.properties
+**/*.keystore
+
+# iOS (если появится)
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+
+# Logs / crash dumps
+*.log
+hs_err_pid*.log
+replay_pid*.log
+
+# Test reports / artifacts
 test_reports/
+test_results_*.txt
 *.tmp
