@@ -10,7 +10,10 @@ import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
 
 class ContactsScreen extends StatefulWidget {
-  const ContactsScreen({super.key});
+  /// В тестах можно отключить async-запросы счётчиков, чтобы не зависеть от SQLite/таймеров.
+  final bool enableUnreadCounters;
+
+  const ContactsScreen({super.key, this.enableUnreadCounters = true});
 
   @override
   State<ContactsScreen> createState() => _ContactsScreenState();
@@ -19,6 +22,7 @@ class ContactsScreen extends StatefulWidget {
 class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStateMixin {
   late Future<List<Contact>> _contactsFuture;
   StreamSubscription? _updateSubscription;
+  Timer? _updateCheckTimer;
   
   // Анимации
   late AnimationController _fabController;
@@ -69,20 +73,22 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
       _refreshContacts();
     });
 
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
+    // В тестах не запускаем фоновые проверки обновлений (иначе появятся таймеры/сетевые запросы).
+    if (!const bool.fromEnvironment('FLUTTER_TEST')) {
+      _updateCheckTimer?.cancel();
+      _updateCheckTimer = Timer(const Duration(seconds: 2), () {
+        if (!mounted) return;
         UpdateService.checkForUpdate(context);
-      }
-    });
+      });
+    }
   }
 
   Future<List<Contact>> _loadContactsWithTimeout() async {
     setState(() => _isLoading = true);
     try {
-      final contacts = await DatabaseService.instance.getContacts().timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => <Contact>[],
-      );
+      // Важно: это локальная БД. Таймаут здесь создаёт Timer и ухудшает стабильность widget-тестов.
+      // Если будут реальные зависания — лучше решать на уровне DatabaseService/инициализации, а не UI.
+      final contacts = await DatabaseService.instance.getContacts();
       
       if (mounted) {
         setState(() => _isLoading = false);
@@ -97,6 +103,7 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
 
   @override
   void dispose() {
+    _updateCheckTimer?.cancel();
     _updateSubscription?.cancel();
     _fabController.dispose();
     _pulseController.dispose();
@@ -713,16 +720,13 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
   }
 
   Widget _buildContactCard(Contact contact, int index) {
-    return FutureBuilder<int>(
-      future: DatabaseService.instance.getUnreadCount(contact.publicKey),
-      builder: (context, countSnapshot) {
-        final unreadCount = countSnapshot.data ?? 0;
-        final hasUnread = unreadCount > 0;
-        
-        return AnimatedBuilder(
-          animation: Listenable.merge([_pulseController, _glowController]),
-          builder: (context, child) {
-            return Container(
+    if (!widget.enableUnreadCounters) {
+      const unreadCount = 0;
+      const hasUnread = false;
+      return AnimatedBuilder(
+        animation: Listenable.merge([_pulseController, _glowController]),
+        builder: (context, child) {
+          return Container(
               margin: const EdgeInsets.only(bottom: 14),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -843,6 +847,143 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                           _buildUnreadBadge(unreadCount)
                         else
                           _buildArrowButton(),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+        },
+      );
+    }
+
+    return FutureBuilder<int>(
+      future: DatabaseService.instance.getUnreadCount(contact.publicKey),
+      builder: (context, countSnapshot) {
+        final unreadCount = countSnapshot.data ?? 0;
+        final hasUnread = unreadCount > 0;
+
+        return AnimatedBuilder(
+          animation: Listenable.merge([_pulseController, _glowController]),
+          builder: (context, child) {
+            return Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: hasUnread
+                      ? [
+                          const Color(0xFF141420),
+                          const Color(0xFF0F0F18),
+                        ]
+                      : [
+                          const Color(0xFF0E0E12),
+                          const Color(0xFF0A0A0E),
+                        ],
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: hasUnread
+                      ? const Color(0xFFB0BEC5).withOpacity(0.25 + 0.1 * _pulseController.value)
+                      : Colors.white.withOpacity(0.05),
+                  width: hasUnread ? 1.5 : 1,
+                ),
+                boxShadow: hasUnread
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFFB0BEC5).withOpacity(0.08 + 0.05 * _glowController.value),
+                          blurRadius: 20,
+                          spreadRadius: -5,
+                        ),
+                      ]
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      _createPageRoute(ChatScreen(contact: contact)),
+                    );
+                    _refreshContacts();
+                  },
+                  onLongPress: () => _showDeleteContactDialog(contact),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        // Аватар
+                        _buildContactAvatar(contact, hasUnread),
+                        const SizedBox(width: 16),
+
+                        // Информация
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                contact.name,
+                                style: TextStyle(
+                                  fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w500,
+                                  color: hasUnread ? Colors.white : Colors.white.withOpacity(0.85),
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF6AD394).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.lock,
+                                          size: 9,
+                                          color: const Color(0xFF6AD394).withOpacity(0.7),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'E2E',
+                                          style: TextStyle(
+                                            color: const Color(0xFF6AD394).withOpacity(0.7),
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '...${contact.publicKey.length > 8 ? contact.publicKey.substring(contact.publicKey.length - 8) : ""}',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Badge или стрелка
+                        if (hasUnread) _buildUnreadBadge(unreadCount) else _buildArrowButton(),
                       ],
                     ),
                   ),

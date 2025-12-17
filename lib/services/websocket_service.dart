@@ -26,9 +26,14 @@ class WebSocketService {
   Timer? _pingTimer;
   bool _isDisconnectingIntentional = false;
 
+  // === Миграция домена: запоминаем текущий хост и умеем fallback ===
+  int _hostIndex = 0;
+  String get currentHost => AppConfig.apiHosts[_hostIndex.clamp(0, AppConfig.apiHosts.length - 1)];
+
   void connect(String myPublicKey) {
     _currentPublicKey = myPublicKey;
     _isDisconnectingIntentional = false;
+    _hostIndex = 0; // всегда начинаем с нового домена
 
     if (_statusController.value == ConnectionStatus.Connected ||
         _statusController.value == ConnectionStatus.Connecting) {
@@ -41,7 +46,7 @@ class WebSocketService {
   void _initConnection() {
     if (_currentPublicKey == null) return;
 
-    final uri = Uri.parse(AppConfig.webSocketUrl(_currentPublicKey!));
+    final uri = Uri.parse(AppConfig.webSocketUrl(_currentPublicKey!, host: currentHost));
     _statusController.add(ConnectionStatus.Connecting);
     print("WS: Попытка подключения к $uri...");
     DebugLogger.info('WS', 'Попытка подключения к $uri');
@@ -84,13 +89,21 @@ class WebSocketService {
       }).catchError((e) {
         print("WS FATAL: Не удалось подключиться: $e");
         DebugLogger.error('WS', 'FATAL: Не удалось подключиться: $e');
+        _rotateHost();
         _handleDisconnect();
       });
     } catch (e) {
       print("WS EXCEPTION: $e");
       DebugLogger.error('WS', 'EXCEPTION: $e');
+      _rotateHost();
       _handleDisconnect();
     }
+  }
+
+  void _rotateHost() {
+    if (AppConfig.apiHosts.isEmpty) return;
+    _hostIndex = (_hostIndex + 1) % AppConfig.apiHosts.length;
+    DebugLogger.warn('WS', 'Переключение хоста: $currentHost');
   }
 
   void _sendFcmToken() {
@@ -203,9 +216,12 @@ class WebSocketService {
   Future<void> _sendSignalViaHttp(String recipientPublicKey, String signalType) async {
     DebugLogger.info('HTTP', 'Отправка $signalType через HTTP fallback...');
     try {
-      final url = AppConfig.httpUrl('/api/signal');
-      final response = await http.post(
-        Uri.parse(url),
+      http.Response? response;
+
+      // 1) сначала пробуем текущий хост (если WS уже установлен/пытались подключаться)
+      final primaryUrl = AppConfig.httpUrl('/api/signal', host: currentHost);
+      response = await http.post(
+        Uri.parse(primaryUrl),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'sender_pubkey': _currentPublicKey,
@@ -213,6 +229,8 @@ class WebSocketService {
           'signal_type': signalType,
         }),
       ).timeout(const Duration(seconds: 5));
+
+      // 2) если запрос упал исключением — уйдём в catch и попробуем fallback ниже
       
       if (response.statusCode == 200) {
         print("✅ HTTP: [$signalType] успешно отправлен");
@@ -222,6 +240,29 @@ class WebSocketService {
         DebugLogger.error('HTTP', '[$signalType] ошибка ${response.statusCode}');
       }
     } catch (e) {
+      // fallback по всем хостам
+      for (final url in AppConfig.httpUrls('/api/signal')) {
+        try {
+          final response = await http.post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({
+              'sender_pubkey': _currentPublicKey,
+              'recipient_pubkey': recipientPublicKey,
+              'signal_type': signalType,
+            }),
+          ).timeout(const Duration(seconds: 5));
+
+          if (response.statusCode == 200) {
+            print("✅ HTTP: [$signalType] успешно отправлен (fallback)");
+            DebugLogger.success('HTTP', '[$signalType] успешно отправлен (fallback) (${response.statusCode})');
+            return;
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+
       print("❌ HTTP: [$signalType] исключение: $e");
       DebugLogger.error('HTTP', '[$signalType] исключение: $e');
     }

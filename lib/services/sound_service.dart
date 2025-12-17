@@ -1,5 +1,6 @@
 // lib/services/sound_service.dart
 
+import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 
 class SoundService {
@@ -7,7 +8,9 @@ class SoundService {
   // Приватный конструктор
   SoundService._internal() {
     // Конфигурация происходит один раз при создании
-    _dialingPlayer.setReleaseMode(ReleaseMode.loop);
+    // Важно: в тестовой среде platform channel может быть недоступен.
+    // Не даём Future завершиться необработанным исключением.
+    unawaited(_dialingPlayer.setReleaseMode(ReleaseMode.loop).catchError((_) {}));
   }
   // Единственный экземпляр
   static final SoundService instance = SoundService._internal();
@@ -16,27 +19,28 @@ class SoundService {
   final AudioPlayer _dialingPlayer = AudioPlayer();
   final AudioPlayer _notificationPlayer = AudioPlayer();
   final bool _isDisposed = false;
+  static const Duration _audioTimeout = Duration(seconds: 2);
 
   Future<void> playDialingSound() async {
     if (_isDisposed) return;
     try {
       // Устанавливаем источник каждый раз, это надежнее
-      await _dialingPlayer.setSource(AssetSource('sounds/dialing.mp3'));
-      await _dialingPlayer.resume();
+      await _dialingPlayer.setSource(AssetSource('sounds/dialing.mp3')).timeout(_audioTimeout);
+      await _dialingPlayer.resume().timeout(_audioTimeout);
     } catch (e) { print("Ошибка playDialingSound: $e"); }
   }
 
   Future<void> playConnectedSound() async {
     if (_isDisposed) return;
     try {
-      await _notificationPlayer.play(AssetSource('sounds/connected.mp3'));
+      await _notificationPlayer.play(AssetSource('sounds/connected.mp3')).timeout(_audioTimeout);
     } catch (e) { print("Ошибка playConnectedSound: $e"); }
   }
 
   Future<void> playDisconnectedSound() async {
     if (_isDisposed) return;
     try {
-      await _notificationPlayer.play(AssetSource('sounds/disconnected.mp3'));
+      await _notificationPlayer.play(AssetSource('sounds/disconnected.mp3')).timeout(_audioTimeout);
     } catch (e) { print("Ошибка playDisconnectedSound: $e"); }
   }
 
@@ -44,10 +48,10 @@ class SoundService {
     if (_isDisposed) return;
     try {
       if (_dialingPlayer.state == PlayerState.playing) {
-        await _dialingPlayer.pause();
+        await _dialingPlayer.pause().timeout(_audioTimeout);
       }
       if (_notificationPlayer.state == PlayerState.playing) {
-        await _notificationPlayer.stop();
+        await _notificationPlayer.stop().timeout(_audioTimeout);
       }
     } catch (e) { print("Ошибка stopAllSounds: $e"); }
   }

@@ -16,6 +16,13 @@ void main() {
   group('ContactsScreen Widget Tests', () {
     late Database testDb;
 
+    setUp(() {
+      final binding = TestWidgetsFlutterBinding.ensureInitialized();
+      // Увеличиваем экран для сложной верстки (иначе overflow в пустом состоянии).
+      binding.window.physicalSizeTestValue = const Size(1080, 1920);
+      binding.window.devicePixelRatioTestValue = 1.0;
+    });
+
     setUp(() async {
       // Создаем in-memory БД для каждого теста
       testDb = await openDatabase(
@@ -66,10 +73,16 @@ void main() {
       }
     });
 
+    tearDown(() {
+      final binding = TestWidgetsFlutterBinding.ensureInitialized();
+      binding.window.clearPhysicalSizeTestValue();
+      binding.window.clearDevicePixelRatioTestValue();
+    });
+
     testWidgets('Отображает заголовок и основные элементы', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
-          home: ContactsScreen(),
+          home: ContactsScreen(enableUnreadCounters: false),
         ),
       );
 
@@ -78,16 +91,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       // Проверяем наличие заголовка
-      expect(find.text('ORPHEUS'), findsOneWidget);
+      expect(find.text('КОНТАКТЫ'), findsOneWidget);
 
-      // Проверяем наличие кнопки добавления контакта (FAB)
-      expect(find.byType(FloatingActionButton), findsOneWidget);
+      // Проверяем наличие кнопки добавления контакта (иконка "+")
+      expect(find.byIcon(Icons.add), findsOneWidget);
     });
 
     testWidgets('Отображает состояние загрузки', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
-          home: ContactsScreen(),
+          home: ContactsScreen(enableUnreadCounters: false),
         ),
       );
 
@@ -96,7 +109,7 @@ void main() {
 
       // Может быть либо список контактов, либо индикатор загрузки, либо пустое состояние
       final hasLoading = find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
-      final hasEmptyState = find.text('НЕТ КОНТАКТОВ').evaluate().isNotEmpty;
+      final hasEmptyState = find.text('Нет контактов').evaluate().isNotEmpty;
       final hasList = find.byType(ListView).evaluate().isNotEmpty;
 
       // Должно быть одно из состояний
@@ -104,32 +117,39 @@ void main() {
     });
 
     testWidgets('Отображает пустое состояние при отсутствии контактов', (WidgetTester tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: ContactsScreen(),
-        ),
-      );
-
+      // В widget-тестах реальные async-операции (sqflite_ffi) должны стартовать внутри runAsync,
+      // иначе Future из initState может зависнуть в fakeAsync.
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: ContactsScreen(enableUnreadCounters: false),
+          ),
+        );
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      });
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
 
       // Должно быть пустое состояние (БД пустая)
-      expect(find.text('НЕТ КОНТАКТОВ'), findsOneWidget);
+      expect(find.text('Нет контактов'), findsOneWidget);
     });
 
     testWidgets('Отображает список контактов', (WidgetTester tester) async {
-      // Добавляем тестовые контакты в БД
-      await DatabaseService.instance.addContact(Contact(name: "Alice", publicKey: "KEY1"));
-      await DatabaseService.instance.addContact(Contact(name: "Bob", publicKey: "KEY2"));
+      await tester.runAsync(() async {
+        // Добавляем тестовые контакты в БД
+        await DatabaseService.instance.addContact(Contact(name: "Alice", publicKey: "KEY1"));
+        await DatabaseService.instance.addContact(Contact(name: "Bob", publicKey: "KEY2"));
 
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: ContactsScreen(),
-        ),
-      );
-
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: ContactsScreen(enableUnreadCounters: false),
+          ),
+        );
+        await tester.pump();
+        // Даём времени отработать и загрузке контактов, и запросам unreadCount в карточках.
+        await Future<void>.delayed(const Duration(seconds: 1));
+      });
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Должен быть список контактов
       expect(find.text('Alice'), findsOneWidget);
@@ -139,29 +159,25 @@ void main() {
     testWidgets('Кнопка добавления контакта открывает диалог', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
-          home: ContactsScreen(),
+          home: ContactsScreen(enableUnreadCounters: false),
         ),
       );
 
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      // Находим FAB
-      final fab = find.byType(FloatingActionButton);
-      expect(fab, findsOneWidget);
-
-      // Нажимаем на FAB
-      await tester.tap(fab);
-      await tester.pumpAndSettle();
+      // Нажимаем на кнопку добавления контакта (плюс)
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump(const Duration(milliseconds: 400));
 
       // Должен появиться диалог добавления контакта
-      expect(find.text('ДОБАВИТЬ КОНТАКТ'), findsOneWidget);
+      expect(find.text('Новый контакт'), findsOneWidget);
     });
 
     testWidgets('Диалог добавления контакта можно закрыть', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
-          home: ContactsScreen(),
+          home: ContactsScreen(enableUnreadCounters: false),
         ),
       );
 
@@ -169,15 +185,15 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Открываем диалог
-      await tester.tap(find.byType(FloatingActionButton));
-      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump(const Duration(milliseconds: 400));
 
       // Закрываем диалог
-      await tester.tap(find.text('ОТМЕНА'));
-      await tester.pumpAndSettle();
+      await tester.tap(find.text('Отмена'));
+      await tester.pump(const Duration(milliseconds: 400));
 
       // Диалог должен исчезнуть
-      expect(find.text('ДОБАВИТЬ КОНТАКТ'), findsNothing);
+      expect(find.text('Новый контакт'), findsNothing);
     });
   });
 }

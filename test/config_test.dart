@@ -35,6 +35,29 @@ void main() {
       expect(url, endsWith('/api/test'));
     });
 
+    test('Список fallback-хостов определён и содержит legacy', () {
+      expect(AppConfig.apiHosts, isNotEmpty);
+      expect(AppConfig.apiHosts, contains(AppConfig.legacyHost));
+    });
+
+    test('httpUrl поддерживает явный host', () {
+      final url = AppConfig.httpUrl('/api/test', host: 'example.com');
+      expect(url, equals('https://example.com/api/test'));
+    });
+
+    test('webSocketUrl поддерживает явный host', () {
+      final url = AppConfig.webSocketUrl('pk', host: 'example.com');
+      expect(url, equals('wss://example.com/ws/pk'));
+    });
+
+    test('httpUrls возвращает URL для всех хостов', () {
+      final urls = AppConfig.httpUrls('/api/check-update').toList();
+      expect(urls.length, equals(AppConfig.apiHosts.length));
+      for (final h in AppConfig.apiHosts) {
+        expect(urls, contains('https://$h/api/check-update'));
+      }
+    });
+
     test('Генерация HTTP URL с разными путями', () {
       final url1 = AppConfig.httpUrl('/api/check-update');
       final url2 = AppConfig.httpUrl('/api/users');

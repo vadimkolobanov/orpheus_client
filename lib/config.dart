@@ -2,18 +2,49 @@ class AppConfig {
   // ФИНАЛЬНЫЙ РЕЛИЗ 1.0.0
   static const String appVersion = "v1.1.0";
 
-  // IP сервера
-  static const String serverIp = 'vadimkolobanov-orpheus-d95e.twc1.net';
+  // === ХОСТЫ (миграция домена) ===
+  // Старый домен остаётся рабочим для уже выпущенных клиентов.
+  static const String legacyHost = 'vadimkolobanov-orpheus-d95e.twc1.net';
+
+  // Новый домен API/связи (цель миграции).
+  static const String primaryApiHost = 'api.orpheus.click';
+
+  /// Приоритетный список хостов API/WS.
+  /// Важно: первым идёт новый домен, затем старый (fallback).
+  static const List<String> apiHosts = [
+    primaryApiHost,
+    legacyHost,
+  ];
+
+  /// Для совместимости со старым кодом/тестами.
+  /// В новых релизах это будет `api.orpheus.click`,
+  /// а при проблемах сервисы будут падать обратно на `legacyHost`.
+  static const String serverIp = primaryApiHost;
   // static const String serverIp = '10.0.2.2:8000'; // Для локальных тестов
 
   // --- Готовые URL ---
-  static String webSocketUrl(String publicKey) {
+  static String webSocketUrl(String publicKey, {String? host}) {
     final encodedPublicKey = Uri.encodeComponent(publicKey);
-    return 'wss://$serverIp/ws/$encodedPublicKey';
+    final h = host ?? serverIp;
+    return 'wss://$h/ws/$encodedPublicKey';
   }
 
-  static String httpUrl(String path) {
-    return 'https://$serverIp$path';
+  static String httpUrl(String path, {String? host}) {
+    final h = host ?? serverIp;
+    return 'https://$h$path';
+  }
+
+  /// Перечень URL (по всем хостам) для безопасного fallback.
+  static Iterable<String> httpUrls(String path) sync* {
+    for (final h in apiHosts) {
+      yield httpUrl(path, host: h);
+    }
+  }
+
+  static Iterable<String> webSocketUrls(String publicKey) sync* {
+    for (final h in apiHosts) {
+      yield webSocketUrl(publicKey, host: h);
+    }
   }
 
   // --- История обновлений (Changelog) ---

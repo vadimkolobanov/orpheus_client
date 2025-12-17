@@ -1,5 +1,6 @@
 // lib/welcome_screen.dart
 
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:orpheus_project/main.dart';
@@ -14,6 +15,8 @@ class WelcomeScreen extends StatefulWidget {
 
 class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateMixin {
   final _importController = TextEditingController();
+
+  Timer? _revealTimer;
   
   // Анимации
   late AnimationController _particlesController;
@@ -89,13 +92,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
     );
     
     // Запуск reveal анимации
-    Future.delayed(const Duration(milliseconds: 300), () {
+    _revealTimer?.cancel();
+    _revealTimer = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
       _revealController.forward();
     });
   }
 
   @override
   void dispose() {
+    _revealTimer?.cancel();
     _particlesController.dispose();
     _glowController.dispose();
     _revealController.dispose();

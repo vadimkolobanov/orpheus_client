@@ -1,4 +1,4 @@
-﻿# AI_WORKLOG
+# AI_WORKLOG
 
 Журнал действий ИИ/агента в этом репозитории (клиент).
 
@@ -182,3 +182,29 @@
   - `lib/config.dart`
   - `CHANGELOG.md`
   - `AI_WORKLOG.md`
+
+## 2025-12-17
+- Time: текущее время local
+- Task: Миграция домена `orpheus.click` — подготовка клиента (fallback) + документация + стабилизация тестов
+- Changes:
+  - Добавлена схема миграции доменов: `orpheus.click` (сайт), `api.orpheus.click` (API/WS), `update.orpheus.click` (обновления).
+  - Клиент: введён список хостов (новый → старый) и безопасный fallback для HTTP/WS.
+  - Обновления: запрос `check-update` выполняется с fallback по хостам; `download_url` поддерживает абсолютные ссылки (для `update.orpheus.click`).
+  - WebSocket: при ошибках подключения переключаемся на следующий хост; HTTP fallback для критичных сигналов пробует хосты.
+  - Стабилизированы тесты: устранены pending timers/флейки в widget-тестах, добавлены проверки для доменной миграции.
+- Files:
+  - `docs/DOMAIN_MIGRATION_orpheus.click.md`
+  - `lib/config.dart`
+  - `lib/services/update_service.dart`
+  - `lib/services/websocket_service.dart`
+  - `lib/contacts_screen.dart`
+  - `lib/welcome_screen.dart`
+  - `lib/services/sound_service.dart`
+  - `test/config_test.dart`
+  - `test/services/update_service_test.dart`
+  - `test/widgets/contacts_screen_test.dart`
+  - `test/widgets/welcome_screen_test.dart`
+  - `pubspec.lock`
+  - `CHANGELOG.md`
+- Commands:
+  - `flutter test`

@@ -8,6 +8,8 @@ import 'package:orpheus_project/config.dart';
 class UpdateService {
   static bool _isUpdateDialogShown = false;
 
+  static const Duration _networkTimeout = Duration(seconds: 5);
+
   // Главный метод проверки
   static Future<void> checkForUpdate(BuildContext context) async {
     if (_isUpdateDialogShown) return; // Не спамить окнами
@@ -21,10 +23,9 @@ class UpdateService {
 
       // 2. Спрашиваем сервер
       // Запрос идет к API, которое читает версию из БД
-      final url = Uri.parse(AppConfig.httpUrl('/api/check-update'));
-      final response = await http.get(url);
+      final response = await _getWithFallback('/api/check-update');
 
-      if (response.statusCode == 200) {
+      if (response != null && response.statusCode == 200) {
         final data = json.decode(response.body);
 
         int serverBuildNumber = data['version_code'];
@@ -46,13 +47,37 @@ class UpdateService {
     }
   }
 
+  /// Запрос с fallback по списку `AppConfig.apiHosts`.
+  /// Возвращает первый успешный ответ (HTTP 200..499/500 тоже как ответ),
+  /// либо null если не удалось достучаться ни до одного хоста.
+  static Future<http.Response?> _getWithFallback(String path) async {
+    for (final urlStr in AppConfig.httpUrls(path)) {
+      try {
+        final uri = Uri.parse(urlStr);
+        final resp = await http.get(uri).timeout(_networkTimeout);
+        return resp;
+      } catch (_) {
+        // пробуем следующий хост
+        continue;
+      }
+    }
+    return null;
+  }
+
+  static String resolveDownloadUrl(String urlPath) {
+    // Абсолютные ссылки (например update.orpheus.click) используем как есть.
+    if (urlPath.startsWith("http://") || urlPath.startsWith("https://")) {
+      return urlPath;
+    }
+    // Относительные ссылки резолвим через текущий serverIp (новый домен в новых релизах).
+    return AppConfig.httpUrl(urlPath);
+  }
+
   static void _showUpdateDialog(BuildContext context, String version, String urlPath, bool required) {
     _isUpdateDialogShown = true;
 
     // Формируем полную ссылку
-    String fullUrl = urlPath.startsWith("http")
-        ? urlPath
-        : AppConfig.httpUrl(urlPath);
+    String fullUrl = resolveDownloadUrl(urlPath);
 
     showDialog(
       context: context,
