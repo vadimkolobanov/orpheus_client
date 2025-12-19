@@ -21,7 +21,6 @@ class ChatMessage {
 
   // Конвертация статуса в int для БД
   static int _statusToInt(MessageStatus status) => status.index;
-  static MessageStatus _intToStatus(int index) => MessageStatus.values[index];
 
   Map<String, dynamic> toMap(String contactKey) {
     return {

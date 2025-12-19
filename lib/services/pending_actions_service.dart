@@ -1,7 +1,6 @@
 // lib/services/pending_actions_service.dart
 
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
 /// Сервис для хранения и обработки отложенных действий (например, отклонение звонков)
 /// когда приложение закрыто и WebSocket не подключен

@@ -285,3 +285,84 @@
   - `AI_WORKLOG.md`
 - Commands:
   - (не запускались)
+
+## 2025-12-19
+- Time: 16:18 local
+- Task: Клиент — обновить текст дисклеймера бета-версии
+- Changes:
+  - Обновлён текст дисклеймера на входе под формулировки “бета-версия” и “закрытое тестирование”.
+  - Разделены действия: кнопка “Я понял(а)” + чекбокс “Больше не показывать” (флаг сохраняется только при выборе).
+  - Обновлены widget-тесты под новый текст/кнопки.
+- Files:
+  - `lib/screens/home_screen.dart`
+  - `test/widgets/beta_disclaimer_test.dart`
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`
+- Commands:
+  - `flutter test test/widgets/beta_disclaimer_test.dart`
+
+## 2025-12-19
+- Time: 16:52 local
+- Task: Клиент — presence-статусы в контактах и чате
+- Changes:
+  - Добавлен `PresenceService`: подписка/отписка и обработка `presence-state` / `presence-update` по WebSocket.
+  - Контакты: подписка на presence для списка контактов + онлайн-индикатор в карточке.
+  - Чат: отображение статуса “В сети / Не в сети” в заголовке.
+- Files:
+  - `lib/services/presence_service.dart`
+  - `lib/main.dart`
+  - `lib/contacts_screen.dart`
+  - `lib/chat_screen.dart`
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`
+- Commands:
+  - (рекомендуется) `flutter analyze`
+  - (рекомендуется) `flutter test`
+
+## 2025-12-19
+- Time: 16:52 local
+- Task: Процесс — уточнить scope правил для Cursor
+- Changes:
+  - Обновлены правила `.cursor/rules/00-scope.md`: добавлен `alwaysApply` и уточнён процесс/ограничения работы.
+- Files:
+  - `.cursor/rules/00-scope.md`
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`
+- Commands:
+  - (не запускались)
+
+## 2025-12-19
+- Time: 17:02 local
+- Task: Техдолг — убрать предупреждения анализатора
+- Changes:
+  - Удалены неиспользуемые элементы (импорты/поля/методы) и упрощены ветки UI без `dead_code`.
+- Files:
+  - `lib/chat_screen.dart`
+  - `lib/contacts_screen.dart`
+  - `lib/main.dart`
+  - `lib/models/chat_message_model.dart`
+  - `lib/screens/settings_screen.dart`
+  - `lib/services/incoming_call_buffer.dart`
+  - `lib/services/pending_actions_service.dart`
+  - `lib/updates_screen.dart`
+  - `AI_WORKLOG.md`
+- Commands:
+  - `flutter analyze`
+  - `flutter test`
+
+## 2025-12-19
+- Time: 18:03 local
+- Task: Клиент — оформить сообщения о звонках в чате
+- Changes:
+  - В чате сообщения “Входящий/Исходящий/Пропущен звонок” отображаются как карточки с иконкой и акцентным цветом (не как обычный текст).
+  - Для “Пропущен звонок” показываем направление (входящий/исходящий).
+  - Добавлены unit-тесты для `PresenceService` (подписка/отписка, diff, chunking, парсинг `presence-state`/`presence-update`).
+- Files:
+  - `lib/chat_screen.dart`
+  - `test/services/presence_service_test.dart`
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`
+- Commands:
+  - `flutter analyze`
+  - `flutter test`
+  - `flutter test test/services/presence_service_test.dart`

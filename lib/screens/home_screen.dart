@@ -76,46 +76,84 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final dismissed = await _isBetaDisclaimerDismissed();
     if (dismissed || !mounted) return;
 
+    bool dontShowAgain = false;
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.info_outline, color: Colors.orange),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Важно',
-                style: TextStyle(color: Colors.white, fontSize: 18),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.orange),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'ВАЖНО',
+                  style: TextStyle(color: Colors.white, fontSize: 18),
+                ),
               ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Вы используете бета-версию приложения',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Сейчас приложение проходит закрытое тестирование. '
+                  'Возможны непредвиденные сбои и ошибки. '
+                  'Мы постоянно работаем над улучшением сервиса',
+                  style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.35),
+                ),
+                const SizedBox(height: 6),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: dontShowAgain,
+                  onChanged: (value) {
+                    setState(() {
+                      dontShowAgain = value ?? false;
+                    });
+                  },
+                  activeColor: const Color(0xFF6AD394),
+                  checkColor: Colors.black,
+                  title: const Text(
+                    'Больше не показывать',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6AD394),
+                foregroundColor: Colors.black,
+              ),
+              onPressed: () async {
+                if (dontShowAgain) {
+                  await _setBetaDisclaimerDismissed();
+                }
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Я понял(а)'),
             ),
           ],
         ),
-        content: const SingleChildScrollView(
-          child: Text(
-            'Вы используете версию приложения, проходящую тестирование.\n\n'
-            'Возможны нестабильности и неоднозначное поведение в отдельных сценариях. '
-            'Мы постепенно выявляем такие случаи и оперативно исправляем.\n\n'
-            'Пожалуйста, не воспринимайте это как “идеальный” релиз.',
-            style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.35),
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF6AD394),
-              foregroundColor: Colors.black,
-            ),
-            onPressed: () async {
-              await _setBetaDisclaimerDismissed();
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text('Я понял(а) и больше не показывать'),
-          ),
-        ],
       ),
     );
   }

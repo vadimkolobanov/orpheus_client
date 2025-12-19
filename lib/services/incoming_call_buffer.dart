@@ -13,7 +13,6 @@ class IncomingCallBuffer {
 
   /// Гарантирует, что для отправителя есть список.
   /// Не очищает существующие данные (кандидаты, пришедшие до offer, сохраняются).
-  @visibleForTesting
   void ensure(String senderPublicKey) {
     _bySender.putIfAbsent(senderPublicKey, () => <Map<String, dynamic>>[]);
   }

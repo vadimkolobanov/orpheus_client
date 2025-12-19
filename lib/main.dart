@@ -17,6 +17,7 @@ import 'package:orpheus_project/services/incoming_message_handler.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/panic_wipe_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
+import 'package:orpheus_project/services/presence_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/theme/app_theme.dart';
 import 'package:orpheus_project/welcome_screen.dart';
@@ -25,6 +26,7 @@ import 'package:orpheus_project/screens/home_screen.dart';
 // Глобальные сервисы
 final cryptoService = CryptoService();
 final websocketService = WebSocketService();
+final presenceService = PresenceService(websocketService);
 final notificationService = NotificationService();
 final authService = AuthService.instance;
 final panicWipeService = PanicWipeService.instance;
@@ -183,7 +185,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _isCheckCompleted = false;
   late bool _keysExist;
   bool _isLocked = false;
-  bool _needsRestart = false; // Флаг для перезапуска после wipe
 
   @override
   void initState() {
@@ -197,7 +198,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       DebugLogger.warn('APP', '⚠️ PANIC WIPE - restarting app');
       if (mounted) {
         setState(() {
-          _needsRestart = true;
           _keysExist = false;
         });
       }

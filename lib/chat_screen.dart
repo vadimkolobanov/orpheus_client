@@ -40,6 +40,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    // Presence: гарантируем, что собеседник находится в watched-наборе.
+    presenceService.addWatchedPubkeys([widget.contact.publicKey]);
+
     _encryptionController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -264,6 +267,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       child: AnimatedBuilder(
         animation: _headerPulseController,
         builder: (context, child) {
+          final isOnline = presenceService.isOnline(widget.contact.publicKey);
           return ClipRRect(
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
@@ -310,28 +314,31 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                               const SizedBox(height: 2),
                               Row(
                                 children: [
-                                  Container(
-                                    width: 7,
-                                    height: 7,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF6AD394).withOpacity(
-                                        0.6 + 0.4 * _headerPulseController.value
-                                      ),
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFF6AD394).withOpacity(0.4),
-                                          blurRadius: 4,
+                                  if (isOnline)
+                                    Container(
+                                      width: 7,
+                                      height: 7,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF6AD394).withOpacity(
+                                          0.6 + 0.4 * _headerPulseController.value,
                                         ),
-                                      ],
-                                    ),
-                                  ),
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF6AD394).withOpacity(0.4),
+                                            blurRadius: 4,
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else
+                                    const SizedBox(width: 7, height: 7),
                                   const SizedBox(width: 6),
                                   Text(
-                                    "Защищённый канал",
+                                    isOnline ? "В сети" : "Не в сети",
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.grey.shade500,
+                                      color: isOnline ? Colors.grey.shade500 : Colors.grey.shade600,
                                     ),
                                   ),
                                 ],
@@ -437,44 +444,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildSecurityBanner() {
-    return AnimatedBuilder(
-      animation: _headerPulseController,
-      builder: (context, child) {
-        return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFF6AD394).withOpacity(0.08),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: const Color(0xFF6AD394).withOpacity(0.15),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.verified_user,
-                size: 14,
-                color: const Color(0xFF6AD394).withOpacity(0.7 + 0.3 * _headerPulseController.value),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                "Сквозное шифрование · ChaCha20-Poly1305",
-                style: TextStyle(
-                  fontSize: 11,
-                  color: const Color(0xFF6AD394).withOpacity(0.8),
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildEmptyChatState() {
     return Center(
       child: AnimatedBuilder(
@@ -535,6 +504,29 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final shouldAnimate = !_animatedMessageIds.contains(messageId);
     if (shouldAnimate) {
       _animatedMessageIds.add(messageId);
+    }
+
+    final callUi = _callStatusUiFor(message);
+    if (callUi != null) {
+      final callWidget = _buildCallStatusItem(message, callUi, timeStr);
+      if (shouldAnimate) {
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+          child: callWidget,
+          builder: (context, value, child) {
+            return Transform.scale(
+              scale: 0.96 + 0.04 * value,
+              child: Opacity(
+                opacity: value,
+                child: child,
+              ),
+            );
+          },
+        );
+      }
+      return callWidget;
     }
 
     Widget messageWidget = Align(
@@ -673,6 +665,159 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
 
     return messageWidget;
+  }
+
+  _CallStatusUi? _callStatusUiFor(ChatMessage message) {
+    final text = message.text.trim();
+
+    if (text == 'Входящий звонок') {
+      return const _CallStatusUi(
+        icon: Icons.call_received,
+        accent: Color(0xFF6AD394),
+        title: 'Звонок',
+        subtitle: 'Входящий',
+      );
+    }
+
+    if (text == 'Исходящий звонок') {
+      return const _CallStatusUi(
+        icon: Icons.call_made,
+        accent: Color(0xFF4A90D9),
+        title: 'Звонок',
+        subtitle: 'Исходящий',
+      );
+    }
+
+    if (text == 'Пропущен звонок') {
+      final isOutgoing = message.isSentByMe;
+      return _CallStatusUi(
+        icon: isOutgoing ? Icons.call_made : Icons.call_missed,
+        accent: const Color(0xFFE57373),
+        title: 'Пропущенный звонок',
+        subtitle: isOutgoing ? 'Исходящий' : 'Входящий',
+      );
+    }
+
+    return null;
+  }
+
+  Widget _buildCallStatusItem(ChatMessage message, _CallStatusUi ui, String timeStr) {
+    final isMyMessage = message.isSentByMe;
+    final accent = ui.accent;
+
+    return Align(
+      alignment: Alignment.center,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.82,
+        ),
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => CallScreen(contactPublicKey: widget.contact.publicKey),
+              ),
+            ),
+            borderRadius: BorderRadius.circular(18),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    accent.withOpacity(0.16),
+                    const Color(0xFF12121A),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: accent.withOpacity(0.32),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withOpacity(0.12),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: accent.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: accent.withOpacity(0.28),
+                      ),
+                    ),
+                    child: Icon(
+                      ui.icon,
+                      color: accent.withOpacity(0.95),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          ui.title,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          ui.subtitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        timeStr,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      if (isMyMessage) ...[
+                        const SizedBox(height: 2),
+                        Icon(
+                          Icons.done_all,
+                          size: 14,
+                          color: const Color(0xFF4A90D9).withOpacity(0.8),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildModernInputArea() {
@@ -851,6 +996,20 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       },
     );
   }
+}
+
+class _CallStatusUi {
+  final IconData icon;
+  final Color accent;
+  final String title;
+  final String subtitle;
+
+  const _CallStatusUi({
+    required this.icon,
+    required this.accent,
+    required this.title,
+    required this.subtitle,
+  });
 }
 
 // Фоновый painter для чата

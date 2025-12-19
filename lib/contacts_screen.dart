@@ -89,6 +89,9 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
       // Важно: это локальная БД. Таймаут здесь создаёт Timer и ухудшает стабильность widget-тестов.
       // Если будут реальные зависания — лучше решать на уровне DatabaseService/инициализации, а не UI.
       final contacts = await DatabaseService.instance.getContacts();
+
+      // Presence: подписываемся на статусы всех контактов (diff внутри сервиса).
+      presenceService.setWatchedPubkeys(contacts.map((c) => c.publicKey));
       
       if (mounted) {
         setState(() => _isLoading = false);
@@ -163,7 +166,14 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                         return _buildEmptyState();
                       }
 
-                      return _buildContactsList(contacts);
+                      return StreamBuilder<Map<String, bool>>(
+                        stream: presenceService.stream,
+                        initialData: const <String, bool>{},
+                        builder: (context, presenceSnapshot) {
+                          final presence = presenceSnapshot.data ?? const <String, bool>{};
+                          return _buildContactsList(contacts, presence);
+                        },
+                      );
                     },
                   ),
                 ),
@@ -358,86 +368,6 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildSecurityStatus() {
-    return AnimatedBuilder(
-      animation: _glowController,
-      builder: (context, child) {
-        return Container(
-          margin: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                const Color(0xFF6AD394).withOpacity(0.08),
-                const Color(0xFF6AD394).withOpacity(0.03),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: const Color(0xFF6AD394).withOpacity(0.12 + 0.05 * _glowController.value),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6AD394).withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  Icons.shield,
-                  size: 14,
-                  color: const Color(0xFF6AD394).withOpacity(0.8 + 0.2 * _glowController.value),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Сквозное шифрование",
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF6AD394).withOpacity(0.9),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      "Все сообщения защищены E2E",
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6AD394).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  "АКТИВНО",
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF6AD394).withOpacity(0.9),
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 
@@ -694,12 +624,13 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
     );
   }
 
-  Widget _buildContactsList(List<Contact> contacts) {
+  Widget _buildContactsList(List<Contact> contacts, Map<String, bool> presence) {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
       itemCount: contacts.length,
       itemBuilder: (context, index) {
         final contact = contacts[index];
+        final isOnline = presence[contact.publicKey] == true;
         
         return TweenAnimationBuilder<double>(
           tween: Tween(begin: 0, end: 1),
@@ -710,7 +641,7 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
               offset: Offset(0, 25 * (1 - value)),
               child: Opacity(
                 opacity: value,
-                child: _buildContactCard(contact, index),
+                child: _buildContactCard(contact, index, isOnline: isOnline),
               ),
             );
           },
@@ -719,10 +650,8 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
     );
   }
 
-  Widget _buildContactCard(Contact contact, int index) {
+  Widget _buildContactCard(Contact contact, int index, {required bool isOnline}) {
     if (!widget.enableUnreadCounters) {
-      const unreadCount = 0;
-      const hasUnread = false;
       return AnimatedBuilder(
         animation: Listenable.merge([_pulseController, _glowController]),
         builder: (context, child) {
@@ -732,38 +661,23 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: hasUnread
-                      ? [
-                          const Color(0xFF141420),
-                          const Color(0xFF0F0F18),
-                        ]
-                      : [
-                          const Color(0xFF0E0E12),
-                          const Color(0xFF0A0A0E),
-                        ],
+                  colors: const [
+                    Color(0xFF0E0E12),
+                    Color(0xFF0A0A0E),
+                  ],
                 ),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: hasUnread
-                      ? const Color(0xFFB0BEC5).withOpacity(0.25 + 0.1 * _pulseController.value)
-                      : Colors.white.withOpacity(0.05),
-                  width: hasUnread ? 1.5 : 1,
+                  color: Colors.white.withOpacity(0.05),
+                  width: 1,
                 ),
-                boxShadow: hasUnread
-                    ? [
-                        BoxShadow(
-                          color: const Color(0xFFB0BEC5).withOpacity(0.08 + 0.05 * _glowController.value),
-                          blurRadius: 20,
-                          spreadRadius: -5,
-                        ),
-                      ]
-                    : [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Material(
                 color: Colors.transparent,
@@ -782,7 +696,7 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                     child: Row(
                       children: [
                         // Аватар
-                        _buildContactAvatar(contact, hasUnread),
+                        _buildContactAvatar(contact, false, isOnline: isOnline),
                         const SizedBox(width: 16),
                         
                         // Информация
@@ -793,8 +707,8 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                               Text(
                                 contact.name,
                                 style: TextStyle(
-                                  fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w500,
-                                  color: hasUnread ? Colors.white : Colors.white.withOpacity(0.85),
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white.withOpacity(0.85),
                                   fontSize: 16,
                                 ),
                               ),
@@ -843,10 +757,7 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                         ),
                         
                         // Badge или стрелка
-                        if (hasUnread)
-                          _buildUnreadBadge(unreadCount)
-                        else
-                          _buildArrowButton(),
+                        _buildArrowButton(),
                       ],
                     ),
                   ),
@@ -922,7 +833,7 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                     child: Row(
                       children: [
                         // Аватар
-                        _buildContactAvatar(contact, hasUnread),
+                        _buildContactAvatar(contact, hasUnread, isOnline: isOnline),
                         const SizedBox(width: 16),
 
                         // Информация
@@ -996,64 +907,93 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
     );
   }
 
-  Widget _buildContactAvatar(Contact contact, bool hasUnread) {
+  Widget _buildContactAvatar(Contact contact, bool hasUnread, {required bool isOnline}) {
     return AnimatedBuilder(
       animation: _pulseController,
       builder: (context, child) {
-        return Container(
-          padding: const EdgeInsets.all(2),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: hasUnread
-                ? LinearGradient(
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: hasUnread
+                    ? LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          const Color(0xFFB0BEC5).withOpacity(0.6 + 0.2 * _pulseController.value),
+                          const Color(0xFF6AD394).withOpacity(0.4 + 0.2 * _pulseController.value),
+                        ],
+                      )
+                    : null,
+                boxShadow: hasUnread
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFFB0BEC5).withOpacity(0.25),
+                          blurRadius: 12,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [
-                      const Color(0xFFB0BEC5).withOpacity(0.6 + 0.2 * _pulseController.value),
-                      const Color(0xFF6AD394).withOpacity(0.4 + 0.2 * _pulseController.value),
-                    ],
-                  )
-                : null,
-            boxShadow: hasUnread
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFFB0BEC5).withOpacity(0.25),
-                      blurRadius: 12,
-                      spreadRadius: 1,
+                    colors: hasUnread
+                        ? [
+                            const Color(0xFFB0BEC5),
+                            const Color(0xFF8A9BA8),
+                          ]
+                        : [
+                            const Color(0xFF1E1E24),
+                            const Color(0xFF16161A),
+                          ],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Center(
+                  child: Text(
+                    contact.name.isNotEmpty ? contact.name[0].toUpperCase() : "?",
+                    style: TextStyle(
+                      color: hasUnread ? Colors.black : Colors.white.withOpacity(0.7),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
                     ),
-                  ]
-                : null,
-          ),
-          child: Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: hasUnread
-                    ? [
-                        const Color(0xFFB0BEC5),
-                        const Color(0xFF8A9BA8),
-                      ]
-                    : [
-                        const Color(0xFF1E1E24),
-                        const Color(0xFF16161A),
-                      ],
-              ),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Center(
-              child: Text(
-                contact.name.isNotEmpty ? contact.name[0].toUpperCase() : "?",
-                style: TextStyle(
-                  color: hasUnread ? Colors.black : Colors.white.withOpacity(0.7),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
+                  ),
                 ),
               ),
             ),
-          ),
+            if (isOnline)
+              Positioned(
+                right: -1,
+                top: -1,
+                child: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6AD394),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFF050508),
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF6AD394).withOpacity(0.35),
+                        blurRadius: 8,
+                        spreadRadius: 0,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );
