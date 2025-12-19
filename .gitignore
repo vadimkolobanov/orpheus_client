@@ -28,6 +28,12 @@ ios/Flutter/ephemeral/
 hs_err_pid*.log
 replay_pid*.log
 
+# Office / презентации (не коммитим никогда)
+*.docx
+*.rtf
+docs/Презентация/
+docs/PRESENTATION_Orpheus.md
+
 # Test reports / artifacts
 test_reports/
 test_results_*.txt

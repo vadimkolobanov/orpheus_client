@@ -141,8 +141,8 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                 // Кастомный хедер
                 _buildHeader(),
                 
-                // Поисковая строка / статус
-                _buildSecurityStatus(),
+                // Отступ между хедером и списком
+                const SizedBox(height: 8),
                 
                 // Список контактов
                 Expanded(

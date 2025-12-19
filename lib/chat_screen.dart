@@ -183,9 +183,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 // Отступ для AppBar
                 const SizedBox(height: 10),
                 
-                // Индикатор безопасности
-                _buildSecurityBanner(),
-                
                 // Список сообщений
                 Expanded(
                   child: _chatHistory.isEmpty
@@ -508,14 +505,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   color: Colors.grey.shade500,
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Сообщения защищены сквозным шифрованием",
-                style: TextStyle(
-                  color: Colors.grey.shade700,
-                  fontSize: 12,
                 ),
               ),
             ],

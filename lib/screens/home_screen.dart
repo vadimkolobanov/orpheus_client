@@ -1,9 +1,9 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:orpheus_project/contacts_screen.dart';
 import 'package:orpheus_project/screens/settings_screen.dart';
 import 'package:orpheus_project/screens/status_screen.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,6 +13,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+  static const String _betaDisclaimerDismissedKey = 'beta_disclaimer_dismissed_v1';
+
   int _currentIndex = 1; // По умолчанию открываем Контакты
   
   late AnimationController _glowController;
@@ -40,8 +42,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    
-    _checkDeviceSettings();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _maybeShowBetaDisclaimer();
+      if (!mounted) return;
+      await _checkDeviceSettings();
+    });
   }
   
   @override
@@ -50,6 +56,68 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _pulseController.dispose();
     _transitionController.dispose();
     super.dispose();
+  }
+
+  Future<bool> _isBetaDisclaimerDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_betaDisclaimerDismissedKey) ?? false;
+  }
+
+  Future<void> _setBetaDisclaimerDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_betaDisclaimerDismissedKey, true);
+  }
+
+  Future<void> _maybeShowBetaDisclaimer() async {
+    // Небольшая пауза, чтобы не "рвать" первый кадр.
+    await Future.delayed(const Duration(milliseconds: 250));
+    if (!mounted) return;
+
+    final dismissed = await _isBetaDisclaimerDismissed();
+    if (dismissed || !mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.orange),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Важно',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Вы используете версию приложения, проходящую тестирование.\n\n'
+            'Возможны нестабильности и неоднозначное поведение в отдельных сценариях. '
+            'Мы постепенно выявляем такие случаи и оперативно исправляем.\n\n'
+            'Пожалуйста, не воспринимайте это как “идеальный” релиз.',
+            style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.35),
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6AD394),
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () async {
+              await _setBetaDisclaimerDismissed();
+              if (context.mounted) Navigator.pop(context);
+            },
+            child: const Text('Я понял(а) и больше не показывать'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _checkDeviceSettings() async {
