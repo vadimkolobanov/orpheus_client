@@ -174,7 +174,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
     // Применяем буферизованные ICE кандидаты
     if (_callState == CallState.Incoming) {
-      final bufferedCandidates = getAndClearIncomingCallBuffer(widget.contactPublicKey);
+      final bufferedCandidates = incomingCallBuffer.takeAll(widget.contactPublicKey);
       if (bufferedCandidates.isNotEmpty) {
         _addLog("📦 Применение ${bufferedCandidates.length} буферизованных кандидатов");
         for (final candidateMsg in bufferedCandidates) {
@@ -323,7 +323,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _safePop() {
-    getAndClearIncomingCallBuffer(widget.contactPublicKey);
+    incomingCallBuffer.takeAll(widget.contactPublicKey);
     if (mounted && Navigator.canPop(context)) {
       Navigator.pop(context);
     }
@@ -418,7 +418,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     BackgroundCallService.stopCallService();
 
     // 2. Чистим буфер
-    getAndClearIncomingCallBuffer(widget.contactPublicKey);
+    incomingCallBuffer.takeAll(widget.contactPublicKey);
 
     // 3. Отправляем HangUp если закрыли свайпом (не через кнопку)
     if (!_messagesSent) {

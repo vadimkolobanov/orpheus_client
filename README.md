@@ -1,53 +1,53 @@
-﻿# Orpheus Client (Flutter)
+# Orpheus Client (Flutter)
 
-РљР»РёРµРЅС‚СЃРєРѕРµ РїСЂРёР»РѕР¶РµРЅРёРµ РЅР° Flutter РґР»СЏ РїСЂРѕРµРєС‚Р° Orpheus.
+Клиентское приложение на Flutter для проекта Orpheus.
 
-## Р‘С‹СЃС‚СЂС‹Р№ СЃС‚Р°СЂС‚
+## Быстрый старт
 
-### РўСЂРµР±РѕРІР°РЅРёСЏ
-- Flutter SDK (СЃРј. `environment` РІ `pubspec.yaml`)
-- Android SDK / Android Studio (РґР»СЏ Android)
+### Требования
+- Flutter SDK (см. `environment` в `pubspec.yaml`)
+- Android SDK / Android Studio (для Android)
 
-### РЈСЃС‚Р°РЅРѕРІРєР° Р·Р°РІРёСЃРёРјРѕСЃС‚РµР№
+### Установка зависимостей
 ```powershell
 flutter pub get
 ```
 
-### Р—Р°РїСѓСЃРє
+### Запуск
 ```powershell
 flutter run
 ```
 
-## РўРµСЃС‚С‹ Рё РѕС‚С‡С‘С‚С‹
-РЎРј.:
-- `QUICK_START_TESTS.md`
-- `TEST_REPORTS_GUIDE.md`
+## Тесты и отчёты
 
-РћСЃРЅРѕРІРЅС‹Рµ РєРѕРјР°РЅРґС‹:
+См. `docs/testing/README.md`.
+
+Основные команды:
 ```powershell
 flutter test
 ```
-РР»Рё СЃ РіРµРЅРµСЂР°С†РёРµР№ РѕС‚С‡С‘С‚РѕРІ:
+
+Или с генерацией отчётов:
 ```powershell
 .\test_runner.ps1
 ```
 
-## Р”РѕРєСѓРјРµРЅС‚Р°С†РёСЏ
-- РћСЃРЅРѕРІРЅР°СЏ: `docs/README.md`
-- РђСЂС…РёС‚РµРєС‚СѓСЂР°: `docs/ARCHITECTURE.md`
-- Р РµС€РµРЅРёСЏ (ADR): `docs/DECISIONS/`
+## Документация
+- Основная: `docs/README.md`
+- Архитектура: `docs/ARCHITECTURE.md`
+- Решения (ADR): `docs/DECISIONS/`
 
-## РџСЂРѕС†РµСЃСЃ РёР·РјРµРЅРµРЅРёР№ (С‡С‚РѕР±С‹ РР РЅРµ Р·Р°Р±С‹РІР°Р»)
-- РѕР±РЅРѕРІРёС‚СЊ `CHANGELOG.md` (СЃРµРєС†РёСЏ `Unreleased`)
-- РґРѕР±Р°РІРёС‚СЊ Р·Р°РїРёСЃСЊ РІ `AI_WORKLOG.md`
-- РѕР±РЅРѕРІРёС‚СЊ `docs/*` РїСЂРё РЅРµРѕР±С…РѕРґРёРјРѕСЃС‚Рё
+## Процесс изменений (чтобы ничего не забыть)
+- Обновить `CHANGELOG.md` (секция `Unreleased`)
+- Добавить запись в `AI_WORKLOG.md`
+- Обновить `docs/*` при необходимости
 
 ### Cursor
-- РџСЂР°РІРёР»Р°: `.cursor/rules/`
-- РљРѕРјР°РЅРґС‹-С€Р°Р±Р»РѕРЅС‹: `.cursor/commands/` (РЅР°РїСЂРёРјРµСЂ: `update-artifacts`, `update-changelog`, `log-work`, `commit-ready`)
+- Правила: `.cursor/rules/`
+- Команды-шаблоны: `.cursor/commands/` (например: `update-artifacts`, `update-changelog`, `log-work`, `commit-ready`)
 
-### Git hooks (СЂРµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ)
-Р§С‚РѕР±С‹ РєРѕРјРјРёС‚ РЅРµР»СЊР·СЏ Р±С‹Р»Рѕ СЃРґРµР»Р°С‚СЊ Р±РµР· `CHANGELOG.md` Рё `AI_WORKLOG.md`:
+### Git hooks (рекомендуется)
+Чтобы коммит нельзя было сделать без `CHANGELOG.md` и `AI_WORKLOG.md`:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install-hooks.ps1
 ```

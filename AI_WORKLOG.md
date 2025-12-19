@@ -208,3 +208,31 @@
   - `CHANGELOG.md`
 - Commands:
   - `flutter test`
+
+## 2025-12-19
+- Time: текущее время local
+- Task: Контрактные тесты для сообщений/звонков + перенос логики из main.dart + уборка документации тестов
+- Changes:
+  - Вынесена обработка входящих WS сообщений из `main.dart` в тестируемый сервис `IncomingMessageHandler`.
+  - Выделен `IncomingCallBuffer` для буферизации сигналов (в первую очередь ICE) и устранения race condition (кандидаты могут прийти раньше offer).
+  - Добавлены контрактные тесты для критичных сценариев:
+    - входящий `chat`: расшифровка → сохранение → UI update → уведомление в фоне без текста
+    - сигналинг звонка: `call-offer`, `ice-candidate`, `call-answer`, `hang-up`, `call-rejected`
+    - исходящие пакеты `WebSocketService`: формат JSON и гарантия доставки `hang-up` через WS + HTTP fallback
+  - `WebSocketService`: добавлена инъекция `http.Client` и тестовый хук для подключения канала (для детерминированных тестов без сети).
+  - Документация: тестовые инструкции/контракты собраны в `docs/testing/README.md`, удалены дублирующие `.md` из корня.
+- Files:
+  - `lib/services/incoming_message_handler.dart`
+  - `lib/services/incoming_call_buffer.dart`
+  - `lib/services/websocket_service.dart`
+  - `lib/main.dart`
+  - `lib/call_screen.dart`
+  - `test/services/incoming_message_handler_test.dart`
+  - `test/services/websocket_outgoing_protocol_test.dart`
+  - `docs/testing/README.md`
+  - `docs/README.md`
+  - `README.md`
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`
+- Commands:
+  - `flutter test`

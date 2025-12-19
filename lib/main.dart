@@ -12,6 +12,8 @@ import 'package:orpheus_project/services/background_call_service.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:orpheus_project/services/incoming_call_buffer.dart';
+import 'package:orpheus_project/services/incoming_message_handler.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/panic_wipe_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
@@ -33,14 +35,8 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final StreamController<String> messageUpdateController = StreamController.broadcast();
 final StreamController<Map<String, dynamic>> signalingStreamController = StreamController.broadcast();
 
-// Буфер для входящих ICE кандидатов (race condition fix)
-final Map<String, List<Map<String, dynamic>>> _incomingCallBuffers = {};
-
-List<Map<String, dynamic>> getAndClearIncomingCallBuffer(String contactPublicKey) {
-  final buffer = _incomingCallBuffers.remove(contactPublicKey) ?? [];
-  print("MAIN: Извлечено ${buffer.length} буферизованных кандидатов для ${contactPublicKey.substring(0, 8)}...");
-  return buffer;
-}
+/// Буфер входящих сигналов звонка (ICE candidates и т.п.)
+final IncomingCallBuffer incomingCallBuffer = IncomingCallBuffer.instance;
 
 bool _hasKeys = false;
 
@@ -105,132 +101,75 @@ void main() async {
 }
 
 void _listenForMessages() {
+  final handler = IncomingMessageHandler(
+    crypto: _IncomingCryptoAdapter(cryptoService),
+    database: _IncomingDatabaseAdapter(DatabaseService.instance),
+    notifications: _IncomingNotificationsAdapter(),
+    callBuffer: incomingCallBuffer,
+    openCallScreen: ({required contactPublicKey, required offer}) {
+      navigatorKey.currentState?.push(MaterialPageRoute(
+        builder: (context) => CallScreen(contactPublicKey: contactPublicKey, offer: offer),
+      ));
+    },
+    emitSignaling: (msg) => signalingStreamController.add(msg),
+    emitChatUpdate: (senderKey) => messageUpdateController.add(senderKey),
+    isAppInForeground: () => isAppInForeground,
+  );
+
   websocketService.stream.listen((messageJson) async {
     try {
-      final messageData = json.decode(messageJson) as Map<String, dynamic>;
-      final type = messageData['type'] as String?;
-      final senderKey = messageData['sender_pubkey'] as String?;
-
-      print("📨 WS: type=$type, sender=${senderKey?.substring(0, 8) ?? 'null'}...");
-
-      // Пропускаем служебные сообщения
-      if (type == 'error' || type == 'payment-confirmed' || type == 'license-status' || type == 'pong' || senderKey == null) {
-        return;
-      }
-
-      // Логируем все входящие сигнальные сообщения
-      DebugLogger.info('MAIN', '📨 IN: $type от ${senderKey.substring(0, 8)}...');
-
-      // === ЗВОНКИ ===
-      if (type == 'call-offer') {
-        final data = messageData['data'] as Map<String, dynamic>;
-        DebugLogger.success('CALL', '📞 Входящий звонок от ${senderKey.substring(0, 8)}...');
-
-        // Сброс буфера для нового звонка
-        _incomingCallBuffers.remove(senderKey);
-        _incomingCallBuffers[senderKey] = [];
-
-        // Показываем уведомление о звонке
-        final contactName = await _getContactName(senderKey);
-        await NotificationService.showCallNotification(callerName: contactName);
-
-        // Открываем экран звонка
-        DebugLogger.info('CALL', 'Открытие CallScreen...');
-        navigatorKey.currentState?.push(MaterialPageRoute(
-          builder: (context) => CallScreen(contactPublicKey: senderKey, offer: data),
-        ));
-      }
-      else if (type == 'ice-candidate') {
-        // Буферизуем если экран звонка ещё не готов
-        if (_incomingCallBuffers.containsKey(senderKey)) {
-          _incomingCallBuffers[senderKey]!.add(messageData);
-          DebugLogger.info('ICE', 'Кандидат буферизован (всего: ${_incomingCallBuffers[senderKey]!.length})');
-        }
-        signalingStreamController.add(messageData);
-      }
-      else if (type == 'call-answer') {
-        DebugLogger.success('CALL', '📞 Получен answer от ${senderKey.substring(0, 8)}...');
-        signalingStreamController.add(messageData);
-      }
-      else if (type == 'hang-up' || type == 'call-rejected') {
-        DebugLogger.warn('CALL', '📞 Получен $type от ${senderKey.substring(0, 8)}...');
-        _incomingCallBuffers.remove(senderKey);
-        
-        // ВАЖНО: Сначала отправляем сигнал в CallScreen (до hideCallNotification)
-        // чтобы ошибка ProGuard не блокировала завершение звонка
-        signalingStreamController.add(messageData);
-        DebugLogger.info('CALL', '✅ Сигнал $type отправлен в CallScreen');
-        
-        // Теперь безопасно скрываем уведомление
-        try {
-          await NotificationService.hideCallNotification();
-        } catch (e) {
-          DebugLogger.error('NOTIF', 'Ошибка hideCallNotification: $e');
-        }
-        
-        print("📞 MAIN: Получен $type от ${senderKey.substring(0, 8)}...");
-      }
-
-      // === ЧАТ ===
-      else if (type == 'chat') {
-        final payload = messageData['payload'] as String?;
-        if (payload != null) {
-          try {
-            final decryptedMessage = await cryptoService.decrypt(senderKey, payload);
-            DebugLogger.info('CHAT', '💬 Сообщение от ${senderKey.substring(0, 8)}...');
-            final receivedMessage = ChatMessage(
-              text: decryptedMessage,
-              isSentByMe: false,
-              status: MessageStatus.delivered,
-              isRead: false,
-            );
-            await DatabaseService.instance.addMessage(receivedMessage, senderKey);
-            messageUpdateController.add(senderKey);
-
-            // Показываем уведомление только если:
-            // 1. Приложение в фоне (не активно)
-            // 2. Это не системное сообщение о звонке
-            final isCallStatusMessage = _isCallStatusMessage(decryptedMessage);
-            if (!isAppInForeground && !isCallStatusMessage) {
-              final contactName = await _getContactName(senderKey);
-              DebugLogger.info('CHAT', 'Показ уведомления (app in background)');
-              // Не показываем содержимое сообщения - только имя отправителя
-              await NotificationService.showMessageNotification(
-                senderName: contactName,
-              );
-            }
-          } catch (e) {
-            print("Decryption Error: $e");
-            DebugLogger.error('CHAT', 'Ошибка расшифровки: $e');
-          }
-        }
-      }
+      await handler.handleRawMessage(messageJson);
     } catch (e) {
-      print("Message Handler Error: $e");
       DebugLogger.error('MAIN', 'Message Handler Error: $e');
     }
   });
 }
 
-/// Получить имя контакта по публичному ключу
-Future<String> _getContactName(String publicKey) async {
-  try {
-    final contact = await DatabaseService.instance.getContact(publicKey);
-    if (contact != null && contact.name.isNotEmpty) {
-      return contact.name;
-    }
-  } catch (_) {}
-  return publicKey.substring(0, 8);
+class _IncomingCryptoAdapter implements IncomingMessageCrypto {
+  _IncomingCryptoAdapter(this._crypto);
+  final CryptoService _crypto;
+  @override
+  Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload) {
+    return _crypto.decrypt(senderPublicKeyBase64, encryptedPayload);
+  }
 }
 
-/// Проверка является ли сообщение системным сообщением о звонке
-bool _isCallStatusMessage(String message) {
-  const callStatusMessages = [
-    'Исходящий звонок',
-    'Входящий звонок',
-    'Пропущен звонок',
-  ];
-  return callStatusMessages.contains(message);
+class _IncomingDatabaseAdapter implements IncomingMessageDatabase {
+  _IncomingDatabaseAdapter(this._db);
+  final DatabaseService _db;
+
+  @override
+  Future<void> addMessage(ChatMessage message, String contactPublicKey) {
+    return _db.addMessage(message, contactPublicKey);
+  }
+
+  @override
+  Future<String?> getContactName(String publicKey) async {
+    try {
+      final contact = await _db.getContact(publicKey);
+      if (contact != null && contact.name.trim().isNotEmpty) {
+        return contact.name;
+      }
+    } catch (_) {}
+    return null;
+  }
+}
+
+class _IncomingNotificationsAdapter implements IncomingMessageNotifications {
+  @override
+  Future<void> showCallNotification({required String callerName}) {
+    return NotificationService.showCallNotification(callerName: callerName);
+  }
+
+  @override
+  Future<void> hideCallNotification() {
+    return NotificationService.hideCallNotification();
+  }
+
+  @override
+  Future<void> showMessageNotification({required String senderName}) {
+    return NotificationService.showMessageNotification(senderName: senderName);
+  }
 }
 
 class MyApp extends StatefulWidget {

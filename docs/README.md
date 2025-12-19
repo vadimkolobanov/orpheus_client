@@ -1,44 +1,18 @@
-# Orpheus Server (Backend)
+# Orpheus Client (Flutter) — документация
 
-## Быстрый старт
+Эта папка содержит **актуальную** документацию именно по Flutter-клиенту.
 
-### Предусловия
-- Python 3.10+
-- Установлен `pip`
+## Куда смотреть
+- **Тестирование**: `docs/testing/README.md`
+- **Архитектура**: `docs/ARCHITECTURE.md`
+- **Решения (ADR)**: `docs/DECISIONS/`
+- **Миграция домена**: `docs/DOMAIN_MIGRATION_orpheus.click.md`
 
-### Установка
-```bash
-python -m venv .venv
-.\.venv\Scripts\activate           # Windows
-pip install -r requirements.txt
-```
+## Процесс изменений
+- Если меняется поведение приложения/контракты — обновляйте тесты (они диктуют поведение).
+- Если меняется публичное поведение/UX — обновляйте документацию в `docs/`.
+- `AI_WORKLOG.md` — это журнал, не заменяет документацию.
 
-### Запуск (локально)
-```bash
-uvicorn main:app --reload --port 8000
-```
-
-### Быстрая проверка
-```bash
-curl http://localhost:8000/docs
-```
-Откроется Swagger UI (проверка, что сервер поднялся).
-
-### Тесты
-Тестов в репозитории нет. Если добавите — опишите команды здесь.
-
-## Процесс изменений (обязательно)
-- Обновить `CHANGELOG.md` (секция Unreleased)
-- Добавить запись в `AI_WORKLOG.md`
-- При необходимости обновить `docs/*`
-- Перед коммитом: `git status` убедиться, что changelog/worklog в коммите
-
-## Hooks
-## Отчёты
-- `docs/REPORT_SINCE_2025-12-06.md` — сводка изменений с версии 0.9.0 (с 06.12.2025).
-Включить локально (требует git):
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-hooks.ps1
-```
-
-
+## Release notes / changelog
+- Публичные release notes ведём в админ-панели `OPHEUS_ADMIN` → раздел **"Версии"** (`app_versions`).
+- `CHANGELOG.md` в этом репозитории — внутренний журнал разработки.

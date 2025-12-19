@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -12,7 +13,10 @@ import 'package:rxdart/rxdart.dart';
 enum ConnectionStatus { Disconnected, Connecting, Connected }
 
 class WebSocketService {
+  WebSocketService({http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
+
   WebSocketChannel? _channel;
+  final http.Client _httpClient;
 
   final _socketResponseController = StreamController<String>.broadcast();
   Stream<String> get stream => _socketResponseController.stream;
@@ -155,6 +159,13 @@ class WebSocketService {
     _statusController.add(ConnectionStatus.Disconnected);
   }
 
+  @visibleForTesting
+  void debugAttachConnectedChannel(WebSocketChannel channel, {String? currentPublicKey}) {
+    _channel = channel;
+    if (currentPublicKey != null) _currentPublicKey = currentPublicKey;
+    _statusController.add(ConnectionStatus.Connected);
+  }
+
   void _startPingPong() {
     _pingTimer?.cancel();
     _pingTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
@@ -220,7 +231,7 @@ class WebSocketService {
 
       // 1) сначала пробуем текущий хост (если WS уже установлен/пытались подключаться)
       final primaryUrl = AppConfig.httpUrl('/api/signal', host: currentHost);
-      response = await http.post(
+      response = await _httpClient.post(
         Uri.parse(primaryUrl),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
@@ -243,7 +254,7 @@ class WebSocketService {
       // fallback по всем хостам
       for (final url in AppConfig.httpUrls('/api/signal')) {
         try {
-          final response = await http.post(
+          final response = await _httpClient.post(
             Uri.parse(url),
             headers: {'Content-Type': 'application/json'},
             body: json.encode({
