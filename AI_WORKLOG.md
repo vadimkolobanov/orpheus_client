@@ -236,3 +236,24 @@
   - `AI_WORKLOG.md`
 - Commands:
   - `flutter test`
+
+## 2025-12-19
+- Time: текущее время local
+- Task: История обновлений — переход на публичные release notes из OPHEUS_ADMIN + уточнение процесса
+- Changes:
+  - Экран “История обновлений” теперь пытается загрузить release notes с публичного API сайта, с fallback на встроенный список при офлайне.
+  - Добавлен `ReleaseNotesService` для получения публичных релизов.
+  - Документация/процесс: уточнено, что “Что нового” ведём в `OPHEUS_ADMIN` → “Версии” (единый публичный changelog).
+- Files:
+  - `lib/services/release_notes_service.dart`
+  - `lib/updates_screen.dart`
+  - `lib/config.dart`
+  - `docs/COMMIT_PROCESS.md`
+  - `docs/REPORT_SINCE_2025-12-06.md`
+  - `docs/HOW_TO_GIVE_TASKS.md`
+  - `.cursor/rules/10-artifacts.md`
+  - `.cursor/commands/update-artifacts.md`
+  - `CHANGELOG.md`
+  - `AI_WORKLOG.md`
+- Commands:
+  - `flutter test`

@@ -4,7 +4,8 @@
 Область: **клиент (Flutter) + документация репозитория**.  
 
 ## Источники, на основе которых собран отчёт
-- **Встроенная “История обновлений” в приложении**: `lib/config.dart` → `AppConfig.changelogData` (показывается в `lib/updates_screen.dart`).
+- **Встроенная “История обновлений” в приложении**: `lib/config.dart` → `AppConfig.changelogData` (legacy).  
+  Новый единый источник публичных release notes: `OPHEUS_ADMIN` → "Версии" (`app_versions`).
 - **Репозиторный changelog разработки**: `CHANGELOG.md` (секция `[Unreleased]`).
 - **Журнал работ**: `AI_WORKLOG.md`.
 - **Техническая документация**: `docs/*` и ADR в `docs/DECISIONS/*`.

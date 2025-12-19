@@ -2,7 +2,9 @@
 
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:orpheus_project/config.dart';
+import 'package:orpheus_project/services/release_notes_service.dart';
 
 class UpdatesScreen extends StatefulWidget {
   const UpdatesScreen({super.key});
@@ -15,6 +17,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
   late AnimationController _pulseController;
   late AnimationController _glowController;
   late AnimationController _revealController;
+  late Future<List<Map<String, dynamic>>> _entriesFuture;
 
   @override
   void initState() {
@@ -34,6 +37,40 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     )..forward();
+
+    _entriesFuture = _loadEntries();
+  }
+
+  Future<List<Map<String, dynamic>>> _loadEntries() async {
+    try {
+      final service = ReleaseNotesService();
+      final releases = await service.fetchPublicReleases(limit: 50);
+      if (releases.isEmpty) {
+        return AppConfig.changelogData;
+      }
+
+      // Приводим к формату legacy, чтобы не переписывать UI целиком.
+      // Ожидается: {version, date, changes: List<String>}
+      final df = DateFormat('dd.MM.yyyy');
+      return releases.map((r) {
+        final date = r.createdAt != null ? df.format(r.createdAt!.toLocal()) : '';
+        final changes = r.publicChangelog
+            .split('\n')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .map((s) => s.startsWith('-') ? s.substring(1).trim() : s)
+            .toList();
+
+        return <String, dynamic>{
+          'version': r.versionName.isNotEmpty ? r.versionName : 'build ${r.versionCode}',
+          'date': date.isNotEmpty ? date : '—',
+          'changes': changes,
+        };
+      }).toList();
+    } catch (_) {
+      // Fallback: встроенный legacy список (offline-safe)
+      return AppConfig.changelogData;
+    }
   }
 
   @override
@@ -77,23 +114,36 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
           ],
         ),
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16.0),
-        itemCount: AppConfig.changelogData.length,
-        itemBuilder: (context, index) {
-          final item = AppConfig.changelogData[index];
-          final version = item['version'] as String;
-          final date = item['date'] as String;
-          final changes = item['changes'] as List<String>;
-          final isLatest = index == 0;
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _entriesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(color: Color(0xFFB0BEC5)),
+            );
+          }
 
-          return _buildAnimatedUpdateCard(
-            index: index,
-            version: version,
-            date: date,
-            changes: changes,
-            isLatest: isLatest,
-            isLast: index == AppConfig.changelogData.length - 1,
+          final entries = snapshot.data ?? AppConfig.changelogData;
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16.0),
+            itemCount: entries.length,
+            itemBuilder: (context, index) {
+              final item = entries[index];
+              final version = item['version'] as String;
+              final date = item['date'] as String;
+              final changes = (item['changes'] as List).cast<String>();
+              final isLatest = index == 0;
+
+              return _buildAnimatedUpdateCard(
+                index: index,
+                version: version,
+                date: date,
+                changes: changes,
+                isLatest: isLatest,
+                isLast: index == entries.length - 1,
+              );
+            },
           );
         },
       ),

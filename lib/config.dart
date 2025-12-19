@@ -48,6 +48,14 @@ class AppConfig {
   }
 
   // --- История обновлений (Changelog) ---
+  //
+  // ⚠️ ВАЖНО (политика проекта):
+  // - Пользовательский "Что нового" / changelog НЕ должен вестись в клиенте.
+  // - Единый источник правды для release notes: админ-панель OPHEUS_ADMIN → раздел "Версии".
+  // - Сейчас клиент загружает release notes по публичному API админки:
+  //   https://orpheus.click/api/public/releases
+  // - Этот список оставлен как fallback (offline-safe) и может быть удалён позже.
+  // - НЕ добавляйте сюда новые записи.
   static const List<Map<String, dynamic>> changelogData = [
     {
       'version': '1.1.0',

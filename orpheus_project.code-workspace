@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../../Prog/OPHEUS_ADMIN"
+		},
+		{
+			"path": "../../Prog/Orpheus_Site"
 		}
 	],
 	"settings": {}

@@ -21,7 +21,7 @@
 
 ## Цель (как должно быть)
 
-- `orpheus.click` — сайт
+- `orpheus.click` — сайт + вход в админку (единый сервис `OPHEUS_ADMIN`)
 - `api.orpheus.click` — API + WebSocket связь
 - `update.orpheus.click` — раздача APK/артефактов (Timeweb Cloud S3)
 
@@ -74,7 +74,8 @@
 **Готово, когда**: `wss://api.orpheus.click/ws/<pubkey>` подключается.
 
 ### Этап 5. Сайт на `orpheus.click` (отдельно)
-- Разместить сайт на `orpheus.click`.
+- Разместить сайт на `orpheus.click` (публичные страницы) в сервисе `OPHEUS_ADMIN`.
+- Админка доступна по `/admin`, вход по `/login`.
 - Старый домен можно оставить как есть или сделать редирект только для `/` (не трогая `/ws` и `/api`).
 
 **Готово, когда**: сайт живёт отдельно.
@@ -100,3 +101,5 @@
 - [ ] `wss://api.orpheus.click/ws/<pubkey>` работает
 - [ ] `https://update.orpheus.click/<apk>` скачивается
 - [ ] В `app_versions.download_url` стоит абсолютная ссылка на `update.orpheus.click`
+
+
