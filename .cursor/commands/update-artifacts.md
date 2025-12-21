@@ -1,3 +1,20 @@
+# Command: update-artifacts (orpheus_client)
+
+Цель: синхронизировать артефакты процесса под последние изменения.
+
+## Шаги
+1. Посмотри изменения:
+   - `git status`
+   - `git diff --name-only`
+2. Если менялись `lib/`, `test/`, `android/`, `assets/`, `pubspec.*`, `analysis_options.yaml`:
+   - Обнови `CHANGELOG.md` → секция `[Unreleased]` (коротко, пользовательским языком).
+   - Обнови `AI_WORKLOG.md` → новая запись (Date/Time/Task/Changes/Files/Commands).
+3. Если меняется поведение/инструкции — обнови `docs/**`.
+4. Если изменение пользовательское (“Что нового”) — напомни: единый источник в `OPHEUS_ADMIN` → “Версии”.
+
+## Критерий готовности
+- `CHANGELOG.md` и `AI_WORKLOG.md` отражают изменения.
+- Нет “забытых” файлов (untracked) в `git status`.
 # Update artifacts (docs/changelog/worklog)
 
 Проверь, что после последних изменений обновлены артефакты процесса:

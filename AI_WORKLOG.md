@@ -4,6 +4,32 @@
 
 ---
 
+## 2025-12-21
+- Time:  (заполнить реальным временем) local
+- Task: Восстановление Cursor agent режима (rules/commands) + git hooks
+- Changes:
+  - Добавлены реальные `.cursor/rules/**` и `.cursor/commands/**` (чтобы агент работал предсказуемо и дисциплинированно).
+  - Добавлены `.githooks/pre-commit` и `.githooks/README.md` (блокируют коммит без обновления артефактов при изменениях кода).
+  - Добавлен документ `docs/AGENT_WORKFLOW.md` (алгоритм постановки задач и критерии “готово”).
+  - Обновлён `CHANGELOG.md` (Unreleased) под процессные изменения.
+- Files:
+  - `.cursor/rules/00-scope.md`
+  - `.cursor/rules/05-workflow.md`
+  - `.cursor/rules/10-artifacts.md`
+  - `.cursor/rules/15-git-files.md`
+  - `.cursor/rules/20-auto-commit.md`
+  - `.cursor/commands/update-artifacts.md`
+  - `.cursor/commands/update-changelog.md`
+  - `.cursor/commands/log-work.md`
+  - `.cursor/commands/commit-ready.md`
+  - `.cursor/commands/triage.md`
+  - `.githooks/pre-commit`
+  - `.githooks/README.md`
+  - `docs/AGENT_WORKFLOW.md`
+  - `CHANGELOG.md`
+- Commands:
+  - (не запускались)
+
 ## 2025-12-12
 - Time: 00:00 local
 - Task: Инициализация процесса разработки (Cursor rules/commands, docs, hooks)

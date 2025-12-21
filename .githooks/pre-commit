@@ -1,3 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+changed="$(git diff --cached --name-only)"
+if [[ -z "${changed}" ]]; then
+  exit 0
+fi
+
+requires_artifacts=false
+
+if echo "${changed}" | grep -Eq '^(lib/|test/|android/|assets/|pubspec\.yaml|pubspec\.lock|analysis_options\.yaml)'; then
+  requires_artifacts=true
+fi
+
+if [[ "${requires_artifacts}" == "true" ]]; then
+  if ! echo "${changed}" | grep -qx 'CHANGELOG.md'; then
+    echo "ERROR: Требуется обновить и застейджить CHANGELOG.md (секция [Unreleased])." >&2
+    echo "Подсказка: Cursor command 'update-artifacts'." >&2
+    exit 1
+  fi
+  if ! echo "${changed}" | grep -qx 'AI_WORKLOG.md'; then
+    echo "ERROR: Требуется обновить и застейджить AI_WORKLOG.md (новая запись о задаче)." >&2
+    echo "Подсказка: Cursor command 'log-work' / 'update-artifacts'." >&2
+    exit 1
+  fi
+fi
+
+exit 0
+
 #!/bin/sh
 set -e
 

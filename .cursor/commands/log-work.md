@@ -1,3 +1,27 @@
+# Command: log-work (orpheus_client)
+
+Цель: добавить запись в `AI_WORKLOG.md` за текущую задачу.
+
+## Правила
+- Дата: `YYYY-MM-DD`
+- Time: локальное время
+- Task: 1 строка
+- Changes: список (что именно поменялось)
+- Files: список путей
+- Commands: только то, что реально запускалось
+
+## Шаблон
+```
+## YYYY-MM-DD
+- Time: HH:MM local
+- Task: ...
+- Changes:
+  - ...
+- Files:
+  - `path/to/file`
+- Commands:
+  - `команда`
+```
 # Log work (AI_WORKLOG)
 
 Добавь запись в `AI_WORKLOG.md` по текущей задаче.
