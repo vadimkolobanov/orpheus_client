@@ -8,7 +8,8 @@
 - Time:  (заполнить реальным временем) local
 - Task: Восстановление Cursor agent режима (rules/commands) + git hooks
 - 
-- Changes:
+- Chang
+- es:
   - Добавлены реальные `.cursor/rules/**` и `.cursor/commands/**` (чтобы агент работал предсказуемо и дисциплинированно).
   - Добавлены `.githooks/pre-commit` и `.githooks/README.md` (блокируют коммит без обновления артефактов при изменениях кода).
   - Добавлен документ `docs/AGENT_WORKFLOW.md` (алгоритм постановки задач и критерии “готово”).
