@@ -159,3 +159,4 @@ class PresenceService {
     _states.close();
   }
 }
+

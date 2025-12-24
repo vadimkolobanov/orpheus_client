@@ -103,3 +103,4 @@
 - [ ] В `app_versions.download_url` стоит абсолютная ссылка на `update.orpheus.click`
 
 
+

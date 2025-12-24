@@ -16,3 +16,4 @@
 ## Release notes / changelog
 - Публичные release notes ведём в админ-панели `OPHEUS_ADMIN` → раздел **"Версии"** (`app_versions`).
 - `CHANGELOG.md` в этом репозитории — внутренний журнал разработки.
+
