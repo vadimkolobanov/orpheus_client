@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 import 'package:orpheus_project/call_screen.dart';
 import 'package:orpheus_project/license_screen.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
@@ -49,6 +51,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   DebugLogger.info('APP', '🚀 Orpheus запускается...');
+
+  // Intl (DateFormat) требует инициализации таблиц локали.
+  // Без этого DateFormat(..., 'ru') падает с LocaleDataException на некоторых устройствах/локалях (например en-US).
+  Intl.defaultLocale = 'ru';
+  await initializeDateFormatting('ru');
 
   try {
     // 1. Firebase

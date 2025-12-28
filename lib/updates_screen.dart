@@ -6,7 +6,15 @@ import 'package:orpheus_project/config.dart';
 import 'package:orpheus_project/services/release_notes_service.dart';
 
 class UpdatesScreen extends StatefulWidget {
-  const UpdatesScreen({super.key});
+  const UpdatesScreen({
+    super.key,
+    ReleaseNotesService? releaseNotesService,
+    Future<List<Map<String, dynamic>>>? debugEntriesFutureOverride,
+  })  : _releaseNotesService = releaseNotesService,
+        _debugEntriesFutureOverride = debugEntriesFutureOverride;
+
+  final ReleaseNotesService? _releaseNotesService;
+  final Future<List<Map<String, dynamic>>>? _debugEntriesFutureOverride;
 
   @override
   State<UpdatesScreen> createState() => _UpdatesScreenState();
@@ -37,12 +45,12 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
       duration: const Duration(milliseconds: 1500),
     )..forward();
 
-    _entriesFuture = _loadEntries();
+    _entriesFuture = widget._debugEntriesFutureOverride ?? _loadEntries();
   }
 
   Future<List<Map<String, dynamic>>> _loadEntries() async {
     try {
-      final service = ReleaseNotesService();
+      final service = widget._releaseNotesService ?? ReleaseNotesService();
       final releases = await service.fetchPublicReleases(limit: 50);
       if (releases.isEmpty) {
         return AppConfig.changelogData;

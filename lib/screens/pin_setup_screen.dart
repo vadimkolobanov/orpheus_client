@@ -20,19 +20,21 @@ enum PinSetupMode {
 class PinSetupScreen extends StatefulWidget {
   final PinSetupMode mode;
   final VoidCallback? onSuccess;
+  final AuthService auth;
 
-  const PinSetupScreen({
+  PinSetupScreen({
     super.key,
     required this.mode,
     this.onSuccess,
-  });
+    AuthService? auth,
+  }) : auth = auth ?? AuthService.instance;
 
   @override
   State<PinSetupScreen> createState() => _PinSetupScreenState();
 }
 
 class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProviderStateMixin {
-  final _auth = AuthService.instance;
+  late final AuthService _auth;
   
   String _enteredPin = '';
   String _confirmedPin = '';
@@ -101,6 +103,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
+    _auth = widget.auth;
     
     _shakeController = AnimationController(
       vsync: this,

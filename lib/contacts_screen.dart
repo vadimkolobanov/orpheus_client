@@ -1238,6 +1238,7 @@ class _ModernAddContactDialog extends StatefulWidget {
 
 class _ModernAddContactDialogState extends State<_ModernAddContactDialog> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
+  bool _isUpdatingKey = false; // Флаг для предотвращения рекурсии при обновлении ключа
 
   @override
   void initState() {
@@ -1254,6 +1255,79 @@ class _ModernAddContactDialogState extends State<_ModernAddContactDialog> with S
     super.dispose();
   }
 
+  /// Извлекает ключ из полного текста сообщения
+  /// Ищет строку после "Мой ключ:" или "ключ:" или просто длинную строку, похожую на ключ
+  String? _extractKeyFromText(String text) {
+    if (text.trim().isEmpty) return null;
+    
+    final cleaned = text.trim();
+    
+    // Сначала проверяем, не является ли весь текст уже ключом (длинная строка без пробелов и без обычных слов)
+    final singleLine = cleaned.replaceAll(RegExp(r'\s+'), '');
+    if (singleLine.length > 20 && 
+        !singleLine.toLowerCase().contains('привет') &&
+        !singleLine.toLowerCase().contains('добавь') &&
+        !singleLine.toLowerCase().contains('орфей') &&
+        !singleLine.toLowerCase().contains('orpheus') &&
+        !singleLine.toLowerCase().contains('мой') &&
+        !singleLine.toLowerCase().contains('ключ')) {
+      return singleLine;
+    }
+    
+    // Ищем паттерн "Мой ключ:" или "ключ:" (с учетом регистра и возможных вариаций)
+    final keyPattern = RegExp(r'(?:Мой\s+)?ключ\s*:?\s*', caseSensitive: false);
+    final match = keyPattern.firstMatch(cleaned);
+    
+    if (match != null) {
+      // Берем текст после "Мой ключ:" или "ключ:"
+      var keyCandidate = cleaned.substring(match.end).trim();
+      
+      // Убираем все переносы строк, пробелы и другие символы форматирования
+      keyCandidate = keyCandidate.replaceAll(RegExp(r'\s+'), '').trim();
+      
+      // Если получили что-то похожее на ключ (длинная строка без пробелов)
+      if (keyCandidate.isNotEmpty && keyCandidate.length > 20) {
+        return keyCandidate;
+      }
+      
+      // Если после "ключ:" идет перенос строки, берем следующую строку
+      final linesAfterKey = cleaned.substring(match.end).split('\n');
+      for (final line in linesAfterKey) {
+        final trimmed = line.trim().replaceAll(RegExp(r'\s+'), '');
+        if (trimmed.length > 20 && 
+            !trimmed.toLowerCase().contains('привет') &&
+            !trimmed.toLowerCase().contains('добавь') &&
+            !trimmed.toLowerCase().contains('орфей') &&
+            !trimmed.toLowerCase().contains('orpheus')) {
+          return trimmed;
+        }
+      }
+    }
+    
+    // Если паттерн не найден, ищем самую длинную строку (вероятно, это ключ)
+    final lines = cleaned.split('\n');
+    String? longestLine;
+    int maxLength = 0;
+    
+    for (final line in lines) {
+      final trimmed = line.trim().replaceAll(RegExp(r'\s+'), '');
+      // Игнорируем строки, которые явно не ключи (короткие или содержат обычный текст)
+      if (trimmed.length > maxLength && 
+          trimmed.length > 20 && 
+          !trimmed.toLowerCase().contains('привет') &&
+          !trimmed.toLowerCase().contains('добавь') &&
+          !trimmed.toLowerCase().contains('орфей') &&
+          !trimmed.toLowerCase().contains('orpheus') &&
+          !trimmed.toLowerCase().contains('мой') &&
+          !trimmed.toLowerCase().contains('ключ')) {
+        longestLine = trimmed;
+        maxLength = trimmed.length;
+      }
+    }
+    
+    return longestLine;
+  }
+
   @override
   Widget build(BuildContext context) {
     return ScaleTransition(
@@ -1268,34 +1342,38 @@ class _ModernAddContactDialogState extends State<_ModernAddContactDialog> with S
             borderRadius: BorderRadius.circular(24),
             side: BorderSide(color: const Color(0xFFB0BEC5).withOpacity(0.15)),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFB0BEC5).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFB0BEC5).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.person_add, color: Color(0xFFB0BEC5), size: 22),
                       ),
-                      child: const Icon(Icons.person_add, color: Color(0xFFB0BEC5), size: 22),
-                    ),
-                    const SizedBox(width: 14),
-                    const Text(
-                      'Новый контакт',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Text(
+                          'Новый контакт',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          softWrap: true,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
                 
                 const SizedBox(height: 24),
                 
@@ -1321,6 +1399,23 @@ class _ModernAddContactDialogState extends State<_ModernAddContactDialog> with S
                     icon: const Icon(Icons.qr_code_scanner, color: Color(0xFFB0BEC5)),
                     onPressed: widget.onScanQR,
                   ),
+                  onChanged: (text) {
+                    // Пропускаем обработку, если мы сами обновляем поле (предотвращение рекурсии)
+                    if (_isUpdatingKey) return;
+                    
+                    // Автоматически извлекаем ключ из вставленного текста
+                    final extractedKey = _extractKeyFromText(text);
+                    if (extractedKey != null && extractedKey != text) {
+                      // Обновляем поле только если извлеченный ключ отличается от вставленного текста
+                      _isUpdatingKey = true;
+                      widget.keyController.value = TextEditingValue(
+                        text: extractedKey,
+                        selection: TextSelection.collapsed(offset: extractedKey.length),
+                      );
+                      // Сбрасываем флаг после небольшой задержки
+                      Future.microtask(() => _isUpdatingKey = false);
+                    }
+                  },
                 ),
                 
                 const SizedBox(height: 24),
@@ -1358,7 +1453,8 @@ class _ModernAddContactDialogState extends State<_ModernAddContactDialog> with S
                     ),
                   ],
                 ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1374,6 +1470,7 @@ class _ModernAddContactDialogState extends State<_ModernAddContactDialog> with S
     int maxLines = 1,
     bool isMonospace = false,
     Widget? suffixIcon,
+    ValueChanged<String>? onChanged,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1390,6 +1487,7 @@ class _ModernAddContactDialogState extends State<_ModernAddContactDialog> with S
         TextField(
           controller: controller,
           maxLines: maxLines,
+          onChanged: onChanged,
           style: TextStyle(
             fontFamily: isMonospace ? 'monospace' : null,
             fontSize: isMonospace ? 12 : 14,
@@ -1464,42 +1562,46 @@ class _ModernDeleteDialogState extends State<_ModernDeleteDialog> with SingleTic
             borderRadius: BorderRadius.circular(24),
             side: BorderSide(color: Colors.red.withOpacity(0.2)),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    shape: BoxShape.circle,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.delete_forever, color: Colors.red, size: 32),
                   ),
-                  child: const Icon(Icons.delete_forever, color: Colors.red, size: 32),
-                ),
-                
-                const SizedBox(height: 20),
-                
-                Text(
-                  'Удалить ${widget.contactName}?',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
+                  
+                  const SizedBox(height: 20),
+                  
+                  Text(
+                    'Удалить ${widget.contactName}?',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    softWrap: true,
+                    textAlign: TextAlign.center,
                   ),
-                ),
-                
-                const SizedBox(height: 12),
-                
-                Text(
-                  'Контакт и вся история переписки\nбудут удалены безвозвратно',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.grey.shade400,
-                    fontSize: 14,
-                    height: 1.4,
+                  
+                  const SizedBox(height: 12),
+                  
+                  Text(
+                    'Контакт и вся история переписки\nбудут удалены безвозвратно',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.grey.shade400,
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                    softWrap: true,
                   ),
-                ),
                 
                 const SizedBox(height: 24),
                 
@@ -1535,7 +1637,8 @@ class _ModernDeleteDialogState extends State<_ModernDeleteDialog> with SingleTic
                     ),
                   ],
                 ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

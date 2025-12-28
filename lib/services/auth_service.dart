@@ -9,11 +9,48 @@ import 'package:orpheus_project/models/security_config.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 
+/// Абстракция для secure storage (нужна для unit-тестов без MethodChannel).
+abstract class AuthSecureStorage {
+  Future<String?> read({required String key});
+  Future<void> write({required String key, required String value});
+  Future<void> delete({required String key});
+}
+
+/// Прод-реализация secure storage через `flutter_secure_storage`.
+class FlutterAuthSecureStorage implements AuthSecureStorage {
+  FlutterAuthSecureStorage(this._inner);
+  final FlutterSecureStorage _inner;
+
+  @override
+  Future<String?> read({required String key}) => _inner.read(key: key);
+
+  @override
+  Future<void> write({required String key, required String value}) => _inner.write(key: key, value: value);
+
+  @override
+  Future<void> delete({required String key}) => _inner.delete(key: key);
+}
+
 class AuthService {
   static final AuthService instance = AuthService._();
-  AuthService._();
 
-  final _secureStorage = const FlutterSecureStorage();
+  /// Создать отдельный экземпляр (в тестах), чтобы не трогать singleton и не зависеть от плагинов.
+  static AuthService createForTesting({
+    required AuthSecureStorage secureStorage,
+    DateTime Function()? now,
+  }) {
+    return AuthService._(secureStorage: secureStorage, now: now);
+  }
+
+  AuthService._({
+    AuthSecureStorage? secureStorage,
+    DateTime Function()? now,
+  })  : _secureStorage =
+            secureStorage ?? FlutterAuthSecureStorage(const FlutterSecureStorage()),
+        _now = now ?? DateTime.now;
+
+  final AuthSecureStorage _secureStorage;
+  final DateTime Function() _now;
   static const _configKey = 'orpheus_security_config';
 
   /// Текущая конфигурация безопасности
@@ -187,7 +224,7 @@ class AuthService {
   Future<void> _incrementFailedAttempts() async {
     _config = _config.copyWith(
       failedAttempts: _config.failedAttempts + 1,
-      lastFailedAttempt: DateTime.now(),
+      lastFailedAttempt: _now(),
     );
     await _saveConfig();
     print("AUTH: Неверный PIN, попытка ${_config.failedAttempts}");

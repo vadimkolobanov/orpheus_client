@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,6 +13,23 @@ class DeviceSettingsService {
   
   // Ключ для хранения настройки "не показывать диалог"
   static const String _setupDialogDismissedKey = 'setup_dialog_dismissed';
+
+  // ===== Test hooks =====
+  @visibleForTesting
+  static bool? debugForceAndroid;
+
+  @visibleForTesting
+  static String? debugManufacturerOverride;
+
+  @visibleForTesting
+  static bool? debugBatteryOptimizationDisabledOverride;
+
+  @visibleForTesting
+  static void debugResetForTesting() {
+    debugForceAndroid = null;
+    debugManufacturerOverride = null;
+    debugBatteryOptimizationDisabledOverride = null;
+  }
   
   /// Проверить, был ли диалог скрыт пользователем
   static Future<bool> isSetupDialogDismissed() async {
@@ -27,7 +45,11 @@ class DeviceSettingsService {
 
   /// Получить производителя устройства
   static Future<String> getDeviceManufacturer() async {
-    if (!Platform.isAndroid) return 'other';
+    final forced = debugForceAndroid;
+    if (forced != true && !Platform.isAndroid) return 'other';
+
+    final override = debugManufacturerOverride;
+    if (override != null) return override.toLowerCase();
     
     try {
       final manufacturer = await _settingsChannel.invokeMethod<String>('getDeviceManufacturer');
@@ -39,7 +61,11 @@ class DeviceSettingsService {
 
   /// Проверить, отключена ли оптимизация батареи для приложения
   static Future<bool> isBatteryOptimizationDisabled() async {
-    if (!Platform.isAndroid) return true;
+    final forced = debugForceAndroid;
+    if (forced != true && !Platform.isAndroid) return true;
+
+    final override = debugBatteryOptimizationDisabledOverride;
+    if (override != null) return override;
     
     try {
       return await _batteryChannel.invokeMethod<bool>('isBatteryOptimizationDisabled') ?? false;

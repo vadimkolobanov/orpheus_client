@@ -12,7 +12,13 @@ import 'package:orpheus_project/main.dart';
 
 class LicenseScreen extends StatefulWidget {
   final VoidCallback onLicenseConfirmed;
-  const LicenseScreen({super.key, required this.onLicenseConfirmed});
+  const LicenseScreen({
+    super.key,
+    required this.onLicenseConfirmed,
+    Stream<String>? debugWsStreamOverride,
+  }) : _debugWsStreamOverride = debugWsStreamOverride;
+
+  final Stream<String>? _debugWsStreamOverride;
 
   @override
   State<LicenseScreen> createState() => _LicenseScreenState();
@@ -57,7 +63,8 @@ class _LicenseScreenState extends State<LicenseScreen> with TickerProviderStateM
       duration: const Duration(seconds: 8),
     )..repeat();
 
-    _wsSubscription = websocketService.stream.listen((message) {
+    final wsStream = widget._debugWsStreamOverride ?? websocketService.stream;
+    _wsSubscription = wsStream.listen((message) {
       try {
         final data = json.decode(message);
         if (data['type'] == 'payment-confirmed' ||

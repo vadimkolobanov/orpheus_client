@@ -180,6 +180,25 @@ class DatabaseService {
     await db.insert('messages', message.toMap(contactKey));
   }
 
+  /// Обновить статус сообщения (для исходящих/входящих).
+  ///
+  /// Контракт: обновляет строку по (contactPublicKey, timestamp, isSentByMe).
+  /// Это достаточно детерминировано для наших сообщений, т.к. timestamp задаётся при создании.
+  Future<void> updateMessageStatus({
+    required String contactKey,
+    required int timestampMs,
+    required bool isSentByMe,
+    required MessageStatus status,
+  }) async {
+    final db = await instance.database;
+    await db.update(
+      'messages',
+      {'status': status.index},
+      where: 'contactPublicKey = ? AND timestamp = ? AND isSentByMe = ?',
+      whereArgs: [contactKey, timestampMs, isSentByMe ? 1 : 0],
+    );
+  }
+
   // Получить сообщения (с маппингом новых полей)
   Future<List<ChatMessage>> getMessagesForContact(String contactKey) async {
     // В duress mode возвращаем пустой список

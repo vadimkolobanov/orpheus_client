@@ -7,14 +7,17 @@ import 'package:orpheus_project/screens/pin_setup_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
 
 class SecuritySettingsScreen extends StatefulWidget {
-  const SecuritySettingsScreen({super.key});
+  final AuthService auth;
+
+  SecuritySettingsScreen({super.key, AuthService? auth})
+      : auth = auth ?? AuthService.instance;
 
   @override
   State<SecuritySettingsScreen> createState() => _SecuritySettingsScreenState();
 }
 
 class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with SingleTickerProviderStateMixin {
-  final _auth = AuthService.instance;
+  late final AuthService _auth;
   final _localAuth = LocalAuthentication();
   
   bool _canUseBiometrics = false;
@@ -23,6 +26,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
   @override
   void initState() {
     super.initState();
+    _auth = widget.auth;
     
     _revealController = AnimationController(
       vsync: this,

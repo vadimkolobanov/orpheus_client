@@ -13,20 +13,31 @@ class LockScreen extends StatefulWidget {
   final VoidCallback onUnlocked;
   final VoidCallback onDuressMode;
   final Future<void> Function(WipeReason reason) onWipe;
+  final AuthService auth;
 
-  const LockScreen({
+  LockScreen({
     super.key,
     required this.onUnlocked,
     required this.onDuressMode,
     required this.onWipe,
-  });
+    AuthService? auth,
+  }) : auth = auth ?? AuthService.instance;
+
+  /// Для виджет/юнит-тестов: можно подменить AuthService, чтобы не зависеть от плагинов.
+  LockScreen.forTesting({
+    super.key,
+    required this.onUnlocked,
+    required this.onDuressMode,
+    required this.onWipe,
+    required AuthService auth,
+  }) : auth = auth;
 
   @override
   State<LockScreen> createState() => _LockScreenState();
 }
 
 class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
-  final _auth = AuthService.instance;
+  late final AuthService _auth;
   final _localAuth = LocalAuthentication();
   
   String _enteredPin = '';
@@ -44,6 +55,8 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+
+    _auth = widget.auth;
     
     _shakeController = AnimationController(
       vsync: this,

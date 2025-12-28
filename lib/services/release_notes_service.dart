@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 
 class ReleaseNote {
   final int versionCode;
@@ -44,13 +45,22 @@ class ReleaseNotesService {
     'https://orpheus.click',
   ];
 
+  ReleaseNotesService({http.Client? httpClient}) : _http = httpClient ?? http.Client();
+
+  final http.Client _http;
+
+  @visibleForTesting
+  static List<String>? debugBaseUrlsOverride;
+
   Future<List<ReleaseNote>> fetchPublicReleases({int limit = 30}) async {
     Object? lastError;
 
-    for (final base in _baseUrls) {
+    final bases = debugBaseUrlsOverride ?? _baseUrls;
+
+    for (final base in bases) {
       final url = Uri.parse('$base/api/public/releases?limit=$limit');
       try {
-        final res = await http
+        final res = await _http
             .get(url, headers: {'Accept': 'application/json'})
             .timeout(const Duration(seconds: 8));
 

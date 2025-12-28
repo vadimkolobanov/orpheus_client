@@ -2,58 +2,183 @@
 
 import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
+
+/// Минимальный контракт для звукового бэкенда.
+///
+/// Важно: в тестах мы подменяем бэкенд на in-memory fake, чтобы проверять,
+/// что SoundService действительно вызывает нужные действия (а не просто "не падает").
+abstract class SoundBackend {
+  Future<void> playDialing();
+  Future<void> playConnected();
+  Future<void> playDisconnected();
+  Future<void> stopAll();
+}
+
+class NoopSoundBackend implements SoundBackend {
+  @override
+  Future<void> playDialing() async {}
+
+  @override
+  Future<void> playConnected() async {}
+
+  @override
+  Future<void> playDisconnected() async {}
+
+  @override
+  Future<void> stopAll() async {}
+}
+
+class AudioplayersSoundBackend implements SoundBackend {
+  AudioplayersSoundBackend({
+    Duration timeout = const Duration(seconds: 2),
+  }) : _timeout = timeout;
+
+  final Duration _timeout;
+
+  AudioPlayer? _dialingPlayer;
+  AudioPlayer? _notificationPlayer;
+
+  void _ensurePlayers() {
+    if (_dialingPlayer != null && _notificationPlayer != null) return;
+    try {
+      _dialingPlayer = AudioPlayer();
+      _notificationPlayer = AudioPlayer();
+      unawaited(_dialingPlayer!.setReleaseMode(ReleaseMode.loop).catchError((_) {}));
+    } catch (_) {
+      // best-effort: звук не должен валить приложение
+      _dialingPlayer = null;
+      _notificationPlayer = null;
+    }
+  }
+
+  @override
+  Future<void> playDialing() async {
+    _ensurePlayers();
+    final dialing = _dialingPlayer;
+    if (dialing == null) return;
+    try {
+      // Устанавливаем источник каждый раз, это надежнее
+      await dialing.setSource(AssetSource('assets/sounds/dialing.mp3')).timeout(_timeout);
+      await dialing.resume().timeout(_timeout);
+    } catch (_) {
+      // best-effort
+    }
+  }
+
+  @override
+  Future<void> playConnected() async {
+    _ensurePlayers();
+    final notif = _notificationPlayer;
+    if (notif == null) return;
+    try {
+      await notif.play(AssetSource('assets/sounds/connected.mp3')).timeout(_timeout);
+    } catch (_) {
+      // best-effort
+    }
+  }
+
+  @override
+  Future<void> playDisconnected() async {
+    _ensurePlayers();
+    final notif = _notificationPlayer;
+    if (notif == null) return;
+    try {
+      await notif.play(AssetSource('assets/sounds/disconnected.mp3')).timeout(_timeout);
+    } catch (_) {
+      // best-effort
+    }
+  }
+
+  @override
+  Future<void> stopAll() async {
+    _ensurePlayers();
+    final dialing = _dialingPlayer;
+    final notif = _notificationPlayer;
+    if (dialing == null || notif == null) return;
+    try {
+      if (dialing.state == PlayerState.playing) {
+        await dialing.pause().timeout(_timeout);
+      }
+      if (notif.state == PlayerState.playing) {
+        await notif.stop().timeout(_timeout);
+      }
+    } catch (_) {
+      // best-effort
+    }
+  }
+}
 
 class SoundService {
   // --- НАСТОЯЩИЙ SINGLETON ---
   // Приватный конструктор
-  SoundService._internal() {
-    // Конфигурация происходит один раз при создании
-    // Важно: в тестовой среде platform channel может быть недоступен.
-    // Не даём Future завершиться необработанным исключением.
-    unawaited(_dialingPlayer.setReleaseMode(ReleaseMode.loop).catchError((_) {}));
-  }
+  SoundService._internal() : _backend = _defaultBackend();
   // Единственный экземпляр
   static final SoundService instance = SoundService._internal();
   // -------------------------
 
-  final AudioPlayer _dialingPlayer = AudioPlayer();
-  final AudioPlayer _notificationPlayer = AudioPlayer();
-  final bool _isDisposed = false;
-  static const Duration _audioTimeout = Duration(seconds: 2);
+  SoundBackend _backend;
+  bool _isDisposed = false;
+
+  bool get _supportsAudioPlatform {
+    const isFlutterTest = bool.fromEnvironment('FLUTTER_TEST');
+    return !isFlutterTest &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
+  }
+
+  static SoundBackend _defaultBackend() {
+    const isFlutterTest = bool.fromEnvironment('FLUTTER_TEST');
+    if (isFlutterTest) return NoopSoundBackend();
+    if (kIsWeb) return NoopSoundBackend();
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return NoopSoundBackend();
+    }
+    return AudioplayersSoundBackend();
+  }
+
+  @visibleForTesting
+  static void debugSetBackendForTesting(SoundBackend? backend) {
+    instance._backend = backend ?? _defaultBackend();
+  }
 
   Future<void> playDialingSound() async {
     if (_isDisposed) return;
     try {
-      // Устанавливаем источник каждый раз, это надежнее
-      await _dialingPlayer.setSource(AssetSource('sounds/dialing.mp3')).timeout(_audioTimeout);
-      await _dialingPlayer.resume().timeout(_audioTimeout);
-    } catch (e) { print("Ошибка playDialingSound: $e"); }
+      await _backend.playDialing();
+    } catch (e) {
+      // best-effort: звук не должен валить приложение
+      print("Ошибка playDialingSound: $e");
+    }
   }
 
   Future<void> playConnectedSound() async {
     if (_isDisposed) return;
     try {
-      await _notificationPlayer.play(AssetSource('sounds/connected.mp3')).timeout(_audioTimeout);
-    } catch (e) { print("Ошибка playConnectedSound: $e"); }
+      await _backend.playConnected();
+    } catch (e) {
+      print("Ошибка playConnectedSound: $e");
+    }
   }
 
   Future<void> playDisconnectedSound() async {
     if (_isDisposed) return;
     try {
-      await _notificationPlayer.play(AssetSource('sounds/disconnected.mp3')).timeout(_audioTimeout);
-    } catch (e) { print("Ошибка playDisconnectedSound: $e"); }
+      await _backend.playDisconnected();
+    } catch (e) {
+      print("Ошибка playDisconnectedSound: $e");
+    }
   }
 
   Future<void> stopAllSounds() async {
     if (_isDisposed) return;
     try {
-      if (_dialingPlayer.state == PlayerState.playing) {
-        await _dialingPlayer.pause().timeout(_audioTimeout);
-      }
-      if (_notificationPlayer.state == PlayerState.playing) {
-        await _notificationPlayer.stop().timeout(_audioTimeout);
-      }
-    } catch (e) { print("Ошибка stopAllSounds: $e"); }
+      await _backend.stopAll();
+    } catch (e) {
+      print("Ошибка stopAllSounds: $e");
+    }
   }
 
 // Этот метод больше не нужен и удален.

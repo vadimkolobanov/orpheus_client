@@ -60,10 +60,41 @@ flutter test
 - `lib/services/pending_actions_service.dart`
 - `lib/services/background_call_service.dart`
 
+## Что уже закреплено unit-тестами (контракты)
+
+### Безопасность
+- `AuthService` (PIN/duress/wipeCode/autoWipe + storage roundtrip): `test/services/auth_service_test.dart`
+- `SecurityConfig` (lockout ladder по ADR 0003 + сериализация): `test/models/security_config_test.dart`
+- `PanicWipeService` (3 быстрых ухода в фон → wipe): `test/services/panic_wipe_service_test.dart`
+
+### Pending actions
+- `PendingActionsService` (pending call rejections: дедупликация/очистка/устойчивость к ошибкам): `test/services/pending_actions_service_test.dart`
+
+### Звонки (простые контракты)
+- `IncomingCallBuffer` (буферизация ICE до offer): `test/services/incoming_call_buffer_test.dart`
+- `CallStateService` (флаг активного звонка): `test/services/call_state_service_test.dart`
+- `BackgroundCallService` (foreground service на время звонка): `test/services/background_call_service_test.dart`
+- `CallSessionController` (контрактный lifecycle CallScreen: hang-up/reject + системные сообщения): `test/services/call_session_controller_test.dart`
+
+### WebRTC (контракты гонок)
+- Очередь remote ICE кандидатов до установки remote SDP: `test/services/webrtc_candidate_queue_test.dart`
+- Интеграция очереди с WebRTCService (ICE до/после SDP + reset на hangUp): `test/services/webrtc_service_queue_integration_test.dart`
+
+### Уведомления (локальные контракты)
+- `NotificationService` (каналы + call/message + privacy + best‑effort): `test/services/notification_service_test.dart`
+
+### Чат (контракты форматирования и отправки)
+- `ChatTimeRules` (Сегодня/Вчера/дата, разделители, скрытие времени в одну минуту): `test/services/chat_time_rules_test.dart`
+- `ChatSessionController` (send/clear/read, статусы sent/failed): `test/services/chat_session_controller_test.dart`
+
 ## Где лежат тесты
 - `test/models/` — модели
 - `test/services/` — сервисы
 - `test/widgets/` — widget-тесты
+
+## Каталог тестов (для отчёта/инвестора)
+
+Сводный список тестовых наборов с кратким описанием (1 строка на файл): `docs/testing/TEST_CATALOG.md`
 
 ## Примечание про документацию/логи
 - `AI_WORKLOG.md` — **журнал** действий (не “истина” про текущее поведение).

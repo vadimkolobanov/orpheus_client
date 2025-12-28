@@ -264,7 +264,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
                   : "PIN-код не установлен",
               onTap: () => Navigator.push(
                 context,
-                _createPageRoute(const SecuritySettingsScreen()),
+                _createPageRoute(SecuritySettingsScreen()),
               ).then((_) {
                 if (!mounted) return;
                 setState(() {});

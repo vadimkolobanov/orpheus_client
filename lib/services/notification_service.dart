@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:flutter/foundation.dart';
 
 /// Обработчик фоновых FCM сообщений (top-level функция)
 /// Вызывается когда приложение убито или в фоне
@@ -28,8 +29,20 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
-  static FlutterLocalNotificationsPlugin? _localNotifications;
+  /// ВАЖНО: не трогаем `FirebaseMessaging.instance` в момент импорта/конструирования
+  /// (widget-тесты могут падать без зарегистрированных плагинов).
+  /// Достаём инстанс лениво — только когда реально вызывается `init()`.
+  FirebaseMessaging get _firebaseMessaging => FirebaseMessaging.instance;
+
+  // ===== Local notifications backend (DI for unit tests) =====
+  static NotificationLocalBackend? _localBackend;
+  static bool _localInitialized = false;
+
+  @visibleForTesting
+  static void debugSetLocalBackendForTesting(NotificationLocalBackend? backend) {
+    _localBackend = backend;
+    _localInitialized = false;
+  }
 
   /// FCM токен для отправки на сервер
   String? fcmToken;
@@ -44,6 +57,12 @@ class NotificationService {
   static const String _messageChannelId = 'orpheus_messages';
   static const String _messageChannelName = 'Сообщения';
 
+  /// Android small icon для уведомлений.
+  ///
+  /// Важно: НЕ используем `ic_launcher` (часто адаптивный) — он и даёт "белый квадрат".
+  /// Нужна монохромная иконка в `res/drawable`.
+  static const String _androidSmallIcon = 'ic_stat_orpheus';
+
   // Notification IDs
   static const int _callNotificationId = 1001;
   static const int _messageNotificationId = 1002;
@@ -51,7 +70,7 @@ class NotificationService {
   /// Инициализация сервиса
   Future<void> init() async {
     // 1. Инициализация локальных уведомлений
-    await _initLocalNotifications();
+    await _ensureLocalNotificationsInitialized();
 
     // 2. Запрос разрешений FCM
     NotificationSettings settings = await _firebaseMessaging.requestPermission(
@@ -96,47 +115,31 @@ class NotificationService {
   }
 
   /// Инициализация локальных уведомлений
-  static Future<void> _initLocalNotifications() async {
-    _localNotifications = FlutterLocalNotificationsPlugin();
+  static Future<void> _ensureLocalNotificationsInitialized() async {
+    if (_localBackend == null) {
+      _localBackend = PluginNotificationLocalBackend();
+    }
+    if (_localInitialized) return;
 
     // Создаём каналы уведомлений
-    final androidPlugin = _localNotifications!
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-
-    // Канал для звонков - максимальный приоритет
-    await androidPlugin?.createNotificationChannel(
-      const AndroidNotificationChannel(
-        _callChannelId,
-        _callChannelName,
-        description: 'Уведомления о входящих звонках',
-        importance: Importance.max,
-        playSound: true,
-        enableVibration: true,
-        enableLights: true,
-        ledColor: Color(0xFF6AD394),
-      ),
+    await _localBackend!.createAndroidChannel(
+      id: _callChannelId,
+      name: _callChannelName,
+      description: 'Уведомления о входящих звонках',
+      importance: Importance.max,
+      ledColor: const Color(0xFF6AD394),
     );
 
-    // Канал для сообщений - высокий приоритет
-    await androidPlugin?.createNotificationChannel(
-      const AndroidNotificationChannel(
-        _messageChannelId,
-        _messageChannelName,
-        description: 'Уведомления о новых сообщениях',
-        importance: Importance.high,
-        playSound: true,
-        enableVibration: true,
-      ),
+    await _localBackend!.createAndroidChannel(
+      id: _messageChannelId,
+      name: _messageChannelName,
+      description: 'Уведомления о новых сообщениях',
+      importance: Importance.high,
     );
 
-    // Инициализация
-    await _localNotifications!.initialize(
-      const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      ),
-      onDidReceiveNotificationResponse: _onNotificationTap,
-    );
+    await _localBackend!.initialize(onTap: _onNotificationTap);
 
+    _localInitialized = true;
     print("🔔 Local notifications initialized");
   }
 
@@ -156,9 +159,7 @@ class NotificationService {
   /// Обработка фоновых data-only сообщений
   static Future<void> _handleBackgroundMessage(Map<String, dynamic> data) async {
     // Обеспечиваем инициализацию локальных уведомлений
-    if (_localNotifications == null) {
-      await _initLocalNotifications();
-    }
+    await _ensureLocalNotificationsInitialized();
 
     final type = data['type'];
     final senderName = data['sender_name'] ?? 'Неизвестный';
@@ -168,6 +169,11 @@ class NotificationService {
     } else if (type == 'message') {
       await showMessageNotification(senderName: senderName);
     }
+  }
+
+  @visibleForTesting
+  static Future<void> debugHandleBackgroundMessageForTesting(Map<String, dynamic> data) {
+    return _handleBackgroundMessage(data);
   }
 
   /// Обработка клика по уведомлению FCM
@@ -194,31 +200,18 @@ class NotificationService {
     required String callerName,
   }) async {
     try {
-      if (_localNotifications == null) {
-        await _initLocalNotifications();
-      }
+      await _ensureLocalNotificationsInitialized();
 
-      const androidDetails = AndroidNotificationDetails(
-        _callChannelId,
-        _callChannelName,
-        channelDescription: 'Входящий звонок',
-        importance: Importance.max,
-        priority: Priority.max,
+      await _localBackend!.show(
+        id: _callNotificationId,
+        channelId: _callChannelId,
+        channelName: _callChannelName,
+        title: 'Входящий звонок',
+        body: callerName,
         category: AndroidNotificationCategory.call,
+        androidSmallIcon: _androidSmallIcon,
         fullScreenIntent: true,
-        ongoing: true,  // Не смахивается
-        autoCancel: false,
-        showWhen: false,
-        enableVibration: true,
-        playSound: true,
-        // Без кнопок actions!
-      );
-
-      await _localNotifications!.show(
-        _callNotificationId,
-        'Входящий звонок',
-        callerName,
-        const NotificationDetails(android: androidDetails),
+        ongoing: true,
       );
 
       print("🔔 Call notification shown: $callerName");
@@ -232,7 +225,7 @@ class NotificationService {
   /// Скрыть уведомление о звонке
   static Future<void> hideCallNotification() async {
     try {
-      await _localNotifications?.cancel(_callNotificationId);
+      await _localBackend?.cancel(_callNotificationId);
       print("🔔 Call notification hidden");
       DebugLogger.info('NOTIF', '🔔 Уведомление о звонке скрыто');
     } catch (e) {
@@ -249,29 +242,19 @@ class NotificationService {
     required String senderName,
   }) async {
     try {
-      if (_localNotifications == null) {
-        await _initLocalNotifications();
-      }
+      await _ensureLocalNotificationsInitialized();
 
-      final androidDetails = AndroidNotificationDetails(
-        _messageChannelId,
-        _messageChannelName,
-        channelDescription: 'Новое сообщение',
-        importance: Importance.high,
-        priority: Priority.high,
+      await _localBackend!.show(
+        id: _messageNotificationId + senderName.hashCode % 1000, // Уникальный ID для разных отправителей
+        channelId: _messageChannelId,
+        channelName: _messageChannelName,
+        title: senderName,
+        body: 'Новое сообщение', // Не показываем содержимое для приватности
         category: AndroidNotificationCategory.message,
-        showWhen: true,
-        enableVibration: true,
-        playSound: true,
-        // Группировка сообщений от одного контакта
+        androidSmallIcon: _androidSmallIcon,
         groupKey: 'orpheus_messages_group',
-      );
-
-      await _localNotifications!.show(
-        _messageNotificationId + senderName.hashCode % 1000,  // Уникальный ID для разных отправителей
-        senderName,
-        'Новое сообщение',  // Не показываем содержимое для приватности
-        NotificationDetails(android: androidDetails),
+        ongoing: false,
+        fullScreenIntent: false,
       );
 
       print("🔔 Message notification shown: $senderName");
@@ -285,7 +268,7 @@ class NotificationService {
   /// Скрыть все уведомления о сообщениях
   static Future<void> hideMessageNotifications() async {
     try {
-      await _localNotifications?.cancelAll();
+      await _localBackend?.cancelAll();
       print("🔔 All notifications hidden");
     } catch (e) {
       print("🔔 hideMessageNotifications error (ignored): $e");
@@ -295,28 +278,133 @@ class NotificationService {
 
   /// Показать тестовое уведомление
   static Future<void> showTestNotification() async {
-    if (_localNotifications == null) {
-      await _initLocalNotifications();
-    }
+    await _ensureLocalNotificationsInitialized();
 
-    const androidDetails = AndroidNotificationDetails(
-      _messageChannelId,
-      _messageChannelName,
-      channelDescription: 'Тестовое уведомление',
-      importance: Importance.high,
-      priority: Priority.high,
-      showWhen: true,
-      enableVibration: true,
-      playSound: true,
-    );
-
-    await _localNotifications!.show(
-      9999,
-      'Orpheus',
-      'Тестовое уведомление работает! 🔔',
-      const NotificationDetails(android: androidDetails),
+    await _localBackend!.show(
+      id: 9999,
+      channelId: _messageChannelId,
+      channelName: _messageChannelName,
+      title: 'Orpheus',
+      body: 'Тестовое уведомление работает! 🔔',
+      category: AndroidNotificationCategory.message,
+      androidSmallIcon: _androidSmallIcon,
+      groupKey: null,
+      ongoing: false,
+      fullScreenIntent: false,
     );
 
     print("🔔 Test notification shown");
   }
+}
+
+/// Минимальный интерфейс для локальных уведомлений (DI для unit-тестов).
+abstract class NotificationLocalBackend {
+  Future<void> createAndroidChannel({
+    required String id,
+    required String name,
+    required String description,
+    required Importance importance,
+    Color? ledColor,
+  });
+
+  Future<void> initialize({required void Function(NotificationResponse response) onTap});
+
+  Future<void> show({
+    required int id,
+    required String channelId,
+    required String channelName,
+    required String title,
+    required String body,
+    required AndroidNotificationCategory category,
+    required String androidSmallIcon,
+    required bool fullScreenIntent,
+    required bool ongoing,
+    String? groupKey,
+  });
+
+  Future<void> cancel(int id);
+  Future<void> cancelAll();
+}
+
+class PluginNotificationLocalBackend implements NotificationLocalBackend {
+  PluginNotificationLocalBackend({FlutterLocalNotificationsPlugin? plugin})
+      : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+
+  final FlutterLocalNotificationsPlugin _plugin;
+
+  @override
+  Future<void> createAndroidChannel({
+    required String id,
+    required String name,
+    required String description,
+    required Importance importance,
+    Color? ledColor,
+  }) async {
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.createNotificationChannel(
+      AndroidNotificationChannel(
+        id,
+        name,
+        description: description,
+        importance: importance,
+        playSound: true,
+        enableVibration: true,
+        enableLights: ledColor != null,
+        ledColor: ledColor,
+      ),
+    );
+  }
+
+  @override
+  Future<void> initialize({required void Function(NotificationResponse response) onTap}) async {
+    await _plugin.initialize(
+      const InitializationSettings(
+        android: AndroidInitializationSettings(NotificationService._androidSmallIcon),
+      ),
+      onDidReceiveNotificationResponse: onTap,
+    );
+  }
+
+  @override
+  Future<void> show({
+    required int id,
+    required String channelId,
+    required String channelName,
+    required String title,
+    required String body,
+    required AndroidNotificationCategory category,
+    required String androidSmallIcon,
+    required bool fullScreenIntent,
+    required bool ongoing,
+    String? groupKey,
+  }) async {
+    final androidDetails = AndroidNotificationDetails(
+      channelId,
+      channelName,
+      importance: category == AndroidNotificationCategory.call ? Importance.max : Importance.high,
+      priority: category == AndroidNotificationCategory.call ? Priority.max : Priority.high,
+      category: category,
+      icon: androidSmallIcon,
+      fullScreenIntent: fullScreenIntent,
+      ongoing: ongoing,
+      autoCancel: !ongoing,
+      showWhen: category != AndroidNotificationCategory.call,
+      enableVibration: true,
+      playSound: true,
+      groupKey: groupKey,
+    );
+
+    await _plugin.show(
+      id,
+      title,
+      body,
+      NotificationDetails(android: androidDetails),
+    );
+  }
+
+  @override
+  Future<void> cancel(int id) => _plugin.cancel(id);
+
+  @override
+  Future<void> cancelAll() => _plugin.cancelAll();
 }

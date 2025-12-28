@@ -1,0 +1,160 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:orpheus_project/services/notification_service.dart';
+
+class _FakeLocalBackend implements NotificationLocalBackend {
+  final createdChannels = <({String id, String name, String description, Importance importance})>[];
+  int initializeCalls = 0;
+  final shown = <({
+    int id,
+    String channelId,
+    String channelName,
+    String title,
+    String body,
+    AndroidNotificationCategory category,
+    String androidSmallIcon,
+    bool fullScreenIntent,
+    bool ongoing,
+    String? groupKey,
+  })>[];
+  final cancelled = <int>[];
+  int cancelAllCalls = 0;
+
+  Object? throwOnShow;
+  Object? throwOnCancel;
+  Object? throwOnCancelAll;
+
+  @override
+  Future<void> createAndroidChannel({
+    required String id,
+    required String name,
+    required String description,
+    required Importance importance,
+    Color? ledColor,
+  }) async {
+    createdChannels.add((id: id, name: name, description: description, importance: importance));
+  }
+
+  @override
+  Future<void> initialize({required void Function(NotificationResponse response) onTap}) async {
+    initializeCalls += 1;
+  }
+
+  @override
+  Future<void> show({
+    required int id,
+    required String channelId,
+    required String channelName,
+    required String title,
+    required String body,
+    required AndroidNotificationCategory category,
+    required String androidSmallIcon,
+    required bool fullScreenIntent,
+    required bool ongoing,
+    String? groupKey,
+  }) async {
+    if (throwOnShow != null) throw throwOnShow!;
+    shown.add((
+      id: id,
+      channelId: channelId,
+      channelName: channelName,
+      title: title,
+      body: body,
+      category: category,
+      androidSmallIcon: androidSmallIcon,
+      fullScreenIntent: fullScreenIntent,
+      ongoing: ongoing,
+      groupKey: groupKey,
+    ));
+  }
+
+  @override
+  Future<void> cancel(int id) async {
+    if (throwOnCancel != null) throw throwOnCancel!;
+    cancelled.add(id);
+  }
+
+  @override
+  Future<void> cancelAll() async {
+    if (throwOnCancelAll != null) throw throwOnCancelAll!;
+    cancelAllCalls += 1;
+  }
+}
+
+void main() {
+  group('NotificationService (контракты локальных уведомлений)', () {
+    late _FakeLocalBackend backend;
+
+    setUp(() {
+      backend = _FakeLocalBackend();
+      NotificationService.debugSetLocalBackendForTesting(backend);
+    });
+
+    tearDown(() {
+      NotificationService.debugSetLocalBackendForTesting(null);
+    });
+
+    test('showCallNotification: title=Входящий звонок, body=callerName, ongoing+fullScreenIntent', () async {
+      await NotificationService.showCallNotification(callerName: 'Alice');
+
+      // каналы должны быть созданы при первой инициализации
+      expect(backend.createdChannels.map((c) => c.id), containsAll(['orpheus_calls', 'orpheus_messages']));
+      expect(backend.initializeCalls, equals(1));
+
+      expect(backend.shown, hasLength(1));
+      final s = backend.shown.single;
+      expect(s.id, equals(1001));
+      expect(s.channelId, equals('orpheus_calls'));
+      expect(s.title, equals('Входящий звонок'));
+      expect(s.body, equals('Alice'));
+      expect(s.category, equals(AndroidNotificationCategory.call));
+      expect(s.androidSmallIcon, equals('ic_stat_orpheus'));
+      expect(s.ongoing, isTrue);
+      expect(s.fullScreenIntent, isTrue);
+    });
+
+    test('hideCallNotification: cancel(1001), ошибки игнорируются (best-effort)', () async {
+      backend.throwOnCancel = StateError('boom');
+      await NotificationService.hideCallNotification();
+      // не падает
+    });
+
+    test('showMessageNotification: приватность — body=Новое сообщение (без текста)', () async {
+      await NotificationService.showMessageNotification(senderName: 'Bob');
+
+      expect(backend.shown, hasLength(1));
+      final s = backend.shown.single;
+      expect(s.channelId, equals('orpheus_messages'));
+      expect(s.title, equals('Bob'));
+      expect(s.body, equals('Новое сообщение'));
+      expect(s.category, equals(AndroidNotificationCategory.message));
+      expect(s.androidSmallIcon, equals('ic_stat_orpheus'));
+      expect(s.groupKey, equals('orpheus_messages_group'));
+    });
+
+    test('hideMessageNotifications: cancelAll, ошибки игнорируются (best-effort)', () async {
+      backend.throwOnCancelAll = StateError('boom');
+      await NotificationService.hideMessageNotifications();
+      // не падает
+    });
+
+    test('background message mapping: type=call/message выбирает правильный метод и sender_name дефолт', () async {
+      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'call', 'sender_name': 'Carol'});
+      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'message', 'sender_name': 'Dan'});
+      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'call'}); // дефолт имя
+
+      expect(backend.shown.where((s) => s.channelId == 'orpheus_calls').length, equals(2));
+      expect(backend.shown.where((s) => s.channelId == 'orpheus_messages').length, equals(1));
+      expect(backend.shown.any((s) => s.body == 'Неизвестный'), isTrue);
+    });
+
+    test('ошибки backend.show не должны пробрасываться наружу (best-effort)', () async {
+      backend.throwOnShow = StateError('boom');
+      await NotificationService.showMessageNotification(senderName: 'Eve');
+      await NotificationService.showCallNotification(callerName: 'Mallory');
+    });
+  });
+}
+
+

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,14 +11,47 @@ class UpdateService {
 
   static const Duration _networkTimeout = Duration(seconds: 5);
 
+  // ===== Test hooks (DI/overrides) =====
+  @visibleForTesting
+  static int? debugCurrentBuildNumberOverride;
+
+  /// Override для HTTP GET (например, чтобы симулировать timeout первого хоста и success второго).
+  @visibleForTesting
+  static Future<http.Response> Function(Uri uri)? debugHttpGet;
+
+  /// Override для launchUrl (чтобы не дергать платформенный плагин в тестах).
+  @visibleForTesting
+  static Future<bool> Function(Uri url, {LaunchMode mode})? debugLaunchUrl;
+
+  /// Сбросить флаги/override’ы между тестами.
+  @visibleForTesting
+  static void debugResetForTesting() {
+    _isUpdateDialogShown = false;
+    debugCurrentBuildNumberOverride = null;
+    debugHttpGet = null;
+    debugLaunchUrl = null;
+  }
+
+  @visibleForTesting
+  static Future<http.Response?> debugGetWithFallbackForTesting(String path) {
+    return _getWithFallback(path);
+  }
+
+  static Future<int> _getCurrentBuildNumber() async {
+    final override = debugCurrentBuildNumberOverride;
+    if (override != null) return override;
+
+    // 1. Узнаем свою версию (из pubspec.yaml, цифра после +)
+    final packageInfo = await PackageInfo.fromPlatform();
+    return int.tryParse(packageInfo.buildNumber) ?? 0;
+  }
+
   // Главный метод проверки
   static Future<void> checkForUpdate(BuildContext context) async {
     if (_isUpdateDialogShown) return; // Не спамить окнами
 
     try {
-      // 1. Узнаем свою версию (из pubspec.yaml, цифра после +)
-      PackageInfo packageInfo = await PackageInfo.fromPlatform();
-      int currentBuildNumber = int.tryParse(packageInfo.buildNumber) ?? 0;
+      final currentBuildNumber = await _getCurrentBuildNumber();
 
       print("UPDATE: Текущая сборка: $currentBuildNumber");
 
@@ -28,10 +62,16 @@ class UpdateService {
       if (response != null && response.statusCode == 200) {
         final data = json.decode(response.body);
 
-        int serverBuildNumber = data['version_code'];
-        String downloadUrl = data['download_url'];
-        String versionName = data['version_name'];
-        bool isRequired = data['required'] ?? false;
+        // Стараемся быть устойчивыми к типам (int vs string).
+        final serverBuildNumberRaw = data['version_code'];
+        final serverBuildNumber = switch (serverBuildNumberRaw) {
+          int v => v,
+          String v => int.tryParse(v) ?? 0,
+          _ => 0,
+        };
+        final downloadUrl = (data['download_url'] ?? '').toString();
+        final versionName = (data['version_name'] ?? '').toString();
+        final isRequired = (data['required'] == true);
 
         print("UPDATE: Версия на сервере: $serverBuildNumber");
 
@@ -51,10 +91,11 @@ class UpdateService {
   /// Возвращает первый успешный ответ (HTTP 200..499/500 тоже как ответ),
   /// либо null если не удалось достучаться ни до одного хоста.
   static Future<http.Response?> _getWithFallback(String path) async {
+    final httpGet = debugHttpGet ?? http.get;
     for (final urlStr in AppConfig.httpUrls(path)) {
       try {
         final uri = Uri.parse(urlStr);
-        final resp = await http.get(uri).timeout(_networkTimeout);
+        final resp = await httpGet(uri).timeout(_networkTimeout);
         return resp;
       } catch (_) {
         // пробуем следующий хост
@@ -119,7 +160,8 @@ class UpdateService {
   static Future<void> _launchBrowser(String urlString) async {
     final Uri url = Uri.parse(urlString);
     // Открываем во внешнем браузере, чтобы скачивание прошло надежно
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+    final launcher = debugLaunchUrl ?? launchUrl;
+    if (!await launcher(url, mode: LaunchMode.externalApplication)) {
       print('Could not launch $url');
     }
   }

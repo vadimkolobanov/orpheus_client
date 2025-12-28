@@ -184,11 +184,17 @@ class SecurityConfig {
 
   /// Получить длительность блокировки в зависимости от количества попыток
   Duration? _getLockDuration(int attempts) {
+    // Контракт из ADR 0003:
+    // 5 попыток  → 30 сек
+    // 10 попыток → 1 мин
+    // 15 попыток → 5 мин
+    // 20 попыток → 30 мин
+    //
+    // Между порогами действует “последняя достигнутая ступень”.
     if (attempts < 5) return null;
-    if (attempts < 7) return const Duration(seconds: 30);
-    if (attempts < 10) return const Duration(minutes: 1);
-    if (attempts < 15) return const Duration(minutes: 5);
-    if (attempts < 20) return const Duration(minutes: 15);
+    if (attempts < 10) return const Duration(seconds: 30);
+    if (attempts < 15) return const Duration(minutes: 1);
+    if (attempts < 20) return const Duration(minutes: 5);
     return const Duration(minutes: 30);
   }
 

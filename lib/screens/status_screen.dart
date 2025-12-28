@@ -9,7 +9,23 @@ import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/main.dart';
 
 class StatusScreen extends StatefulWidget {
-  const StatusScreen({super.key});
+  const StatusScreen({
+    super.key,
+    this.httpClient,
+    this.databaseService,
+    this.websocket,
+    this.messageUpdates,
+    this.debugPublicKeyBase64,
+    this.disableTimersForTesting = false,
+  });
+
+  /// DI для widget-тестов: чтобы не ходить в сеть и не зависеть от глобальных singleton’ов.
+  final http.Client? httpClient;
+  final DatabaseService? databaseService;
+  final WebSocketService? websocket;
+  final Stream<void>? messageUpdates;
+  final String? debugPublicKeyBase64;
+  final bool disableTimersForTesting;
 
   @override
   State<StatusScreen> createState() => _StatusScreenState();
@@ -127,42 +143,49 @@ class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMix
     _displayedKeyId = _getKeyFingerprint();
     _loadStats();
     _detectCountry();
-    _startThreatScan();
+    if (!widget.disableTimersForTesting) {
+      _startThreatScan();
+    }
 
-    websocketService.status.listen((status) {
+    final ws = widget.websocket ?? websocketService;
+    ws.status.listen((status) {
       if (mounted) {
         setState(() => _currentStatus = status);
       }
     });
 
-    messageUpdateController.stream.listen((_) {
+    final msgStream = widget.messageUpdates ?? messageUpdateController.stream;
+    msgStream.listen((_) {
       if (mounted) {
         setState(() => _sessionMessages++);
       }
     });
 
-    _updateTimer = Timer.periodic(const Duration(milliseconds: 1000), (timer) {
-      if (mounted) {
-        setState(() => _updateRealtimeData());
-      }
-    });
+    if (!widget.disableTimersForTesting) {
+      _updateTimer = Timer.periodic(const Duration(milliseconds: 1000), (timer) {
+        if (mounted) {
+          setState(() => _updateRealtimeData());
+        }
+      });
 
-    _keyIdAnimTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (mounted && _currentStatus == ConnectionStatus.Connected) {
-        _animateKeyIdScan();
-      }
-    });
+      _keyIdAnimTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (mounted && _currentStatus == ConnectionStatus.Connected) {
+          _animateKeyIdScan();
+        }
+      });
 
-    _threatScanTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) _startThreatScan();
-    });
+      _threatScanTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (mounted) _startThreatScan();
+      });
+    }
   }
 
   /// Определение страны пользователя по IP
   Future<void> _detectCountry() async {
     try {
+      final client = widget.httpClient ?? http.Client();
       // Пробуем ip-api.com (бесплатный, без ключа)
-      final response = await http.get(
+      final response = await client.get(
         Uri.parse('http://ip-api.com/json/?fields=countryCode,country'),
       ).timeout(const Duration(seconds: 5));
 
@@ -192,7 +215,8 @@ class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMix
 
   Future<void> _loadStats() async {
     try {
-      final contacts = await DatabaseService.instance.getContacts();
+      final db = widget.databaseService ?? DatabaseService.instance;
+      final contacts = await db.getContacts();
       if (mounted) {
         setState(() => _contactsCount = contacts.length);
       }
@@ -287,7 +311,7 @@ class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMix
   }
 
   String _getKeyFingerprint() {
-    final publicKey = cryptoService.publicKeyBase64;
+    final publicKey = widget.debugPublicKeyBase64 ?? cryptoService.publicKeyBase64;
     if (publicKey == null || publicKey.length < 8) return "--------";
     return publicKey.substring(0, 8).toUpperCase();
   }

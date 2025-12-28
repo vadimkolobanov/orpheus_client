@@ -18,24 +18,12 @@ import android.app.KeyguardManager
 class MainActivity: FlutterFragmentActivity() {
     private val BATTERY_CHANNEL = "com.example.orpheus_project/battery"
     private val SETTINGS_CHANNEL = "com.example.orpheus_project/settings"
+    private val CALL_CHANNEL = "com.example.orpheus_project/call"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // Разрешить показ активности поверх экрана блокировки
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            keyguardManager.requestDismissKeyguard(this, null)
-        } else {
-            @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-            )
-        }
+        // Флаги showWhenLocked и turnScreenOn теперь применяются только во время звонков
+        // через MethodChannel, чтобы не мешать нормальной работе приложения
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -92,6 +80,53 @@ class MainActivity: FlutterFragmentActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+
+        // Канал для управления поведением во время звонков
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CALL_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "enableCallMode" -> {
+                    enableCallMode()
+                    result.success(true)
+                }
+                "disableCallMode" -> {
+                    disableCallMode()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun enableCallMode() {
+        // Включаем показ поверх блокировки и включение экрана только во время звонка
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            keyguardManager.requestDismissKeyguard(this, null)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+            )
+        }
+    }
+
+    private fun disableCallMode() {
+        // Отключаем показ поверх блокировки после завершения звонка
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(false)
+            setTurnScreenOn(false)
+        } else {
+            @Suppress("DEPRECATION")
+            window.clearFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+            )
         }
     }
 

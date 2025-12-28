@@ -10,13 +10,45 @@
 import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:orpheus_project/services/auth_service.dart';
+import 'package:orpheus_project/models/security_config.dart';
 
 /// Callback для уведомления о wipe
 typedef PanicWipeCallback = Future<void> Function();
 
+/// Минимальный контракт, который нужен `PanicWipeService` (для unit-тестов без настоящего AuthService).
+abstract class PanicWipeAuth {
+  SecurityConfig get config;
+  Future<void> performWipe();
+}
+
+class _AuthServicePanicWipeAuth implements PanicWipeAuth {
+  _AuthServicePanicWipeAuth(this._auth);
+  final AuthService _auth;
+
+  @override
+  SecurityConfig get config => _auth.config;
+
+  @override
+  Future<void> performWipe() => _auth.performWipe();
+}
+
 class PanicWipeService with WidgetsBindingObserver {
   static final PanicWipeService instance = PanicWipeService._();
-  PanicWipeService._();
+
+  /// Создать отдельный экземпляр (в тестах), чтобы не зависеть от singleton и WidgetsBinding.
+  static PanicWipeService createForTesting({
+    required PanicWipeAuth auth,
+    DateTime Function()? now,
+  }) {
+    return PanicWipeService._(auth: auth, now: now);
+  }
+
+  PanicWipeService._({PanicWipeAuth? auth, DateTime Function()? now})
+      : _auth = auth ?? _AuthServicePanicWipeAuth(AuthService.instance),
+        _now = now ?? DateTime.now;
+
+  final PanicWipeAuth _auth;
+  final DateTime Function() _now;
 
   /// Максимальный интервал между "нажатиями" (между событиями paused).
   /// Делаем окно шире, чтобы сценарий "заблокировал/разблокировал/заблокировал" был реалистичен.
@@ -55,9 +87,9 @@ class PanicWipeService with WidgetsBindingObserver {
   void _onPause() {
     if (_isWiping) return;
     // По умолчанию выключено — чтобы нельзя было случайно “триггернуть” wipe.
-    if (!AuthService.instance.config.isPanicGestureEnabled) return;
+    if (!_auth.config.isPanicGestureEnabled) return;
     
-    final now = DateTime.now();
+    final now = _now();
     
     // Удаляем старые записи
     _pauseTimestamps.removeWhere(
@@ -100,7 +132,7 @@ class PanicWipeService with WidgetsBindingObserver {
     
     try {
       // Выполняем wipe
-      await AuthService.instance.performWipe();
+      await _auth.performWipe();
       
       // Уведомляем приложение
       await onPanicWipe?.call();

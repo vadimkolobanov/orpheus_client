@@ -5,7 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 class QrScanScreen extends StatefulWidget {
-  const QrScanScreen({super.key});
+  /// Для widget-тестов: позволяет подменить виджет камеры (mobile_scanner),
+  /// чтобы тесты не падали на отсутствии platform plugin.
+  ///
+  /// Callback `onQrValue` нужно вызвать с распознанной строкой (publicKey).
+  final Widget Function(BuildContext context, Future<void> Function(String value) onQrValue)? scannerBuilder;
+
+  const QrScanScreen({super.key, this.scannerBuilder});
 
   @override
   State<QrScanScreen> createState() => _QrScanScreenState();
@@ -60,19 +66,25 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
     final List<Barcode> barcodes = capture.barcodes;
     for (final barcode in barcodes) {
       if (barcode.rawValue != null) {
-        setState(() {
-          _isScanned = true;
-          _isProcessing = true;
-        });
-        
-        // Анимация успешного сканирования
-        await Future.delayed(const Duration(milliseconds: 500));
-        
-        if (mounted) {
-          Navigator.pop(context, barcode.rawValue);
-        }
+        await _handleQrValue(barcode.rawValue!);
         break;
       }
+    }
+  }
+
+  Future<void> _handleQrValue(String value) async {
+    if (_isScanned) return;
+
+    setState(() {
+      _isScanned = true;
+      _isProcessing = true;
+    });
+
+    // Анимация успешного сканирования
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    if (mounted) {
+      Navigator.pop(context, value);
     }
   }
 
@@ -86,13 +98,15 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
       body: Stack(
         children: [
           // Камера
-          MobileScanner(
-            controller: MobileScannerController(
-              detectionSpeed: DetectionSpeed.noDuplicates,
-              returnImage: false,
-            ),
-            onDetect: _onDetect,
-          ),
+          widget.scannerBuilder != null
+              ? widget.scannerBuilder!(context, _handleQrValue)
+              : MobileScanner(
+                  controller: MobileScannerController(
+                    detectionSpeed: DetectionSpeed.noDuplicates,
+                    returnImage: false,
+                  ),
+                  onDetect: _onDetect,
+                ),
           
           // Затемнение и рамка
           CustomPaint(
