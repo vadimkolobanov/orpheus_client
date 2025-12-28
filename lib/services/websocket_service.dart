@@ -30,6 +30,17 @@ class WebSocketService {
   Timer? _pingTimer;
   bool _isDisconnectingIntentional = false;
 
+  // Exponential backoff для реконнекта
+  int _reconnectAttempt = 0;
+  static const int _minReconnectDelay = 1; // секунды
+  static const int _maxReconnectDelay = 30; // секунды
+
+  int _getReconnectDelay() {
+    // Экспоненциальный backoff: 1, 2, 4, 8, 16, 30, 30, 30...
+    final delay = _minReconnectDelay * (1 << _reconnectAttempt);
+    return delay.clamp(_minReconnectDelay, _maxReconnectDelay);
+  }
+
   // === Миграция домена: запоминаем текущий хост и умеем fallback ===
   int _hostIndex = 0;
   String get currentHost => AppConfig.apiHosts[_hostIndex.clamp(0, AppConfig.apiHosts.length - 1)];
@@ -38,6 +49,7 @@ class WebSocketService {
     _currentPublicKey = myPublicKey;
     _isDisconnectingIntentional = false;
     _hostIndex = 0; // всегда начинаем с нового домена
+    _reconnectAttempt = 0; // сброс backoff при новом подключении
 
     if (_statusController.value == ConnectionStatus.Connected ||
         _statusController.value == ConnectionStatus.Connecting) {
@@ -61,6 +73,7 @@ class WebSocketService {
 
         _channel = IOWebSocketChannel(ws);
         _statusController.add(ConnectionStatus.Connected);
+        _reconnectAttempt = 0; // Сброс backoff при успешном подключении
         print("WS: Соединение установлено!");
         DebugLogger.success('WS', 'Соединение установлено!');
 
@@ -135,12 +148,14 @@ class WebSocketService {
     _stopPingPong();
 
     if (!_isDisconnectingIntentional) {
-      print("WS: Планирование переподключения через 3 сек...");
-      DebugLogger.info('WS', 'Планирование переподключения через 3 сек...');
+      final delay = _getReconnectDelay();
+      _reconnectAttempt++;
+      print("WS: Планирование переподключения через $delay сек (попытка $_reconnectAttempt)...");
+      DebugLogger.info('WS', 'Планирование переподключения через $delay сек (попытка $_reconnectAttempt)...');
       _reconnectTimer?.cancel();
-      _reconnectTimer = Timer(const Duration(seconds: 3), () {
-        print("WS: Попытка реконнекта...");
-        DebugLogger.info('WS', 'Попытка реконнекта...');
+      _reconnectTimer = Timer(Duration(seconds: delay), () {
+        print("WS: Попытка реконнекта #$_reconnectAttempt...");
+        DebugLogger.info('WS', 'Попытка реконнекта #$_reconnectAttempt...');
         _initConnection();
       });
     }
