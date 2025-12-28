@@ -484,19 +484,126 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildMessagesList() {
+    final reversedMessages = _chatHistory.reversed.toList();
     return ListView.builder(
       controller: _scrollController,
       reverse: true,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      itemCount: _chatHistory.length,
+      itemCount: reversedMessages.length,
       itemBuilder: (context, index) {
-        final message = _chatHistory.reversed.toList()[index];
-        return _buildMessageItem(message, index);
+        final message = reversedMessages[index];
+        // Предыдущее сообщение (визуально снизу) - это index - 1
+        final prevMessage = index > 0 ? reversedMessages[index - 1] : null;
+        // Следующее сообщение (визуально сверху) - это index + 1
+        final nextMessage = index < reversedMessages.length - 1 
+            ? reversedMessages[index + 1] 
+            : null;
+        
+        // Показываем разделитель дат, если это первое сообщение дня
+        // (следующее сообщение null или имеет другую дату)
+        final showDateDivider = nextMessage == null || 
+            !_isSameDay(message.timestamp, nextMessage.timestamp);
+        
+        // Скрываем время, если предыдущее сообщение отправлено в ту же минуту
+        final hideTime = prevMessage != null && 
+            _isSameMinute(message.timestamp, prevMessage.timestamp) &&
+            message.isSentByMe == prevMessage.isSentByMe;
+        
+        return Column(
+          children: [
+            if (showDateDivider) _buildDateDivider(message.timestamp),
+            _buildMessageItem(message, index, hideTime: hideTime),
+          ],
+        );
       },
     );
   }
 
-  Widget _buildMessageItem(ChatMessage message, int index) {
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  bool _isSameMinute(DateTime a, DateTime b) {
+    return a.year == b.year && 
+           a.month == b.month && 
+           a.day == b.day && 
+           a.hour == b.hour && 
+           a.minute == b.minute;
+  }
+
+  String _formatDateDivider(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final messageDate = DateTime(date.year, date.month, date.day);
+    
+    if (messageDate == today) {
+      return 'Сегодня';
+    } else if (messageDate == yesterday) {
+      return 'Вчера';
+    } else if (date.year == now.year) {
+      return DateFormat('d MMMM', 'ru').format(date);
+    } else {
+      return DateFormat('d MMMM y', 'ru').format(date);
+    }
+  }
+
+  Widget _buildDateDivider(DateTime date) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              height: 0.5,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.transparent,
+                    const Color(0xFFB0BEC5).withOpacity(0.2),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF12121A),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: const Color(0xFFB0BEC5).withOpacity(0.1),
+              ),
+            ),
+            child: Text(
+              _formatDateDivider(date),
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade500,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Container(
+              height: 0.5,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFFB0BEC5).withOpacity(0.2),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageItem(ChatMessage message, int index, {bool hideTime = false}) {
     final isMyMessage = message.isSentByMe;
     final timeStr = DateFormat('HH:mm').format(message.timestamp);
     final messageId = message.timestamp.millisecondsSinceEpoch;
@@ -536,8 +643,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           maxWidth: MediaQuery.of(context).size.width * 0.78,
         ),
         margin: EdgeInsets.only(
-          top: 4,
-          bottom: 4,
+          top: hideTime ? 2 : 4,
+          bottom: hideTime ? 2 : 4,
           left: isMyMessage ? 50 : 0,
           right: isMyMessage ? 0 : 50,
         ),
@@ -599,46 +706,47 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               ),
             ),
             
-            // Мета-информация под пузырём
-            Padding(
-              padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Иконка шифрования
-                  Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6AD394).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(4),
+            // Мета-информация под пузырём (скрываем если hideTime)
+            if (!hideTime)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Иконка шифрования
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6AD394).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Icon(
+                        Icons.lock,
+                        size: 8,
+                        color: Color(0xFF6AD394),
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.lock,
-                      size: 8,
-                      color: Color(0xFF6AD394),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  // Время
-                  Text(
-                    timeStr,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                  // Галочки для своих сообщений
-                  if (isMyMessage) ...[
                     const SizedBox(width: 6),
-                    Icon(
-                      Icons.done_all,
-                      size: 14,
-                      color: const Color(0xFF4A90D9).withOpacity(0.8),
+                    // Время
+                    Text(
+                      timeStr,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey.shade600,
+                      ),
                     ),
+                    // Галочки для своих сообщений
+                    if (isMyMessage) ...[
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.done_all,
+                        size: 14,
+                        color: const Color(0xFF4A90D9).withOpacity(0.8),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
           ],
         ),
       ),
