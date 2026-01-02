@@ -29,6 +29,7 @@ dependencies:
 
   # Сеть
   web_socket_channel: ^3.0.0
+  connectivity_plus: ^6.0.3
 
   # UI и Медиа
   cupertino_icons: ^1.0.2

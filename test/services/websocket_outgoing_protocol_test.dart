@@ -128,8 +128,9 @@ void main() {
 
       expect(httpClient.requests, isNotEmpty);
       // Важно: в body есть sender_pubkey/recipient_pubkey/signal_type.
-      expect(httpClient.bodies, hasLength(1));
-      final bodyDecoded = json.decode(httpClient.bodies.single) as Map<String, dynamic>;
+      // HTTP отправляется на ВСЕ хосты для гарантии доставки
+      expect(httpClient.bodies, isNotEmpty);
+      final bodyDecoded = json.decode(httpClient.bodies.first) as Map<String, dynamic>;
       expect(bodyDecoded['sender_pubkey'], equals('SENDER_PUBKEY'));
       expect(bodyDecoded['recipient_pubkey'], equals('RECIPIENT'));
       expect(bodyDecoded['signal_type'], equals('hang-up'));

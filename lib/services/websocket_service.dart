@@ -7,7 +7,9 @@ import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:orpheus_project/config.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
+import 'package:orpheus_project/services/pending_actions_service.dart';
 import 'package:rxdart/rxdart.dart';
 
 enum ConnectionStatus { Disconnected, Connecting, Connected }
@@ -30,6 +32,9 @@ class WebSocketService {
   Timer? _pingTimer;
   bool _isDisconnectingIntentional = false;
 
+  // Подписка на изменения сети
+  StreamSubscription? _networkSubscription;
+
   // Exponential backoff для реконнекта
   int _reconnectAttempt = 0;
   static const int _minReconnectDelay = 1; // секунды
@@ -45,11 +50,55 @@ class WebSocketService {
   int _hostIndex = 0;
   String get currentHost => AppConfig.apiHosts[_hostIndex.clamp(0, AppConfig.apiHosts.length - 1)];
 
+  /// Инициализация подписки на изменения сети
+  void _initNetworkMonitoring() {
+    _networkSubscription?.cancel();
+    _networkSubscription = NetworkMonitorService.instance.onNetworkChange.listen((event) {
+      DebugLogger.info('WS', '🌐 Network event: ${event.type}');
+      
+      if (event.type == NetworkChangeType.reconnected || 
+          event.type == NetworkChangeType.networkSwitch) {
+        // При восстановлении связи или смене сети - мгновенный реконнект
+        _forceReconnect(reason: 'Network ${event.type.name}');
+      } else if (event.type == NetworkChangeType.disconnected) {
+        // При потере связи - не пытаемся переподключаться сразу
+        DebugLogger.warn('WS', '📵 Сеть потеряна, ожидание восстановления...');
+      }
+    });
+  }
+
+  /// Принудительное переподключение (при смене сети)
+  void _forceReconnect({String? reason}) {
+    if (_currentPublicKey == null || _isDisconnectingIntentional) return;
+    
+    DebugLogger.info('WS', '🔄 Принудительный реконнект: ${reason ?? "unknown"}');
+    
+    // Отменяем текущий таймер реконнекта
+    _reconnectTimer?.cancel();
+    
+    // Сбрасываем backoff для быстрого переподключения
+    _reconnectAttempt = 0;
+    
+    // Закрываем текущее соединение
+    _stopPingPong();
+    try {
+      _channel?.sink.close();
+    } catch (_) {}
+    _channel = null;
+    
+    // Немедленно переподключаемся
+    _statusController.add(ConnectionStatus.Connecting);
+    _initConnection();
+  }
+
   void connect(String myPublicKey) {
     _currentPublicKey = myPublicKey;
     _isDisconnectingIntentional = false;
     _hostIndex = 0; // всегда начинаем с нового домена
     _reconnectAttempt = 0; // сброс backoff при новом подключении
+
+    // Инициализируем мониторинг сети
+    _initNetworkMonitoring();
 
     if (_statusController.value == ConnectionStatus.Connected ||
         _statusController.value == ConnectionStatus.Connecting) {
@@ -79,6 +128,9 @@ class WebSocketService {
 
         _sendFcmToken();
         _startPingPong();
+        
+        // Отправляем pending сообщения после восстановления соединения
+        _sendPendingMessages();
 
         _channel!.stream.listen(
               (message) {
@@ -165,6 +217,8 @@ class WebSocketService {
     _isDisconnectingIntentional = true;
     _reconnectTimer?.cancel();
     _stopPingPong();
+    _networkSubscription?.cancel();
+    _networkSubscription = null;
 
     if (_channel != null) {
       print("WS: Отключение...");
@@ -199,7 +253,46 @@ class WebSocketService {
   }
 
   void sendChatMessage(String recipientPublicKey, String payload) {
-    _sendMessage({"recipient_pubkey": recipientPublicKey, "type": "chat", "payload": payload});
+    final msg = {"recipient_pubkey": recipientPublicKey, "type": "chat", "payload": payload};
+    
+    // Если нет соединения - сохраняем в очередь
+    if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
+      DebugLogger.warn('WS', '📵 Нет соединения, сообщение сохранено в очередь');
+      PendingActionsService.addPendingMessage(
+        recipientKey: recipientPublicKey,
+        encryptedPayload: payload,
+      );
+      return;
+    }
+    
+    _sendMessage(msg);
+  }
+  
+  /// Отправить все pending сообщения после восстановления соединения
+  Future<void> _sendPendingMessages() async {
+    final pending = await PendingActionsService.getPendingMessages();
+    if (pending.isEmpty) return;
+    
+    DebugLogger.info('WS', '📤 Отправка ${pending.length} pending сообщений...');
+    
+    for (final msg in pending) {
+      if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
+        DebugLogger.warn('WS', 'Соединение потеряно при отправке pending сообщений');
+        break;
+      }
+      
+      _sendMessage({
+        "recipient_pubkey": msg.recipientKey,
+        "type": "chat",
+        "payload": msg.encryptedPayload,
+      });
+      
+      // Небольшая задержка между сообщениями
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+    
+    await PendingActionsService.clearPendingMessages();
+    DebugLogger.success('WS', 'Все pending сообщения отправлены');
   }
 
   // --- ОТПРАВКА СИГНАЛОВ С HTTP FALLBACK ---
@@ -210,8 +303,10 @@ class WebSocketService {
       "data": data
     };
     
-    // Важные сигналы (hang-up, call-rejected) - используем HTTP fallback если WS недоступен
-    final isImportant = type == 'hang-up' || type == 'call-rejected';
+    // Важные сигналы - используем HTTP fallback для гарантии доставки
+    // Включая ice-restart, т.к. при смене сети клиенты могут быть на разных серверах
+    final isImportant = type == 'hang-up' || type == 'call-rejected' || 
+                        type == 'ice-restart' || type == 'ice-restart-answer';
     final statusStr = currentStatus.toString().split('.').last;
     
     if (isImportant) {
@@ -222,7 +317,7 @@ class WebSocketService {
       if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
         print("⚠️ WS недоступен для [$type] - используем HTTP fallback");
         DebugLogger.warn('SIGNAL', 'WS недоступен для [$type] - используем HTTP fallback');
-        _sendSignalViaHttp(recipientPublicKey, type);
+        _sendSignalViaHttpWithData(recipientPublicKey, type, data);
         return;
       }
     } else {
@@ -233,64 +328,72 @@ class WebSocketService {
     _sendMessage(msg);
     
     // Для важных сигналов ВСЕГДА отправляем также через HTTP как гарантию доставки
+    // на ВСЕ хосты, чтобы доставить сигнал даже если получатель на другом сервере
     if (isImportant) {
-      _sendSignalViaHttp(recipientPublicKey, type);
+      _sendSignalViaHttpWithData(recipientPublicKey, type, data);
     }
   }
 
-  /// HTTP fallback для гарантированной доставки hang-up/call-rejected
+  /// HTTP fallback для гарантированной доставки hang-up/call-rejected (без данных)
   Future<void> _sendSignalViaHttp(String recipientPublicKey, String signalType) async {
-    DebugLogger.info('HTTP', 'Отправка $signalType через HTTP fallback...');
+    await _sendSignalViaHttpWithData(recipientPublicKey, signalType, {});
+  }
+
+  /// HTTP fallback для гарантированной доставки сигналов с данными (ice-restart, etc)
+  /// Отправляет на ВСЕ хосты параллельно для гарантии доставки
+  Future<void> _sendSignalViaHttpWithData(String recipientPublicKey, String signalType, Map<String, dynamic> data) async {
+    DebugLogger.info('HTTP', 'Отправка $signalType через HTTP fallback на все хосты...');
+    
+    final body = json.encode({
+      'sender_pubkey': _currentPublicKey,
+      'recipient_pubkey': recipientPublicKey,
+      'signal_type': signalType,
+      'data': data,
+    });
+
+    // Отправляем на ВСЕ хосты параллельно
+    // Это гарантирует доставку даже если получатель на другом сервере
+    final futures = <Future<bool>>[];
+    
+    for (final url in AppConfig.httpUrls('/api/signal')) {
+      futures.add(_trySendSignalToHost(url, signalType, body));
+    }
+
     try {
-      http.Response? response;
-
-      // 1) сначала пробуем текущий хост (если WS уже установлен/пытались подключаться)
-      final primaryUrl = AppConfig.httpUrl('/api/signal', host: currentHost);
-      response = await _httpClient.post(
-        Uri.parse(primaryUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'sender_pubkey': _currentPublicKey,
-          'recipient_pubkey': recipientPublicKey,
-          'signal_type': signalType,
-        }),
-      ).timeout(const Duration(seconds: 5));
-
-      // 2) если запрос упал исключением — уйдём в catch и попробуем fallback ниже
+      final results = await Future.wait(futures);
+      final successCount = results.where((r) => r).length;
       
-      if (response.statusCode == 200) {
-        print("✅ HTTP: [$signalType] успешно отправлен");
-        DebugLogger.success('HTTP', '[$signalType] успешно отправлен (${response.statusCode})');
+      if (successCount > 0) {
+        print("✅ HTTP: [$signalType] доставлен на $successCount/${futures.length} хостов");
+        DebugLogger.success('HTTP', '[$signalType] доставлен на $successCount/${futures.length} хостов');
       } else {
-        print("⚠️ HTTP: [$signalType] ошибка ${response.statusCode}");
-        DebugLogger.error('HTTP', '[$signalType] ошибка ${response.statusCode}');
+        print("❌ HTTP: [$signalType] не удалось доставить ни на один хост");
+        DebugLogger.error('HTTP', '[$signalType] не удалось доставить ни на один хост');
       }
     } catch (e) {
-      // fallback по всем хостам
-      for (final url in AppConfig.httpUrls('/api/signal')) {
-        try {
-          final response = await _httpClient.post(
-            Uri.parse(url),
-            headers: {'Content-Type': 'application/json'},
-            body: json.encode({
-              'sender_pubkey': _currentPublicKey,
-              'recipient_pubkey': recipientPublicKey,
-              'signal_type': signalType,
-            }),
-          ).timeout(const Duration(seconds: 5));
-
-          if (response.statusCode == 200) {
-            print("✅ HTTP: [$signalType] успешно отправлен (fallback)");
-            DebugLogger.success('HTTP', '[$signalType] успешно отправлен (fallback) (${response.statusCode})');
-            return;
-          }
-        } catch (_) {
-          continue;
-        }
-      }
-
       print("❌ HTTP: [$signalType] исключение: $e");
       DebugLogger.error('HTTP', '[$signalType] исключение: $e');
+    }
+  }
+
+  Future<bool> _trySendSignalToHost(String url, String signalType, String body) async {
+    try {
+      final response = await _httpClient.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        DebugLogger.info('HTTP', '[$signalType] → $url: OK');
+        return true;
+      } else {
+        DebugLogger.warn('HTTP', '[$signalType] → $url: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      DebugLogger.warn('HTTP', '[$signalType] → $url: $e');
+      return false;
     }
   }
 

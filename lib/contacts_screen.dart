@@ -8,6 +8,8 @@ import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/qr_scan_screen.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
+import 'package:orpheus_project/services/badge_service.dart';
+import 'package:orpheus_project/widgets/badge_widget.dart';
 
 class ContactsScreen extends StatefulWidget {
   /// В тестах можно отключить async-запросы счётчиков, чтобы не зависеть от SQLite/таймеров.
@@ -92,6 +94,9 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
 
       // Presence: подписываемся на статусы всех контактов (diff внутри сервиса).
       presenceService.setWatchedPubkeys(contacts.map((c) => c.publicKey));
+      
+      // Предзагрузка бейджей для всех контактов (в фоне, не блокируем UI)
+      BadgeService.instance.preloadBadges(contacts.map((c) => c.publicKey).toList());
       
       if (mounted) {
         setState(() => _isLoading = false);
@@ -841,13 +846,23 @@ class _ContactsScreenState extends State<ContactsScreen> with TickerProviderStat
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                contact.name,
-                                style: TextStyle(
-                                  fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w500,
-                                  color: hasUnread ? Colors.white : Colors.white.withOpacity(0.85),
-                                  fontSize: 16,
-                                ),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      contact.name,
+                                      style: TextStyle(
+                                        fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w500,
+                                        color: hasUnread ? Colors.white : Colors.white.withOpacity(0.85),
+                                        fontSize: 16,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Бейдж пользователя
+                                  UserBadge(pubkey: contact.publicKey, compact: true),
+                                ],
                               ),
                               const SizedBox(height: 6),
                               Row(

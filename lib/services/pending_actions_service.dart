@@ -1,5 +1,6 @@
 // lib/services/pending_actions_service.dart
 
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Минимальный интерфейс для хранилища pending-actions (для unit-тестов без плагинов).
@@ -23,10 +24,11 @@ class SharedPrefsPendingActionsPrefs implements PendingActionsPrefs {
   Future<bool> remove(String key) => _prefs.remove(key);
 }
 
-/// Сервис для хранения и обработки отложенных действий (например, отклонение звонков)
+/// Сервис для хранения и обработки отложенных действий (например, отклонение звонков, сообщения)
 /// когда приложение закрыто и WebSocket не подключен
 class PendingActionsService {
   static const String _pendingRejectionsKey = 'pending_call_rejections';
+  static const String _pendingMessagesKey = 'pending_messages';
 
   static Future<PendingActionsPrefs> Function() _prefsProvider =
       () async => SharedPrefsPendingActionsPrefs(await SharedPreferences.getInstance());
@@ -90,5 +92,89 @@ class PendingActionsService {
       print("📞 ERROR: Не удалось очистить pending rejections: $e");
     }
   }
+
+  // ========== PENDING MESSAGES (Очередь сообщений для offline) ==========
+
+  /// Добавить сообщение в очередь для отправки
+  static Future<void> addPendingMessage({
+    required String recipientKey,
+    required String encryptedPayload,
+  }) async {
+    try {
+      final prefs = await _prefs();
+      final existing = prefs.getStringList(_pendingMessagesKey) ?? [];
+      
+      final messageData = json.encode({
+        'recipientKey': recipientKey,
+        'payload': encryptedPayload,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      
+      existing.add(messageData);
+      await prefs.setStringList(_pendingMessagesKey, existing);
+      print("💬 Pending message добавлено для: ${recipientKey.substring(0, 8)}...");
+    } catch (e) {
+      print("💬 ERROR: Не удалось добавить pending message: $e");
+    }
+  }
+  
+  /// Получить все pending messages
+  static Future<List<PendingMessage>> getPendingMessages() async {
+    try {
+      final prefs = await _prefs();
+      final existing = prefs.getStringList(_pendingMessagesKey) ?? [];
+      
+      return existing.map((jsonStr) {
+        try {
+          final data = json.decode(jsonStr) as Map<String, dynamic>;
+          return PendingMessage(
+            recipientKey: data['recipientKey'] as String,
+            encryptedPayload: data['payload'] as String,
+            timestamp: DateTime.tryParse(data['timestamp'] as String? ?? '') ?? DateTime.now(),
+          );
+        } catch (_) {
+          return null;
+        }
+      }).whereType<PendingMessage>().toList();
+    } catch (e) {
+      print("💬 ERROR: Не удалось получить pending messages: $e");
+      return [];
+    }
+  }
+  
+  /// Удалить все pending messages (после успешной отправки)
+  static Future<void> clearPendingMessages() async {
+    try {
+      final prefs = await _prefs();
+      await prefs.remove(_pendingMessagesKey);
+      print("💬 Все pending messages очищены");
+    } catch (e) {
+      print("💬 ERROR: Не удалось очистить pending messages: $e");
+    }
+  }
+  
+  /// Количество pending messages
+  static Future<int> getPendingMessagesCount() async {
+    try {
+      final prefs = await _prefs();
+      final existing = prefs.getStringList(_pendingMessagesKey) ?? [];
+      return existing.length;
+    } catch (e) {
+      return 0;
+    }
+  }
+}
+
+/// Модель pending сообщения
+class PendingMessage {
+  final String recipientKey;
+  final String encryptedPayload;
+  final DateTime timestamp;
+  
+  PendingMessage({
+    required this.recipientKey,
+    required this.encryptedPayload,
+    required this.timestamp,
+  });
 }
 

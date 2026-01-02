@@ -16,6 +16,7 @@ import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/incoming_call_buffer.dart';
 import 'package:orpheus_project/services/incoming_message_handler.dart';
+import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/panic_wipe_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
@@ -96,13 +97,18 @@ void main() async {
     _hasKeys = false;
   };
 
-  // 7. WebSocket подключение
+  // 7. Network Monitor Service (мониторинг сети для реконнекта)
+  DebugLogger.info('APP', 'Инициализация NetworkMonitorService...');
+  await NetworkMonitorService.instance.init();
+  DebugLogger.success('APP', 'NetworkMonitorService инициализирован');
+
+  // 8. WebSocket подключение
   if (_hasKeys && cryptoService.publicKeyBase64 != null) {
     DebugLogger.info('APP', 'Подключение WebSocket...');
     websocketService.connect(cryptoService.publicKeyBase64!);
   }
 
-  // 8. Слушаем сообщения
+  // 9. Слушаем сообщения
   _listenForMessages();
 
   DebugLogger.success('APP', '✅ Приложение запущено');

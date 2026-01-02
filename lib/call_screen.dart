@@ -4,15 +4,19 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/background_call_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
+import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/widgets/call/background_painters.dart';
 import 'package:orpheus_project/widgets/call/control_panel.dart';
+import 'package:orpheus_project/widgets/badge_widget.dart';
 
-enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed }
+enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed, Reconnecting }
 
 class CallScreen extends StatefulWidget {
   final String contactPublicKey;
@@ -36,12 +40,27 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   // Подписки
   StreamSubscription? _signalingSubscription;
   StreamSubscription? _webrtcLogSubscription;
+  StreamSubscription? _networkSubscription;
+  StreamSubscription? _wsStatusSubscription;
+  StreamSubscription? _iceRestartSubscription;
 
   // Состояние звонка
   CallState _callState = CallState.Dialing;
   String _displayName = "Аноним";
   String _debugStatus = "Init";
   String _durationText = "00:00";
+
+  // Состояние сети
+  NetworkState _networkState = NetworkState.online;
+  ConnectionStatus _wsStatus = ConnectionStatus.Connected;
+  bool _isReconnecting = false;
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 5;
+  
+  // Debounce для ICE restart (отправка и получение)
+  DateTime? _lastIceRestartTime;
+  DateTime? _lastIceRestartReceivedTime;
+  static const Duration _iceRestartDebounce = Duration(seconds: 3);
 
   // Управление устройствами
   bool _isSpeakerOn = false;
@@ -103,8 +122,206 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 1500),
     );
 
-    // 4. Старт WebRTC
+    // 4. Подписка на состояние сети и WebSocket
+    _initNetworkMonitoring();
+
+    // 5. Старт WebRTC
     _initCallSequence();
+  }
+
+  /// Инициализация мониторинга сети для индикации и реконнекта
+  void _initNetworkMonitoring() {
+    // Получаем начальное состояние
+    _networkState = NetworkMonitorService.instance.currentState;
+    _wsStatus = websocketService.currentStatus;
+
+    // Подписка на изменения сети
+    _networkSubscription = NetworkMonitorService.instance.onNetworkChange.listen((event) {
+      if (_isDisposed) return;
+      
+      _addLog("🌐 Network: ${event.type.name}");
+      DebugLogger.info('CALL', 'Network event: ${event.type}');
+
+      setState(() {
+        _networkState = NetworkMonitorService.instance.currentState;
+      });
+
+      if (event.type == NetworkChangeType.disconnected) {
+        // Потеря связи во время звонка
+        _handleNetworkLost();
+      } else if (event.type == NetworkChangeType.reconnected || 
+                 event.type == NetworkChangeType.networkSwitch) {
+        // Восстановление связи - нужен ICE restart
+        _handleNetworkRestored();
+      }
+    });
+
+    // Подписка на статус WebSocket
+    _wsStatusSubscription = websocketService.status.listen((status) {
+      if (_isDisposed) return;
+      
+      _addLog("📡 WS: ${status.name}");
+      
+      final previousStatus = _wsStatus;
+      setState(() {
+        _wsStatus = status;
+      });
+
+      // WebSocket восстановился - можно пробовать ICE restart
+      if (previousStatus != ConnectionStatus.Connected && 
+          status == ConnectionStatus.Connected &&
+          _isReconnecting) {
+        _attemptIceRestart();
+      }
+    });
+    
+    // Подписка на автоматический ICE restart от WebRTC при Disconnected/Failed
+    _iceRestartSubscription = _webrtcService.onIceRestartNeeded.listen((_) {
+      if (_isDisposed) return;
+      
+      // Только если звонок был активен
+      if (_callState == CallState.Connected) {
+        _addLog("🔄 ICE restart нужен (автоопределение)");
+        _handleNetworkLost(); // Переводим в режим реконнекта
+      }
+    });
+  }
+
+  /// Обработка потери сети во время звонка
+  void _handleNetworkLost() {
+    if (_callState == CallState.Connected) {
+      _addLog("📵 Сеть потеряна во время звонка!");
+      _isReconnecting = true;
+      _reconnectAttempts = 0;
+      
+      setState(() {
+        _callState = CallState.Reconnecting;
+        _debugStatus = "Потеря связи...";
+      });
+    }
+  }
+
+  /// Обработка восстановления сети
+  void _handleNetworkRestored() {
+    if (_isReconnecting || _callState == CallState.Reconnecting) {
+      _addLog("📶 Сеть восстановлена, попытка реконнекта...");
+      _attemptIceRestart();
+    }
+  }
+
+  /// Обработка входящего ICE restart от собеседника
+  Future<void> _handleIncomingIceRestart(Map<String, dynamic> offer) async {
+    // Debounce - игнорируем дубликаты ice-restart
+    final now = DateTime.now();
+    if (_lastIceRestartReceivedTime != null && 
+        now.difference(_lastIceRestartReceivedTime!) < _iceRestartDebounce) {
+      _addLog("⏳ Incoming ICE restart debounced (duplicate)");
+      return;
+    }
+    _lastIceRestartReceivedTime = now;
+    
+    _addLog("🔄 Обработка входящего ICE restart...");
+    
+    if (mounted) {
+      setState(() {
+        _debugStatus = "ICE restart...";
+      });
+    }
+    
+    try {
+      final success = await _webrtcService.handleIceRestartOffer(
+        offer: offer,
+        onAnswerCreated: (answer) {
+          _addLog("📤 ICE restart answer");
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-restart-answer', answer);
+        },
+        onCandidateCreated: (cand) {
+          _addLog("📤 ICE restart candidate");
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
+        },
+      );
+      
+      if (success) {
+        _addLog("✅ ICE restart обработан успешно");
+      } else {
+        _addLog("⚠️ ICE restart не удался");
+      }
+    } catch (e) {
+      _addLog("❌ Ошибка обработки ICE restart: $e");
+    }
+  }
+
+  /// Попытка ICE restart для восстановления соединения
+  Future<void> _attemptIceRestart() async {
+    // Debounce - не запускаем ICE restart чаще чем раз в 3 секунды
+    final now = DateTime.now();
+    if (_lastIceRestartTime != null && 
+        now.difference(_lastIceRestartTime!) < _iceRestartDebounce) {
+      _addLog("⏳ ICE restart debounced");
+      return;
+    }
+    _lastIceRestartTime = now;
+    
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      _addLog("❌ Превышено число попыток реконнекта");
+      _onError("Не удалось восстановить соединение");
+      return;
+    }
+
+    _reconnectAttempts++;
+    _addLog("🔄 ICE Restart попытка $_reconnectAttempts/$_maxReconnectAttempts");
+    
+    setState(() {
+      _debugStatus = "Переподключение... ($_reconnectAttempts)";
+    });
+
+    try {
+      // Ждём, пока WebSocket восстановится
+      if (_wsStatus != ConnectionStatus.Connected) {
+        _addLog("⏳ Ожидание WebSocket...");
+        await Future.delayed(const Duration(seconds: 1));
+        if (_wsStatus != ConnectionStatus.Connected) {
+          // Ещё не подключились, подождём
+          Future.delayed(const Duration(seconds: 2), () {
+            if (!_isDisposed && _isReconnecting) {
+              _attemptIceRestart();
+            }
+          });
+          return;
+        }
+      }
+
+      // Выполняем ICE restart с типом 'ice-restart' вместо 'call-offer'
+      final success = await _webrtcService.restartIce(
+        onOfferCreated: (offer) {
+          _addLog("📤 ICE restart offer (ice-restart signal)");
+          // ВАЖНО: используем 'ice-restart' а не 'call-offer' чтобы получатель
+          // знал что это renegotiation, а не новый звонок
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-restart', offer);
+        },
+        onCandidateCreated: (cand) {
+          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
+        },
+      );
+
+      if (success) {
+        _addLog("✅ ICE restart инициирован");
+      } else {
+        _addLog("⚠️ ICE restart не удался, повтор...");
+        Future.delayed(const Duration(seconds: 3), () {
+          if (!_isDisposed && _isReconnecting) {
+            _attemptIceRestart();
+          }
+        });
+      }
+    } catch (e) {
+      _addLog("❌ Ошибка ICE restart: $e");
+      Future.delayed(const Duration(seconds: 3), () {
+        if (!_isDisposed && _isReconnecting) {
+          _attemptIceRestart();
+        }
+      });
+    }
   }
 
   Future<void> _startBackgroundMode() async {
@@ -164,6 +381,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         if (_callState != CallState.Connected && mounted) {
           setState(() => _callState = CallState.Connecting);
         }
+      } else if (type == 'ice-restart-answer') {
+        // Ответ на наш ICE restart
+        _addLog("📥 ICE restart answer received");
+        if (mounted) setState(() => _debugStatus = "ICE restart answer");
+        await _webrtcService.handleAnswer(data);
+      } else if (type == 'ice-restart') {
+        // Входящий ICE restart от собеседника
+        _addLog("📥 ICE restart offer received");
+        await _handleIncomingIceRestart(data);
       } else if (type == 'ice-candidate') {
         await _webrtcService.addCandidate(data);
       } else if (type == 'hang-up' || type == 'call-rejected') {
@@ -281,6 +507,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void _onConnected() {
     SoundService.instance.stopAllSounds();
     SoundService.instance.playConnectedSound();
+
+    // Сброс флагов реконнекта при успешном соединении
+    if (_isReconnecting) {
+      _addLog("✅ Соединение восстановлено!");
+      _isReconnecting = false;
+      _reconnectAttempts = 0;
+    }
 
     if (mounted) {
       setState(() => _callState = CallState.Connected);
@@ -401,6 +634,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         return "Входящий звонок";
       case CallState.Connecting:
         return "Соединение...";
+      case CallState.Reconnecting:
+        return "Переподключение...";
       case CallState.Rejected:
         return "Завершен";
       case CallState.Failed:
@@ -408,6 +643,50 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       default:
         return "";
     }
+  }
+
+  /// Виджет предупреждения о проблемах с соединением
+  Widget _buildConnectionWarning() {
+    String message;
+    Color color;
+    IconData icon;
+
+    if (_networkState == NetworkState.offline) {
+      message = "Нет сети";
+      color = Colors.red;
+      icon = Icons.signal_wifi_off;
+    } else if (_wsStatus == ConnectionStatus.Connecting) {
+      message = "Переподключение...";
+      color = Colors.orange;
+      icon = Icons.sync;
+    } else if (_wsStatus == ConnectionStatus.Disconnected) {
+      message = "Соединение потеряно";
+      color = Colors.red;
+      icon = Icons.cloud_off;
+    } else {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            message,
+            style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -452,6 +731,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _waveTimer?.cancel();
     _signalingSubscription?.cancel();
     _webrtcLogSubscription?.cancel();
+    _networkSubscription?.cancel();
+    _wsStatusSubscription?.cancel();
+    _iceRestartSubscription?.cancel();
     SoundService.instance.stopAllSounds();
 
     _webrtcService.hangUp();
@@ -516,16 +798,61 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
+                
+                // Бейдж пользователя
+                AnimatedUserBadge(pubkey: widget.contactPublicKey),
+                const SizedBox(height: 4),
 
                 // Статус или Таймер
                 if (_callState == CallState.Connected)
-                  Text(
-                    _durationText,
-                    style: const TextStyle(
-                      color: Color(0xFF6AD394),
-                      fontSize: 24,
-                      fontFamily: "monospace",
-                    ),
+                  Column(
+                    children: [
+                      Text(
+                        _durationText,
+                        style: const TextStyle(
+                          color: Color(0xFF6AD394),
+                          fontSize: 24,
+                          fontFamily: "monospace",
+                        ),
+                      ),
+                      // Показываем предупреждение при проблемах с сетью
+                      if (_networkState == NetworkState.offline || 
+                          _wsStatus != ConnectionStatus.Connected)
+                        _buildConnectionWarning(),
+                    ],
+                  )
+                else if (_callState == CallState.Reconnecting)
+                  Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _getStatusText(),
+                            style: const TextStyle(color: Colors.orange, fontSize: 18),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _debugStatus,
+                        style: const TextStyle(color: Colors.orange, fontSize: 12),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        "Попытка $_reconnectAttempts из $_maxReconnectAttempts",
+                        style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
+                      ),
+                    ],
                   )
                 else
                   Column(

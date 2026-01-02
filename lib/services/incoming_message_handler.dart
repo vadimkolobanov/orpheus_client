@@ -104,6 +104,12 @@ class IncomingMessageHandler {
       return;
     }
 
+    // ICE restart signals - пробрасываем в CallScreen для renegotiation
+    if (type == 'ice-restart' || type == 'ice-restart-answer') {
+      _emitSignaling(messageData);
+      return;
+    }
+
     if (type == 'hang-up' || type == 'call-rejected') {
       _callBuffer.clear(senderKey);
 

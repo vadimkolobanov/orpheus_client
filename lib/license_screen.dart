@@ -553,11 +553,14 @@ class _LicenseScreenState extends State<LicenseScreen> with TickerProviderStateM
                         color: Colors.red.shade300,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        _promoError!,
-                        style: TextStyle(
-                          color: Colors.red.shade300,
-                          fontSize: 13,
+                      Flexible(
+                        child: Text(
+                          _promoError!,
+                          style: TextStyle(
+                            color: Colors.red.shade300,
+                            fontSize: 13,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],

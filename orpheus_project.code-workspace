@@ -4,13 +4,13 @@
 			"path": "."
 		},
 		{
-			"path": "../../Prog/Orpheus"
+			"path": "../orpheus_desctop"
 		},
 		{
-			"path": "../../Prog/OPHEUS_ADMIN"
+			"path": "../Programs/OPHEUS_ADMIN"
 		},
 		{
-			"path": "../../Prog/Orpheus_Site"
+			"path": "../Programs/orpheus"
 		}
 	],
 	"settings": {}

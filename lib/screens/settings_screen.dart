@@ -13,6 +13,7 @@ import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
 import 'package:orpheus_project/updates_screen.dart';
+import 'package:orpheus_project/widgets/badge_widget.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
@@ -689,7 +690,12 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                
+                // БЕЙДЖ ПОЛЬЗОВАТЕЛЯ
+                AnimatedUserBadge(pubkey: myKey),
+                
+                const SizedBox(height: 10),
 
                 // ТЕКСТОВЫЙ КЛЮЧ
                 AnimatedBuilder(

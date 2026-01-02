@@ -9,6 +9,7 @@ import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/widgets/badge_widget.dart';
 
 class ChatScreen extends StatefulWidget {
   final Contact contact;
@@ -303,13 +304,23 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                widget.contact.name,
-                                style: const TextStyle(
-                                  fontSize: 17,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      widget.contact.name,
+                                      style: const TextStyle(
+                                        fontSize: 17,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Бейдж пользователя
+                                  UserBadge(pubkey: widget.contact.publicKey, compact: true),
+                                ],
                               ),
                               const SizedBox(height: 2),
                               Row(

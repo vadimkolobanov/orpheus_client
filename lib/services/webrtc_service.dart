@@ -31,6 +31,10 @@ class WebRTCService {
   final _debugLogController = StreamController<String>.broadcast();
   Stream<String> get onDebugLog => _debugLogController.stream;
 
+  // Поток для уведомления о необходимости ICE restart
+  final _iceRestartNeededController = StreamController<void>.broadcast();
+  Stream<void> get onIceRestartNeeded => _iceRestartNeededController.stream;
+
   // Внутренняя очередь кандидатов (для решения Race Condition)
   final List<RTCIceCandidate> _queuedRemoteCandidates = [];
   bool _remoteDescriptionSet = false;
@@ -131,9 +135,44 @@ class WebRTCService {
   void _registerPeerConnectionListeners(RTCPeerConnection pc, Function(Map<String, dynamic> candidate) onCandidateCreated) {
     pc.onConnectionState = (RTCPeerConnectionState state) {
       _log('--- [WebRTC] Connection State: $state ---');
+      
+      // При Disconnected или Failed - уведомляем о необходимости ICE restart
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        _log('--- [WebRTC] ICE Disconnected - may need restart ---');
+        // Ждём немного, возможно восстановится само
+        Future.delayed(const Duration(seconds: 3), () {
+          // Проверяем, не восстановилось ли соединение
+          if (_peerConnection?.connectionState == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+            _iceRestartNeededController.add(null);
+          }
+        });
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        _log('--- [WebRTC] ICE Failed - restart needed ---');
+        _iceRestartNeededController.add(null);
+      }
     };
+    
+    pc.onIceConnectionState = (RTCIceConnectionState state) {
+      _log('--- [WebRTC] ICE Connection State: $state ---');
+    };
+    
     pc.onIceCandidate = (RTCIceCandidate candidate) {
       if (candidate.candidate == null) return;
+      
+      // Логируем тип кандидата для диагностики TURN
+      final candidateStr = candidate.candidate ?? '';
+      String candidateType = 'unknown';
+      if (candidateStr.contains('typ host')) {
+        candidateType = 'host'; // Локальный IP
+      } else if (candidateStr.contains('typ srflx')) {
+        candidateType = 'srflx'; // STUN (внешний IP)
+      } else if (candidateStr.contains('typ relay')) {
+        candidateType = 'relay'; // TURN (relay сервер)
+      } else if (candidateStr.contains('typ prflx')) {
+        candidateType = 'prflx'; // Peer reflexive
+      }
+      _log("📤 ICE candidate [$candidateType]");
+      
       onCandidateCreated({
         'candidate': candidate.candidate,
         'sdpMid': candidate.sdpMid,
@@ -208,6 +247,108 @@ class WebRTCService {
       }
     }
     _queuedRemoteCandidates.clear();
+  }
+
+  /// ICE Restart - восстановление соединения при смене сети
+  /// Возвращает true если restart успешно инициирован
+  Future<bool> restartIce({
+    required Function(Map<String, dynamic> offer) onOfferCreated,
+    required Function(Map<String, dynamic> candidate) onCandidateCreated,
+  }) async {
+    if (_peerConnection == null) {
+      _log("--- [WebRTC] ICE Restart: No peer connection ---");
+      return false;
+    }
+
+    try {
+      _log("--- [WebRTC] ICE RESTART ---");
+      
+      // Сбрасываем флаг и очередь
+      _remoteDescriptionSet = false;
+      _queuedRemoteCandidates.clear();
+
+      // ВАЖНО: Перерегистрируем onIceCandidate чтобы новые кандидаты отправлялись!
+      _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+        if (candidate.candidate == null) return;
+        _log("📤 ICE Restart candidate generated");
+        onCandidateCreated({
+          'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMLineIndex
+        });
+      };
+
+      // Создаём новый offer с iceRestart: true
+      RTCSessionDescription offer = await _peerConnection!.createOffer({
+        'offerToReceiveAudio': true,
+        'offerToReceiveVideo': false,
+        'iceRestart': true,
+      });
+
+      await _peerConnection!.setLocalDescription(offer);
+      _log("--- [WebRTC] ICE Restart offer created ---");
+      
+      onOfferCreated({'sdp': offer.sdp, 'type': offer.type});
+      return true;
+    } catch (e) {
+      _log("--- [WebRTC] ICE Restart ERROR: $e ---");
+      return false;
+    }
+  }
+
+  /// Обработка входящего ICE restart offer (renegotiation)
+  Future<bool> handleIceRestartOffer({
+    required Map<String, dynamic> offer,
+    required Function(Map<String, dynamic> answer) onAnswerCreated,
+    required Function(Map<String, dynamic> candidate) onCandidateCreated,
+  }) async {
+    if (_peerConnection == null) {
+      _log("--- [WebRTC] ICE Restart Handle: No peer connection ---");
+      return false;
+    }
+
+    try {
+      _log("--- [WebRTC] HANDLING ICE RESTART OFFER ---");
+      
+      // Сбрасываем флаг и очередь для нового SDP
+      _remoteDescriptionSet = false;
+      _queuedRemoteCandidates.clear();
+
+      // ВАЖНО: Перерегистрируем onIceCandidate чтобы новые кандидаты отправлялись!
+      _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+        if (candidate.candidate == null) return;
+        _log("📤 ICE Restart answer candidate generated");
+        onCandidateCreated({
+          'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMLineIndex
+        });
+      };
+
+      // Устанавливаем новый remote description
+      final remoteOffer = RTCSessionDescription(offer['sdp'], offer['type']);
+      await _peerConnection!.setRemoteDescription(remoteOffer);
+      _remoteDescriptionSet = true;
+      
+      // Создаём answer
+      final answer = await _peerConnection!.createAnswer();
+      await _peerConnection!.setLocalDescription(answer);
+      
+      _log("--- [WebRTC] ICE Restart answer created ---");
+      onAnswerCreated({'sdp': answer.sdp, 'type': answer.type});
+      
+      return true;
+    } catch (e) {
+      _log("--- [WebRTC] ICE Restart Handle ERROR: $e ---");
+      return false;
+    }
+  }
+
+  /// Получить текущее состояние ICE соединения
+  RTCIceConnectionState? get iceConnectionState {
+    // flutter_webrtc не предоставляет прямой доступ к iceConnectionState через геттер,
+    // но мы можем отслеживать через onIceConnectionState
+    return null;
   }
 
   Future<void> hangUp() async {
