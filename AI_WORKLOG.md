@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-01-05
+- Time: (local)
+- Task: Подготовка релиза 1.1.1 (проверки + фиксация версии)
+- Changes:
+  - Прогнан статический анализ и полный набор тестов (`dart analyze`, `flutter test`) — зелёный прогон.
+  - Зафиксирована релизная версия в `pubspec.yaml` и `AppConfig.appVersion` под 1.1.1.
+  - `CHANGELOG.md`: вынесены изменения в секцию релиза `[1.1.1]`.
+- Files:
+  - `pubspec.yaml`
+  - `lib/config.dart`
+  - `CHANGELOG.md`
+- Commands:
+  - `flutter pub get`
+  - `dart analyze`
+  - `flutter test`
+
 ## 2025-12-21
 - Time:  (заполнить реальным временем) local
 - Task: Восстановление Cursor agent режима (rules/commands) + git hooks
