@@ -59,6 +59,9 @@ class IncomingMessageHandler {
     'payment-confirmed',
     'license-status',
     'pong',
+    'support-reply',
+    'presence-state',
+    'presence-update',
   };
 
   Future<void> handleRawMessage(String messageJson) async {

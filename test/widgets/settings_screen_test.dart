@@ -91,6 +91,7 @@ void main() {
 
       expect(find.text('ПРОФИЛЬ'), findsOneWidget);
       expect(find.text('Безопасность'), findsOneWidget);
+      expect(find.text('Написать разработчику'), findsOneWidget);
       expect(find.text('Как пользоваться'), findsOneWidget);
       expect(find.text('История обновлений'), findsOneWidget);
     });

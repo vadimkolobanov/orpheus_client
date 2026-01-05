@@ -7,6 +7,7 @@ import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/screens/debug_logs_screen.dart';
 import 'package:orpheus_project/screens/help_screen.dart';
 import 'package:orpheus_project/screens/security_settings_screen.dart';
+import 'package:orpheus_project/screens/support_chat_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
@@ -278,6 +279,19 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
             _buildAnimatedSettingsItem(
               index: 1,
               delay: 0.45,
+              icon: Icons.support_agent,
+              title: "Написать разработчику",
+              subtitle: "Вопросы, проблемы, предложения",
+              onTap: () => Navigator.push(
+                context,
+                _createPageRoute(const SupportChatScreen()),
+              ),
+              accentColor: const Color(0xFFA91B47),
+            ),
+
+            _buildAnimatedSettingsItem(
+              index: 2,
+              delay: 0.5,
               icon: Icons.help_outline,
               title: "Как пользоваться",
               subtitle: "Краткая инструкция по функциям",
@@ -289,8 +303,8 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
             ),
 
             _buildAnimatedSettingsItem(
-              index: 2,
-              delay: 0.5,
+              index: 3,
+              delay: 0.55,
               icon: Icons.history,
               title: "История обновлений",
               onTap: () => Navigator.push(
@@ -300,8 +314,8 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
             ),
 
             _buildAnimatedSettingsItem(
-              index: 3,
-              delay: 0.55,
+              index: 4,
+              delay: 0.6,
               icon: Icons.shield_outlined,
               title: "Экспорт аккаунта",
               subtitle: "Показать Приватный ключ",
@@ -310,8 +324,8 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
             ),
             
             _buildAnimatedSettingsItem(
-              index: 4,
-              delay: 0.6,
+              index: 5,
+              delay: 0.65,
               icon: Icons.notifications_none,
               title: "Настройка уведомлений",
               subtitle: "Для Android (Vivo, Xiaomi и др.)",
