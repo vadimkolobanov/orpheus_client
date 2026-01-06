@@ -71,8 +71,14 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/sounds/
-    - assets/images/
+    # Важно для размера бандла:
+    # Не добавляем директорию целиком, чтобы не упаковывать служебные наборы иконок
+    # (assets/images/android/*, assets/images/ios/*) — они не нужны в runtime.
+    - assets/sounds/connected.mp3
+    - assets/sounds/dialing.mp3
+    - assets/sounds/disconnected.mp3
+    - assets/images/logo.png
+    - assets/images/logo.svg
 
 flutter_launcher_icons:
   android: true

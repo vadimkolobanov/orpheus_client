@@ -5,6 +5,7 @@ import 'package:path/path.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/services/auth_service.dart';
+import 'package:flutter/foundation.dart';
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
@@ -27,12 +28,18 @@ class DatabaseService {
 
   Future<Database> _initDB(String filePath) async {
     try {
-      print("DB: Получение пути к базе данных...");
+      if (kDebugMode) {
+        print("DB: Получение пути к базе данных...");
+      }
       final dbPath = await getDatabasesPath();
       final path = join(dbPath, filePath);
-      print("DB: Путь к БД: $path");
+      if (kDebugMode) {
+        print("DB: Путь к БД: $path");
+      }
 
-      print("DB: Открытие базы данных...");
+      if (kDebugMode) {
+        print("DB: Открытие базы данных...");
+      }
       // Увеличиваем версию до 3
       final db = await openDatabase(
         path, 
@@ -41,10 +48,14 @@ class DatabaseService {
         onUpgrade: _upgradeDB,
         singleInstance: true, // Важно для избежания блокировок
       );
-      print("DB: База данных открыта успешно");
+      if (kDebugMode) {
+        print("DB: База данных открыта успешно");
+      }
       return db;
     } catch (e) {
-      print("DB: КРИТИЧЕСКАЯ ОШИБКА инициализации: $e");
+      if (kDebugMode) {
+        print("DB: КРИТИЧЕСКАЯ ОШИБКА инициализации: $e");
+      }
       rethrow;
     }
   }
@@ -55,31 +66,49 @@ class DatabaseService {
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    print("DB: Миграция с версии $oldVersion на $newVersion");
+    if (kDebugMode) {
+      print("DB: Миграция с версии $oldVersion на $newVersion");
+    }
     try {
       if (oldVersion < 2) {
-        print("DB: Создание таблицы messages...");
+        if (kDebugMode) {
+          print("DB: Создание таблицы messages...");
+        }
         await _createMessagesTable(db);
       }
       if (oldVersion < 3) {
-        print("DB: Миграция до версии 3...");
+        if (kDebugMode) {
+          print("DB: Миграция до версии 3...");
+        }
         // Проверяем, существуют ли колонки перед добавлением
         try {
           await db.execute("ALTER TABLE messages ADD COLUMN status INTEGER DEFAULT 1");
-          print("DB: Колонка status добавлена");
+          if (kDebugMode) {
+            print("DB: Колонка status добавлена");
+          }
         } catch (e) {
-          print("DB: Колонка status уже существует или ошибка: $e");
+          if (kDebugMode) {
+            print("DB: Колонка status уже существует или ошибка: $e");
+          }
         }
         try {
           await db.execute("ALTER TABLE messages ADD COLUMN isRead INTEGER DEFAULT 1");
-          print("DB: Колонка isRead добавлена");
+          if (kDebugMode) {
+            print("DB: Колонка isRead добавлена");
+          }
         } catch (e) {
-          print("DB: Колонка isRead уже существует или ошибка: $e");
+          if (kDebugMode) {
+            print("DB: Колонка isRead уже существует или ошибка: $e");
+          }
         }
       }
-      print("DB: Миграция завершена");
+      if (kDebugMode) {
+        print("DB: Миграция завершена");
+      }
     } catch (e) {
-      print("DB: ОШИБКА миграции: $e");
+      if (kDebugMode) {
+        print("DB: ОШИБКА миграции: $e");
+      }
       rethrow;
     }
   }
@@ -156,7 +185,9 @@ class DatabaseService {
         publicKey: maps[0]['publicKey'] as String,
       );
     } catch (e) {
-      print("DB ERROR: Failed to get contact by publicKey: $e");
+      if (kDebugMode) {
+        print("DB ERROR: Failed to get contact by publicKey: $e");
+      }
       return null;
     }
   }

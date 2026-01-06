@@ -11,7 +11,9 @@ import 'package:flutter/foundation.dart';
 /// Вызывается когда приложение убито или в фоне
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  print("📱 FCM BACKGROUND: ${message.messageId}");
+  if (kDebugMode) {
+    print("📱 FCM BACKGROUND: ${message.messageId}");
+  }
   DebugLogger.info('FCM', 'BACKGROUND: ${message.messageId}');
   
   // FCM сам показывает уведомление если есть notification payload
@@ -80,24 +82,32 @@ class NotificationService {
       criticalAlert: true,  // Важно для звонков
       provisional: false,
     );
-    print('📱 FCM Permission: ${settings.authorizationStatus}');
+    if (kDebugMode) {
+      print('📱 FCM Permission: ${settings.authorizationStatus}');
+    }
     DebugLogger.info('FCM', 'Permission: ${settings.authorizationStatus}');
 
     // 3. Получение токена
     try {
       fcmToken = await _firebaseMessaging.getToken();
-      print("📱 FCM Token: $fcmToken");
+      if (kDebugMode) {
+        print("📱 FCM Token: $fcmToken");
+      }
       DebugLogger.success('FCM', 'Token получен: ${fcmToken?.substring(0, 30)}...');
 
       // Подписка на обновление токена
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
         fcmToken = newToken;
-        print("📱 FCM Token updated: $newToken");
+        if (kDebugMode) {
+          print("📱 FCM Token updated: $newToken");
+        }
         DebugLogger.info('FCM', 'Token обновлён: ${newToken.substring(0, 30)}...');
         onTokenUpdated?.call();
       });
     } catch (e) {
-      print("📱 FCM Error: $e");
+      if (kDebugMode) {
+        print("📱 FCM Error: $e");
+      }
       DebugLogger.error('FCM', 'Ошибка получения токена: $e');
     }
 
@@ -140,12 +150,16 @@ class NotificationService {
     await _localBackend!.initialize(onTap: _onNotificationTap);
 
     _localInitialized = true;
-    print("🔔 Local notifications initialized");
+    if (kDebugMode) {
+      print("🔔 Local notifications initialized");
+    }
   }
 
   /// Обработка foreground FCM сообщений
   void _handleForegroundMessage(RemoteMessage message) {
-    print('📱 FCM Foreground: ${message.notification?.title}');
+    if (kDebugMode) {
+      print('📱 FCM Foreground: ${message.notification?.title}');
+    }
     
     // Если приложение открыто - FCM не показывает уведомление автоматически
     // Можно показать локальное уведомление если нужно
@@ -178,7 +192,9 @@ class NotificationService {
 
   /// Обработка клика по уведомлению FCM
   void _handleNotificationTap(RemoteMessage message) {
-    print('📱 Notification tap: ${message.data}');
+    if (kDebugMode) {
+      print('📱 Notification tap: ${message.data}');
+    }
     
     final data = message.data;
     if (data.containsKey('caller_key')) {
@@ -188,7 +204,9 @@ class NotificationService {
 
   /// Обработка клика по локальному уведомлению
   static void _onNotificationTap(NotificationResponse response) {
-    print('🔔 Local notification tap: ${response.payload}');
+    if (kDebugMode) {
+      print('🔔 Local notification tap: ${response.payload}');
+    }
     // Можно добавить навигацию к чату/звонку по payload
   }
 
@@ -214,10 +232,14 @@ class NotificationService {
         ongoing: true,
       );
 
-      print("🔔 Call notification shown: $callerName");
+      if (kDebugMode) {
+        print("🔔 Call notification shown: $callerName");
+      }
       DebugLogger.success('NOTIF', '🔔 Показано уведомление о звонке: $callerName');
     } catch (e) {
-      print("🔔 showCallNotification error: $e");
+      if (kDebugMode) {
+        print("🔔 showCallNotification error: $e");
+      }
       DebugLogger.error('NOTIF', 'showCallNotification ошибка: $e');
     }
   }
@@ -226,12 +248,16 @@ class NotificationService {
   static Future<void> hideCallNotification() async {
     try {
       await _localBackend?.cancel(_callNotificationId);
-      print("🔔 Call notification hidden");
+      if (kDebugMode) {
+        print("🔔 Call notification hidden");
+      }
       DebugLogger.info('NOTIF', '🔔 Уведомление о звонке скрыто');
     } catch (e) {
       // ProGuard/R8 может вызывать ошибки с Gson TypeToken
       // Логируем но не бросаем исключение
-      print("🔔 hideCallNotification error (ignored): $e");
+      if (kDebugMode) {
+        print("🔔 hideCallNotification error (ignored): $e");
+      }
       DebugLogger.warn('NOTIF', 'hideCallNotification ошибка (игнорируем): $e');
     }
   }
@@ -257,10 +283,14 @@ class NotificationService {
         fullScreenIntent: false,
       );
 
-      print("🔔 Message notification shown: $senderName");
+      if (kDebugMode) {
+        print("🔔 Message notification shown: $senderName");
+      }
       DebugLogger.success('NOTIF', '📩 Показано уведомление: $senderName');
     } catch (e) {
-      print("🔔 showMessageNotification error: $e");
+      if (kDebugMode) {
+        print("🔔 showMessageNotification error: $e");
+      }
       DebugLogger.error('NOTIF', 'showMessageNotification ошибка: $e');
     }
   }
@@ -269,9 +299,13 @@ class NotificationService {
   static Future<void> hideMessageNotifications() async {
     try {
       await _localBackend?.cancelAll();
-      print("🔔 All notifications hidden");
+      if (kDebugMode) {
+        print("🔔 All notifications hidden");
+      }
     } catch (e) {
-      print("🔔 hideMessageNotifications error (ignored): $e");
+      if (kDebugMode) {
+        print("🔔 hideMessageNotifications error (ignored): $e");
+      }
       DebugLogger.warn('NOTIF', 'hideMessageNotifications ошибка: $e');
     }
   }
@@ -293,7 +327,9 @@ class NotificationService {
       fullScreenIntent: false,
     );
 
-    print("🔔 Test notification shown");
+    if (kDebugMode) {
+      print("🔔 Test notification shown");
+    }
   }
 }
 
