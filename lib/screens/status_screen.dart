@@ -46,6 +46,8 @@ class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMix
   Timer? _updateTimer;
   Timer? _keyIdAnimTimer;
   Timer? _threatScanTimer;
+  StreamSubscription<ConnectionStatus>? _wsStatusSub;
+  StreamSubscription<void>? _messageUpdatesSub;
 
   // Данные сессии
   final DateTime _sessionStart = DateTime.now();
@@ -148,14 +150,14 @@ class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMix
     }
 
     final ws = widget.websocket ?? websocketService;
-    ws.status.listen((status) {
-      if (mounted) {
-        setState(() => _currentStatus = status);
-      }
+    _wsStatusSub = ws.status.distinct().listen((status) {
+      if (!mounted) return;
+      if (_currentStatus == status) return;
+      setState(() => _currentStatus = status);
     });
 
     final msgStream = widget.messageUpdates ?? messageUpdateController.stream;
-    msgStream.listen((_) {
+    _messageUpdatesSub = msgStream.listen((_) {
       if (mounted) {
         setState(() => _sessionMessages++);
       }
@@ -327,6 +329,8 @@ class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMix
     _updateTimer?.cancel();
     _keyIdAnimTimer?.cancel();
     _threatScanTimer?.cancel();
+    _wsStatusSub?.cancel();
+    _messageUpdatesSub?.cancel();
     super.dispose();
   }
 

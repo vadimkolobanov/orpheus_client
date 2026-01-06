@@ -36,6 +36,8 @@ class IncomingMessageHandler {
     required void Function(Map<String, dynamic> msg) emitSignaling,
     required void Function(String senderPublicKey) emitChatUpdate,
     required bool Function() isAppInForeground,
+    bool Function()? isCallActive,
+    int Function()? nowMs,
   })  : _crypto = crypto,
         _db = database,
         _notif = notifications,
@@ -43,7 +45,9 @@ class IncomingMessageHandler {
         _openCallScreen = openCallScreen,
         _emitSignaling = emitSignaling,
         _emitChatUpdate = emitChatUpdate,
-        _isAppInForeground = isAppInForeground;
+        _isAppInForeground = isAppInForeground,
+        _isCallActive = (isCallActive ?? (() => false)),
+        _nowMs = (nowMs ?? (() => DateTime.now().millisecondsSinceEpoch));
 
   final IncomingMessageCrypto _crypto;
   final IncomingMessageDatabase _db;
@@ -53,6 +57,13 @@ class IncomingMessageHandler {
   final void Function(Map<String, dynamic> msg) _emitSignaling;
   final void Function(String senderPublicKey) _emitChatUpdate;
   final bool Function() _isAppInForeground;
+  final bool Function() _isCallActive;
+  final int Function() _nowMs;
+
+  // Анти-спам/анти-дубликаты для call-offer: на некоторых сетях/устройствах возможны повторы.
+  final Map<String, int> _lastCallOfferHandledAtMsBySender = {};
+  static const int _callOfferDebounceMs = 2500;
+  static const int _callOfferTtlMs = 60 * 1000;
 
   static const _ignoredTypes = <String>{
     'error',
@@ -81,6 +92,26 @@ class IncomingMessageHandler {
     if (type == 'call-offer') {
       final data = messageData['data'];
       if (data is! Map<String, dynamic>) return;
+
+      // 1) TTL (backward-compatible): если сервер прислал server_ts_ms и он слишком старый — игнорируем.
+      final now = _nowMs();
+      final dynamic tsRaw = messageData['server_ts_ms'] ?? data['server_ts_ms'];
+      final int? serverTsMs = tsRaw is int ? tsRaw : int.tryParse(tsRaw?.toString() ?? '');
+      if (serverTsMs != null && (now - serverTsMs) > _callOfferTtlMs) {
+        return;
+      }
+
+      // 2) Если уже есть активный звонок/экран — не поднимаем второй входящий (иначе "пачка" экранов).
+      if (_isCallActive()) {
+        return;
+      }
+
+      // 3) Дедуп по sender (короткое окно): защита от дублей при выходе из оффлайна/повторной доставке.
+      final last = _lastCallOfferHandledAtMsBySender[senderKey];
+      if (last != null && (now - last) < _callOfferDebounceMs) {
+        return;
+      }
+      _lastCallOfferHandledAtMsBySender[senderKey] = now;
 
       // ВАЖНО: не очищаем уже пришедшие кандидаты (если они пришли раньше offer).
       _callBuffer.ensure(senderKey);
@@ -115,6 +146,7 @@ class IncomingMessageHandler {
 
     if (type == 'hang-up' || type == 'call-rejected') {
       _callBuffer.clear(senderKey);
+      _lastCallOfferHandledAtMsBySender.remove(senderKey);
 
       // КРИТИЧНО: сначала сообщаем в CallScreen, затем пытаемся спрятать уведомление.
       _emitSignaling(messageData);

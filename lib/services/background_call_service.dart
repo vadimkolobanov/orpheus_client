@@ -2,6 +2,38 @@ import 'dart:ui';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+/// Entry point для foreground/background service (должен быть top-level для стабильной работы в AOT).
+@pragma('vm:entry-point')
+void backgroundCallServiceOnStart(ServiceInstance service) async {
+  DartPluginRegistrant.ensureInitialized();
+  // ignore: avoid_print
+  print("📞 BackgroundCallService onStart (top-level)");
+
+  if (service is AndroidServiceInstance) {
+    service.setAsForegroundService();
+  }
+
+  // Обработка остановки
+  service.on('stopService').listen((event) {
+    // ignore: avoid_print
+    print("📞 Service stopping...");
+    service.stopSelf();
+  });
+
+  // Обработка обновления уведомления
+  service.on('updateNotification').listen((event) {
+    if (event != null && service is AndroidServiceInstance) {
+      final title = event['title'] as String? ?? 'Orpheus';
+      final content = event['content'] as String? ?? 'Звонок...';
+
+      service.setForegroundNotificationInfo(
+        title: title,
+        content: content,
+      );
+    }
+  });
+}
+
 /// Абстракция над плагинами, чтобы unit-тесты не зависели от MethodChannel.
 abstract class BackgroundCallBackend {
   Future<void> createNotificationChannel({
@@ -11,7 +43,7 @@ abstract class BackgroundCallBackend {
   });
 
   Future<void> configure({
-    required void Function(dynamic service) onStart,
+    required void Function(ServiceInstance service) onStart,
     required String notificationChannelId,
     required int notificationId,
   });
@@ -53,13 +85,15 @@ class PluginBackgroundCallBackend implements BackgroundCallBackend {
 
   @override
   Future<void> configure({
-    required void Function(dynamic service) onStart,
+    required void Function(ServiceInstance service) onStart,
     required String notificationChannelId,
     required int notificationId,
   }) async {
     await _service.configure(
       androidConfiguration: AndroidConfiguration(
-        onStart: (service) => onStart(service),
+        // Важно: flutter_background_service требует top-level или static функцию.
+        // Любые лямбды/обёртки ломают запуск на Android.
+        onStart: onStart,
         autoStart: false, // НЕ автозапуск — только вручную при звонке
         autoStartOnBoot: false, // НЕ запускать при загрузке
         isForegroundMode: true,
@@ -71,7 +105,7 @@ class PluginBackgroundCallBackend implements BackgroundCallBackend {
       ),
       iosConfiguration: IosConfiguration(
         autoStart: false,
-        onForeground: (service) => onStart(service),
+        onForeground: onStart,
       ),
     );
   }
@@ -123,7 +157,7 @@ class BackgroundCallService {
 
       // Конфигурация сервиса
       await _backend.configure(
-        onStart: (service) => _onStart(service as ServiceInstance),
+        onStart: backgroundCallServiceOnStart,
         notificationChannelId: channelId,
         notificationId: _notificationId,
       );
@@ -176,33 +210,4 @@ class BackgroundCallService {
     }
   }
 
-  /// Entry point для foreground service
-  @pragma('vm:entry-point')
-  static void _onStart(ServiceInstance service) async {
-    DartPluginRegistrant.ensureInitialized();
-    print("📞 BackgroundCallService _onStart");
-
-    if (service is AndroidServiceInstance) {
-      service.setAsForegroundService();
-    }
-
-    // Обработка остановки
-    service.on('stopService').listen((event) {
-      print("📞 Service stopping...");
-      service.stopSelf();
-    });
-
-    // Обработка обновления уведомления
-    service.on('updateNotification').listen((event) {
-      if (event != null && service is AndroidServiceInstance) {
-        final title = event['title'] as String? ?? 'Orpheus';
-        final content = event['content'] as String? ?? 'Звонок...';
-        
-        service.setForegroundNotificationInfo(
-          title: title,
-          content: content,
-        );
-      }
-    });
-  }
 }

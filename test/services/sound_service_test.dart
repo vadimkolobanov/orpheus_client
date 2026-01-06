@@ -3,6 +3,7 @@ import 'package:orpheus_project/services/sound_service.dart';
 
 class _FakeSoundBackend implements SoundBackend {
   int playDialingCalls = 0;
+  int playIncomingRingtoneCalls = 0;
   int playConnectedCalls = 0;
   int playDisconnectedCalls = 0;
   int stopAllCalls = 0;
@@ -14,6 +15,11 @@ class _FakeSoundBackend implements SoundBackend {
   Future<void> playDialing() async {
     playDialingCalls += 1;
     if (throwOnDialing != null) throw throwOnDialing!;
+  }
+
+  @override
+  Future<void> playIncomingRingtone() async {
+    playIncomingRingtoneCalls += 1;
   }
 
   @override
@@ -60,10 +66,12 @@ void main() {
       final service = SoundService.instance;
 
       await service.playDialingSound();
+      await service.playIncomingRingtone();
       await service.playConnectedSound();
       await service.playDisconnectedSound();
 
       expect(backend.playDialingCalls, equals(1));
+      expect(backend.playIncomingRingtoneCalls, equals(1));
       expect(backend.playConnectedCalls, equals(1));
       expect(backend.playDisconnectedCalls, equals(1));
     });
@@ -81,10 +89,12 @@ void main() {
       // Множественные вызовы не должны вызывать ошибки
       await service.playDialingSound();
       await service.playDialingSound();
+      await service.playIncomingRingtone();
       await service.stopAllSounds();
       await service.stopAllSounds();
 
       expect(backend.playDialingCalls, equals(2));
+      expect(backend.playIncomingRingtoneCalls, equals(1));
       expect(backend.stopAllCalls, equals(2));
     });
 

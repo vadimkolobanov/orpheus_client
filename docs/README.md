@@ -2,11 +2,21 @@
 
 Эта папка содержит **актуальную** документацию именно по Flutter-клиенту.
 
-## Куда смотреть
+## Содержание
+- **Обзор проекта (клиент)**: `docs/PROJECT_OVERVIEW.md`
+- **Структура проекта (файл → ответственность)**: `docs/PROJECT_STRUCTURE.md`
+- **Философия проекта**: `docs/PHILOSOPHY.md`
+- **Установка и запуск**: `docs/GETTING_STARTED.md`
+- **Гайд для разработки**: `docs/DEVELOPMENT_GUIDE.md`
+- **Принципы работы функционала**: `docs/FUNCTIONAL_PRINCIPLES.md`
 - **Тестирование**: `docs/testing/README.md`
+- **Релизы**: `docs/RELEASES.md`
 - **Архитектура**: `docs/ARCHITECTURE.md`
+- **Особенности/плюсы/недоработки**: `docs/FEATURES_AND_LIMITATIONS.md`
+- **Безопасность (обзор проблем и приоритетов)**: `docs/SECURITY_REVIEW.md`
 - **Решения (ADR)**: `docs/DECISIONS/`
 - **Миграция домена**: `docs/DOMAIN_MIGRATION_orpheus.click.md`
+- **Архив** (не для ежедневной работы): `docs/_archive/`
 
 ## Процесс изменений
 - Если меняется поведение приложения/контракты — обновляйте тесты (они диктуют поведение).

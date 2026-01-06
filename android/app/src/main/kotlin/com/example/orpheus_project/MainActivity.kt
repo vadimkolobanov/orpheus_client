@@ -14,6 +14,7 @@ import android.content.Context
 import android.os.Bundle
 import android.app.NotificationManager
 import android.app.KeyguardManager
+import android.os.Build.VERSION_CODES
 
 class MainActivity: FlutterFragmentActivity() {
     private val BATTERY_CHANNEL = "com.example.orpheus_project/battery"
@@ -76,6 +77,10 @@ class MainActivity: FlutterFragmentActivity() {
                 }
                 "openAutoStartSettings" -> {
                     openAutoStartSettings()
+                    result.success(true)
+                }
+                "openFullScreenIntentSettings" -> {
+                    openFullScreenIntentSettings()
                     result.success(true)
                 }
                 else -> result.notImplemented()
@@ -184,6 +189,24 @@ class MainActivity: FlutterFragmentActivity() {
             startActivity(intent)
         } else {
             openAppSettings()
+        }
+    }
+
+    private fun openFullScreenIntentSettings() {
+        // Android 14+ (API 34): Special app access → Full screen intents.
+        // Без этого "большой экран" по full-screen intent может не показываться.
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } else {
+                // Fallback: хотя бы открыть настройки уведомлений приложения
+                openNotificationSettings()
+            }
+        } catch (e: Exception) {
+            openNotificationSettings()
         }
     }
 

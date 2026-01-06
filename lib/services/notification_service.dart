@@ -1,11 +1,13 @@
 // lib/services/notification_service.dart
 
 import 'dart:async';
+import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 /// Обработчик фоновых FCM сообщений (top-level функция)
 /// Вызывается когда приложение убито или в фоне
@@ -14,12 +16,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   print("📱 FCM BACKGROUND: ${message.messageId}");
   DebugLogger.info('FCM', 'BACKGROUND: ${message.messageId}');
   
-  // FCM сам показывает уведомление если есть notification payload
-  // Для data-only сообщений можно показать локальное уведомление
+  // Важно:
+  // - Если в push есть notification payload, Android сам показывает уведомление (и именно оно должно играть звук).
+  // - Если мы поверх него покажем локальное уведомление, это может превратиться в "обновление" и звук не сыграет.
+  // Поэтому локальные уведомления показываем ТОЛЬКО для data-only сообщений.
   final data = message.data;
   if (data.containsKey('type')) {
     DebugLogger.info('FCM', 'Background message type: ${data['type']}');
-    await NotificationService._handleBackgroundMessage(data);
+    final shouldShowLocal = NotificationService.shouldShowLocalNotification(
+      hasNotificationPayload: message.notification != null,
+      data: data,
+    );
+    if (shouldShowLocal) {
+      await NotificationService._handleBackgroundMessage(data);
+    }
   }
 }
 
@@ -52,7 +62,10 @@ class NotificationService {
   static Function(String callerKey)? onIncomingCallFromPush;
 
   // ID каналов уведомлений
-  static const String _callChannelId = 'orpheus_calls';
+  // Сервер указывает этот channel_id в AndroidNotification.channel_id
+  static const String _incomingCallChannelId = 'orpheus_incoming_call';
+  // Legacy: старый канал клиента (оставляем, чтобы не ломать существующие настройки пользователей)
+  static const String _legacyCallChannelId = 'orpheus_calls';
   static const String _callChannelName = 'Входящие звонки';
   static const String _messageChannelId = 'orpheus_messages';
   static const String _messageChannelName = 'Сообщения';
@@ -71,6 +84,17 @@ class NotificationService {
   Future<void> init() async {
     // 1. Инициализация локальных уведомлений
     await _ensureLocalNotificationsInitialized();
+
+    // 1.1 Android 13+: запрос runtime permission на уведомления (best-effort).
+    // На iOS это делается через FirebaseMessaging.requestPermission().
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        final status = await Permission.notification.request();
+        DebugLogger.info('NOTIF', 'Android Permission.notification: $status');
+      } catch (e) {
+        DebugLogger.warn('NOTIF', 'Android Permission.notification request failed: $e');
+      }
+    }
 
     // 2. Запрос разрешений FCM
     NotificationSettings settings = await _firebaseMessaging.requestPermission(
@@ -123,9 +147,18 @@ class NotificationService {
 
     // Создаём каналы уведомлений
     await _localBackend!.createAndroidChannel(
-      id: _callChannelId,
+      id: _incomingCallChannelId,
       name: _callChannelName,
       description: 'Уведомления о входящих звонках',
+      importance: Importance.max,
+      ledColor: const Color(0xFF6AD394),
+    );
+
+    // Legacy канал (оставляем, чтобы не “пропали” старые настройки/каналы у пользователей).
+    await _localBackend!.createAndroidChannel(
+      id: _legacyCallChannelId,
+      name: _callChannelName,
+      description: 'Уведомления о входящих звонках (legacy)',
       importance: Importance.max,
       ledColor: const Color(0xFF6AD394),
     );
@@ -150,7 +183,7 @@ class NotificationService {
     // Если приложение открыто - FCM не показывает уведомление автоматически
     // Можно показать локальное уведомление если нужно
     final data = message.data;
-    if (data.containsKey('type') && data['type'] == 'call') {
+    if (data.containsKey('type') && (data['type'] == 'call' || data['type'] == 'incoming_call')) {
       // Для звонков можно показать уведомление даже в foreground
       // (но обычно экран звонка уже открывается через WebSocket)
     }
@@ -162,11 +195,18 @@ class NotificationService {
     await _ensureLocalNotificationsInitialized();
 
     final type = data['type'];
-    final senderName = data['sender_name'] ?? 'Неизвестный';
 
-    if (type == 'call') {
-      await showCallNotification(callerName: senderName);
-    } else if (type == 'message') {
+    // Сервер (FastAPI) сейчас шлёт:
+    // - incoming_call: caller_name/caller_key
+    // - new_message: sender_name/sender_key
+    //
+    // Оставляем совместимость со старыми call/message.
+    final callerName = (data['caller_name'] ?? data['sender_name'] ?? 'Неизвестный').toString();
+    final senderName = (data['sender_name'] ?? data['caller_name'] ?? 'Неизвестный').toString();
+
+    if (type == 'incoming_call' || type == 'call') {
+      await showCallNotification(callerName: callerName);
+    } else if (type == 'new_message' || type == 'message') {
       await showMessageNotification(senderName: senderName);
     }
   }
@@ -174,6 +214,22 @@ class NotificationService {
   @visibleForTesting
   static Future<void> debugHandleBackgroundMessageForTesting(Map<String, dynamic> data) {
     return _handleBackgroundMessage(data);
+  }
+
+  /// Решение: показывать ли локальное уведомление в background handler.
+  ///
+  /// Если FCM уже содержит `notification` payload — локальное не показываем (иначе теряется звук/дублируется).
+  @visibleForTesting
+  static bool shouldShowLocalNotification({
+    required bool hasNotificationPayload,
+    required Map<String, dynamic> data,
+  }) {
+    if (hasNotificationPayload) return false;
+    final type = data['type'];
+    return type == 'incoming_call' ||
+        type == 'call' ||
+        type == 'new_message' ||
+        type == 'message';
   }
 
   /// Обработка клика по уведомлению FCM
@@ -204,7 +260,7 @@ class NotificationService {
 
       await _localBackend!.show(
         id: _callNotificationId,
-        channelId: _callChannelId,
+        channelId: _incomingCallChannelId,
         channelName: _callChannelName,
         title: 'Входящий звонок',
         body: callerName,

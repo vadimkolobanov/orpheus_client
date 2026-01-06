@@ -118,6 +118,17 @@ class DeviceSettingsService {
     }
   }
 
+  /// Android 14+: открыть Special access → Full screen intents для приложения.
+  /// Без этого ОС может не показывать "большой экран" по full-screen intent.
+  static Future<void> openFullScreenIntentSettings() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _settingsChannel.invokeMethod('openFullScreenIntentSettings');
+    } catch (e) {
+      print("DeviceSettings: Open full-screen intent settings error: $e");
+    }
+  }
+
   /// Открыть настройки автозапуска (для китайских OEM)
   static Future<void> openAutoStartSettings() async {
     if (!Platform.isAndroid) return;

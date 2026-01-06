@@ -70,10 +70,8 @@ void main() async {
     await notificationService.init();
     DebugLogger.success('APP', 'Уведомления инициализированы');
 
-    // 3. BackgroundCallService (только инициализация, не запуск)
-    DebugLogger.info('APP', 'Инициализация BackgroundCallService...');
-    await BackgroundCallService.initialize();
-    DebugLogger.success('APP', 'BackgroundCallService инициализирован');
+    // 3. BackgroundCallService — НЕ инициализируем на старте.
+    // Он будет lazy-инициализирован при первом звонке (см. BackgroundCallService.startCallService()).
   } catch (e) {
     print("INIT ERROR: $e");
     DebugLogger.error('APP', 'INIT ERROR: $e');
@@ -198,6 +196,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _isCheckCompleted = false;
   late bool _keysExist;
   bool _isLocked = false;
+  StreamSubscription<String>? _licenseSubscription;
 
   @override
   void initState() {
@@ -220,8 +219,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     print("🔒 Locked: $_isLocked | PIN enabled: ${authService.config.isPinEnabled}");
 
     // Слушаем статус лицензии
-    websocketService.stream.listen((message) {
+    _licenseSubscription = websocketService.stream.listen((message) {
       try {
+        // Быстрый фильтр — не парсим JSON на каждом сообщении.
+        if (!message.contains('license-status') && !message.contains('payment-confirmed')) return;
+
         final data = json.decode(message);
         if (data['type'] == 'license-status') {
           print("📋 License status received: ${data['status']}");
@@ -229,12 +231,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             _isLicensed = (data['status'] == 'active');
             _isCheckCompleted = true;
           });
+          _licenseSubscription?.cancel();
+          _licenseSubscription = null;
         } else if (data['type'] == 'payment-confirmed') {
           print("💳 Payment confirmed!");
           setState(() {
             _isLicensed = true;
             _isCheckCompleted = true;
           });
+          _licenseSubscription?.cancel();
+          _licenseSubscription = null;
         }
       } catch (_) {}
     });
@@ -287,6 +293,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _licenseSubscription?.cancel();
     super.dispose();
   }
 

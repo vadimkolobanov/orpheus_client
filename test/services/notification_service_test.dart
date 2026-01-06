@@ -99,13 +99,16 @@ void main() {
       await NotificationService.showCallNotification(callerName: 'Alice');
 
       // каналы должны быть созданы при первой инициализации
-      expect(backend.createdChannels.map((c) => c.id), containsAll(['orpheus_calls', 'orpheus_messages']));
+      expect(
+        backend.createdChannels.map((c) => c.id),
+        containsAll(['orpheus_incoming_call', 'orpheus_calls', 'orpheus_messages']),
+      );
       expect(backend.initializeCalls, equals(1));
 
       expect(backend.shown, hasLength(1));
       final s = backend.shown.single;
       expect(s.id, equals(1001));
-      expect(s.channelId, equals('orpheus_calls'));
+      expect(s.channelId, equals('orpheus_incoming_call'));
       expect(s.title, equals('Входящий звонок'));
       expect(s.body, equals('Alice'));
       expect(s.category, equals(AndroidNotificationCategory.call));
@@ -139,14 +142,73 @@ void main() {
       // не падает
     });
 
-    test('background message mapping: type=call/message выбирает правильный метод и sender_name дефолт', () async {
-      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'call', 'sender_name': 'Carol'});
-      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'message', 'sender_name': 'Dan'});
-      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'call'}); // дефолт имя
+    test('background message mapping: type=incoming_call/new_message + legacy call/message', () async {
+      // новый протокол сервера
+      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'incoming_call', 'caller_name': 'Carol'});
+      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'new_message', 'sender_name': 'Dan'});
+      // legacy
+      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'call', 'sender_name': 'Eve'});
+      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'message', 'sender_name': 'Frank'});
+      await NotificationService.debugHandleBackgroundMessageForTesting({'type': 'incoming_call'}); // дефолт имя
 
-      expect(backend.shown.where((s) => s.channelId == 'orpheus_calls').length, equals(2));
-      expect(backend.shown.where((s) => s.channelId == 'orpheus_messages').length, equals(1));
+      expect(backend.shown.where((s) => s.channelId == 'orpheus_incoming_call').length, equals(3));
+      expect(backend.shown.where((s) => s.channelId == 'orpheus_messages').length, equals(2));
       expect(backend.shown.any((s) => s.body == 'Неизвестный'), isTrue);
+    });
+
+    test('background handler policy: если есть notification payload — локальное уведомление не показываем', () {
+      expect(
+        NotificationService.shouldShowLocalNotification(
+          hasNotificationPayload: true,
+          data: {'type': 'incoming_call'},
+        ),
+        isFalse,
+      );
+      expect(
+        NotificationService.shouldShowLocalNotification(
+          hasNotificationPayload: true,
+          data: {'type': 'new_message'},
+        ),
+        isFalse,
+      );
+    });
+
+    test('background handler policy: data-only — локальное уведомление показываем для call/message типов', () {
+      expect(
+        NotificationService.shouldShowLocalNotification(
+          hasNotificationPayload: false,
+          data: {'type': 'incoming_call'},
+        ),
+        isTrue,
+      );
+      expect(
+        NotificationService.shouldShowLocalNotification(
+          hasNotificationPayload: false,
+          data: {'type': 'new_message'},
+        ),
+        isTrue,
+      );
+      expect(
+        NotificationService.shouldShowLocalNotification(
+          hasNotificationPayload: false,
+          data: {'type': 'call'},
+        ),
+        isTrue,
+      );
+      expect(
+        NotificationService.shouldShowLocalNotification(
+          hasNotificationPayload: false,
+          data: {'type': 'message'},
+        ),
+        isTrue,
+      );
+      expect(
+        NotificationService.shouldShowLocalNotification(
+          hasNotificationPayload: false,
+          data: {'type': 'something_else'},
+        ),
+        isFalse,
+      );
     });
 
     test('ошибки backend.show не должны пробрасываться наружу (best-effort)', () async {

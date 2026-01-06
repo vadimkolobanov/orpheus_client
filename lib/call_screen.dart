@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/background_call_service.dart';
+import 'package:orpheus_project/services/call_native_ui_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/network_monitor_service.dart';
@@ -94,6 +95,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
     // Гарантия: пока открыт CallScreen, автолок приложения не должен мешать ответу/разговору.
     CallStateService.instance.setCallActive(true);
+    // Android: разрешаем показывать поверх lockscreen и включать экран во время звонка.
+    // Best-effort: если нативная часть недоступна — звонок всё равно должен работать.
+    CallNativeUiService.enableCallMode();
 
     _displayName = widget.contactPublicKey.substring(0, 8);
     _resolveContactName();
@@ -414,7 +418,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       SoundService.instance.playDialingSound();
       _startOutgoingCall();
     } else {
-      SoundService.instance.playDialingSound();
+      // Входящий звонок: отдельный рингтон (не "гудок" исходящего).
+      SoundService.instance.playIncomingRingtone();
     }
   }
 
@@ -692,6 +697,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   @override
   void dispose() {
     CallStateService.instance.setCallActive(false);
+    CallNativeUiService.disableCallMode();
 
     // 1. Останавливаем foreground service
     BackgroundCallService.stopCallService();

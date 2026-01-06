@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:orpheus_project/services/background_call_service.dart';
 
 class _FakeBackend implements BackgroundCallBackend {
@@ -28,7 +29,7 @@ class _FakeBackend implements BackgroundCallBackend {
 
   @override
   Future<void> configure({
-    required void Function(dynamic service) onStart,
+    required void Function(ServiceInstance service) onStart,
     required String notificationChannelId,
     required int notificationId,
   }) async {

@@ -28,7 +28,7 @@
 - es:
   - Добавлены реальные `.cursor/rules/**` и `.cursor/commands/**` (чтобы агент работал предсказуемо и дисциплинированно).
   - Добавлены `.githooks/pre-commit` и `.githooks/README.md` (блокируют коммит без обновления артефактов при изменениях кода).
-  - Добавлен документ `docs/AGENT_WORKFLOW.md` (алгоритм постановки задач и критерии “готово”).
+  - Добавлен документ `docs/_archive/ai/AGENT_WORKFLOW.md` (алгоритм постановки задач и критерии “готово”).
   - Обновлён `CHANGELOG.md` (Unreleased) под процессные изменения.
 - Files:
   - `.cursor/rules/00-scope.md`
@@ -43,7 +43,7 @@
   - `.cursor/commands/triage.md`
   - `.githooks/pre-commit`
   - `.githooks/README.md`
-  - `docs/AGENT_WORKFLOW.md`
+  - `docs/_archive/ai/AGENT_WORKFLOW.md`
   - `CHANGELOG.md`
 - Commands:
   - (не запускались)
@@ -122,14 +122,14 @@
   - Восстановлен скрипт автоматического коммита `scripts/auto-commit.ps1` с проверкой артефактов.
   - Создан документ `docs/COMMIT_PROCESS.md` с описанием процесса коммита и формата сообщений.
   - Создано правило `.cursor/rules/20-auto-commit.md` для автоматического коммита после изменений.
-  - Создан документ `docs/HOW_TO_GIVE_TASKS.md` с инструкцией, как ставить задачи ИИ для автоматической работы с документацией.
+  - Создан документ `docs/_archive/ai/HOW_TO_GIVE_TASKS.md` с инструкцией, как ставить задачи ИИ для автоматической работы с документацией.
   - Исправлена проблема с неотслеживаемыми файлами: создано правило `.cursor/rules/15-git-files.md` и обновлены правила для обязательного добавления всех файлов в git через `git add .`.
 - Files:
   - `CHANGELOG.md`
   - `AI_WORKLOG.md`
   - `docs/DECISIONS/0002-redis-integration-plan.md`
   - `docs/COMMIT_PROCESS.md`
-  - `docs/HOW_TO_GIVE_TASKS.md`
+  - `docs/_archive/ai/HOW_TO_GIVE_TASKS.md`
   - `.cursor/rules/20-auto-commit.md`
   - `.cursor/rules/15-git-files.md`
   - `.cursor/rules/10-artifacts.md`
@@ -293,8 +293,8 @@
   - `lib/updates_screen.dart`
   - `lib/config.dart`
   - `docs/COMMIT_PROCESS.md`
-  - `docs/REPORT_SINCE_2025-12-06.md`
-  - `docs/HOW_TO_GIVE_TASKS.md`
+  - `docs/_archive/reports/REPORT_SINCE_2025-12-06.md`
+  - `docs/_archive/ai/HOW_TO_GIVE_TASKS.md`
   - `.cursor/rules/10-artifacts.md`
   - `.cursor/commands/update-artifacts.md`
   - `CHANGELOG.md`

@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 /// что SoundService действительно вызывает нужные действия (а не просто "не падает").
 abstract class SoundBackend {
   Future<void> playDialing();
+  Future<void> playIncomingRingtone();
   Future<void> playConnected();
   Future<void> playDisconnected();
   Future<void> stopAll();
@@ -18,6 +19,9 @@ abstract class SoundBackend {
 class NoopSoundBackend implements SoundBackend {
   @override
   Future<void> playDialing() async {}
+
+  @override
+  Future<void> playIncomingRingtone() async {}
 
   @override
   Future<void> playConnected() async {}
@@ -59,10 +63,30 @@ class AudioplayersSoundBackend implements SoundBackend {
     if (dialing == null) return;
     try {
       // Устанавливаем источник каждый раз, это надежнее
-      await dialing.setSource(AssetSource('assets/sounds/dialing.mp3')).timeout(_timeout);
+      // Важно: AssetSource ожидает путь ОТНОСИТЕЛЬНО assets/ (сам добавляет префикс).
+      // Поэтому тут должно быть 'sounds/...' а не 'assets/sounds/...'
+      await dialing.setSource(AssetSource('sounds/dialing.mp3')).timeout(_timeout);
       await dialing.resume().timeout(_timeout);
-    } catch (_) {
-      // best-effort
+    } catch (e) {
+      // best-effort, но логируем для диагностики (эмулятор/устройство)
+      // ignore: avoid_print
+      print('SOUND: playDialing failed: $e');
+    }
+  }
+
+  @override
+  Future<void> playIncomingRingtone() async {
+    _ensurePlayers();
+    final dialing = _dialingPlayer;
+    if (dialing == null) return;
+    try {
+      // Рингтон входящего звонка — отдельный ассет.
+      // По умолчанию в репо он может быть копией dialing.mp3 (позже можно заменить).
+      await dialing.setSource(AssetSource('sounds/ringtone.mp3')).timeout(_timeout);
+      await dialing.resume().timeout(_timeout);
+    } catch (e) {
+      // ignore: avoid_print
+      print('SOUND: playIncomingRingtone failed: $e');
     }
   }
 
@@ -72,9 +96,10 @@ class AudioplayersSoundBackend implements SoundBackend {
     final notif = _notificationPlayer;
     if (notif == null) return;
     try {
-      await notif.play(AssetSource('assets/sounds/connected.mp3')).timeout(_timeout);
-    } catch (_) {
-      // best-effort
+      await notif.play(AssetSource('sounds/connected.mp3')).timeout(_timeout);
+    } catch (e) {
+      // ignore: avoid_print
+      print('SOUND: playConnected failed: $e');
     }
   }
 
@@ -84,9 +109,10 @@ class AudioplayersSoundBackend implements SoundBackend {
     final notif = _notificationPlayer;
     if (notif == null) return;
     try {
-      await notif.play(AssetSource('assets/sounds/disconnected.mp3')).timeout(_timeout);
-    } catch (_) {
-      // best-effort
+      await notif.play(AssetSource('sounds/disconnected.mp3')).timeout(_timeout);
+    } catch (e) {
+      // ignore: avoid_print
+      print('SOUND: playDisconnected failed: $e');
     }
   }
 
@@ -103,8 +129,9 @@ class AudioplayersSoundBackend implements SoundBackend {
       if (notif.state == PlayerState.playing) {
         await notif.stop().timeout(_timeout);
       }
-    } catch (_) {
-      // best-effort
+    } catch (e) {
+      // ignore: avoid_print
+      print('SOUND: stopAll failed: $e');
     }
   }
 }
@@ -151,6 +178,15 @@ class SoundService {
     } catch (e) {
       // best-effort: звук не должен валить приложение
       print("Ошибка playDialingSound: $e");
+    }
+  }
+
+  Future<void> playIncomingRingtone() async {
+    if (_isDisposed) return;
+    try {
+      await _backend.playIncomingRingtone();
+    } catch (e) {
+      print("Ошибка playIncomingRingtone: $e");
     }
   }
 

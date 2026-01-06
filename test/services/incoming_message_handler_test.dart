@@ -128,6 +128,112 @@ void main() {
       expect(buffer.sizeFor('SENDER_KEY'), 1);
     });
 
+    test('call-offer: дедуп по sender в коротком окне (не открывает 2 CallScreen подряд)', () async {
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb()..contactNames['SENDER_KEY'] = 'Alice';
+      final notif = _FakeNotif();
+
+      var now = 1000000;
+      int openCalls = 0;
+
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, __) async => 'x'),
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer}) {
+          openCalls += 1;
+        },
+        emitSignaling: (_) {},
+        emitChatUpdate: (_) {},
+        isAppInForeground: () => true,
+        isCallActive: () => false,
+        nowMs: () => now,
+      );
+
+      final offerMsg = {
+        'type': 'call-offer',
+        'sender_pubkey': 'SENDER_KEY',
+        'data': {'sdp': 'v=0...', 'type': 'offer'},
+      };
+
+      await handler.handleDecoded(offerMsg);
+      await handler.handleDecoded(offerMsg); // тот же момент времени -> должен быть проигнорирован
+
+      expect(openCalls, equals(1));
+      expect(notif.calls.where((c) => c.startsWith('showCall:')).length, equals(1));
+
+      // После окна дедупа следующий offer принимается.
+      now += 3000;
+      await handler.handleDecoded(offerMsg);
+      expect(openCalls, equals(2));
+    });
+
+    test('call-offer: TTL по server_ts_ms (слишком старый offer игнорируется)', () async {
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb();
+      final notif = _FakeNotif();
+
+      var now = 1000000;
+      int openCalls = 0;
+
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, __) async => 'x'),
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer}) {
+          openCalls += 1;
+        },
+        emitSignaling: (_) {},
+        emitChatUpdate: (_) {},
+        isAppInForeground: () => true,
+        isCallActive: () => false,
+        nowMs: () => now,
+      );
+
+      await handler.handleDecoded({
+        'type': 'call-offer',
+        'sender_pubkey': 'SENDER_KEY',
+        'server_ts_ms': now - 61 * 1000,
+        'data': {'sdp': 'old', 'type': 'offer'},
+      });
+
+      expect(openCalls, equals(0));
+      expect(notif.calls, isEmpty);
+    });
+
+    test('call-offer: если звонок уже активен — offer игнорируется', () async {
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb();
+      final notif = _FakeNotif();
+
+      int openCalls = 0;
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, __) async => 'x'),
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer}) {
+          openCalls += 1;
+        },
+        emitSignaling: (_) {},
+        emitChatUpdate: (_) {},
+        isAppInForeground: () => true,
+        isCallActive: () => true,
+        nowMs: () => 1000000,
+      );
+
+      await handler.handleDecoded({
+        'type': 'call-offer',
+        'sender_pubkey': 'SENDER_KEY',
+        'data': {'sdp': 'v=0...', 'type': 'offer'},
+      });
+
+      expect(openCalls, equals(0));
+      expect(notif.calls, isEmpty);
+    });
+
     test('hang-up/call-rejected: сначала signaling, затем hideCallNotification', () async {
       final buffer = IncomingCallBuffer.instance;
       final db = _FakeDb();
