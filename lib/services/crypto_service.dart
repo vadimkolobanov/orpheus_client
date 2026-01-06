@@ -20,6 +20,12 @@ class CryptoService {
   SimplePublicKey? _publicKey;
   DateTime? _registrationDate;
 
+  // Кэш байтов ключей (ускоряет encrypt/decrypt: не нужно extract() на каждый вызов)
+  // Риск/компромисс: приватный ключ и так уже находится в памяти в _keyPair,
+  // но кэш снижает CPU/await overhead и количество копирований данных.
+  List<int>? _privateKeyBytes;
+  List<int>? _publicKeyBytes;
+
   String? get publicKeyBase64 => _publicKey != null ? base64.encode(_publicKey!.bytes) : null;
   DateTime? get registrationDate => _registrationDate;
 
@@ -33,6 +39,10 @@ class CryptoService {
     if (privateKeyB64 != null && publicKeyB64 != null) {
       final privateKeyBytes = base64.decode(privateKeyB64);
       final publicKeyBytes = base64.decode(publicKeyB64);
+
+      // Кэшируем байты ключей (используются очень часто)
+      _privateKeyBytes = privateKeyBytes;
+      _publicKeyBytes = publicKeyBytes;
 
       _publicKey = SimplePublicKey(publicKeyBytes, type: KeyPairType.x25519);
       _keyPair = SimpleKeyPairData(
@@ -57,6 +67,9 @@ class CryptoService {
     final privateKeyData = await _keyPair!.extract();
     _publicKey = await _keyPair!.extractPublicKey();
 
+    _privateKeyBytes = privateKeyData.bytes;
+    _publicKeyBytes = _publicKey!.bytes;
+
     // Сохраняем дату создания аккаунта
     _registrationDate = DateTime.now();
     await _secureStorage.write(
@@ -76,6 +89,9 @@ class CryptoService {
       final privateKeyData = await _keyPair!.extract();
       _publicKey = await _keyPair!.extractPublicKey();
 
+      _privateKeyBytes = privateKeyData.bytes;
+      _publicKeyBytes = _publicKey!.bytes;
+
       await _saveKeys(privateKeyData.bytes, _publicKey!.bytes);
       print("Ключи успешно импортированы.");
     } catch (e) {
@@ -85,7 +101,10 @@ class CryptoService {
 
   Future<String> getPrivateKeyBase64() async {
     if (_keyPair == null) throw Exception("Нет ключей");
+    // Если кэш есть — не делаем extract() лишний раз.
+    if (_privateKeyBytes != null) return base64.encode(_privateKeyBytes!);
     final data = await _keyPair!.extract();
+    _privateKeyBytes = data.bytes;
     return base64.encode(data.bytes);
   }
 
@@ -103,6 +122,8 @@ class CryptoService {
     _keyPair = null;
     _publicKey = null;
     _registrationDate = null;
+    _privateKeyBytes = null;
+    _publicKeyBytes = null;
     
     print("Аккаунт удалён.");
   }
@@ -112,15 +133,19 @@ class CryptoService {
   Future<String> encrypt(String recipientPublicKeyBase64, String message) async {
     if (_keyPair == null) throw Exception("Ключи не инициализированы!");
 
-    // Извлекаем сырые байты, чтобы передать их в изолят
-    final keyData = await _keyPair!.extract();
-    final myPrivateKeyBytes = keyData.bytes;
-    final myPublicKeyBytes = (await _keyPair!.extractPublicKey()).bytes;
+    final myPrivateKeyBytes = _privateKeyBytes;
+    final myPublicKeyBytes = _publicKeyBytes;
+    if (myPrivateKeyBytes == null || myPublicKeyBytes == null) {
+      // Фоллбек для редких случаев (например, если _keyPair получен нестандартным путём)
+      final keyData = await _keyPair!.extract();
+      _privateKeyBytes = keyData.bytes;
+      _publicKeyBytes = (await _keyPair!.extractPublicKey()).bytes;
+    }
 
     // Запускаем тяжелую задачу в отдельном потоке
     return await compute(_encryptTask, {
-      'myPrivateKey': myPrivateKeyBytes,
-      'myPublicKey': myPublicKeyBytes,
+      'myPrivateKey': _privateKeyBytes!,
+      'myPublicKey': _publicKeyBytes!,
       'recipientPublicKey': recipientPublicKeyBase64,
       'message': message,
     });
@@ -129,13 +154,17 @@ class CryptoService {
   Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload) async {
     if (_keyPair == null) throw Exception("Ключи не инициализированы!");
 
-    final keyData = await _keyPair!.extract();
-    final myPrivateKeyBytes = keyData.bytes;
-    final myPublicKeyBytes = (await _keyPair!.extractPublicKey()).bytes;
+    final myPrivateKeyBytes = _privateKeyBytes;
+    final myPublicKeyBytes = _publicKeyBytes;
+    if (myPrivateKeyBytes == null || myPublicKeyBytes == null) {
+      final keyData = await _keyPair!.extract();
+      _privateKeyBytes = keyData.bytes;
+      _publicKeyBytes = (await _keyPair!.extractPublicKey()).bytes;
+    }
 
     return await compute(_decryptTask, {
-      'myPrivateKey': myPrivateKeyBytes,
-      'myPublicKey': myPublicKeyBytes,
+      'myPrivateKey': _privateKeyBytes!,
+      'myPublicKey': _publicKeyBytes!,
       'senderPublicKey': senderPublicKeyBase64,
       'payload': encryptedPayload,
     });

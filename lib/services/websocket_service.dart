@@ -113,7 +113,9 @@ class WebSocketService {
 
     final uri = Uri.parse(AppConfig.webSocketUrl(_currentPublicKey!, host: currentHost));
     _statusController.add(ConnectionStatus.Connecting);
-    print("WS: Попытка подключения к $uri...");
+    if (kDebugMode) {
+      print("WS: Попытка подключения к $uri...");
+    }
     DebugLogger.info('WS', 'Попытка подключения к $uri');
 
     try {
@@ -123,7 +125,9 @@ class WebSocketService {
         _channel = IOWebSocketChannel(ws);
         _statusController.add(ConnectionStatus.Connected);
         _reconnectAttempt = 0; // Сброс backoff при успешном подключении
-        print("WS: Соединение установлено!");
+        if (kDebugMode) {
+          print("WS: Соединение установлено!");
+        }
         DebugLogger.success('WS', 'Соединение установлено!');
 
         _sendFcmToken();
@@ -145,24 +149,32 @@ class WebSocketService {
             } catch (_) {}
           },
           onDone: () {
-            print("WS: Соединение закрыто (onDone).");
+            if (kDebugMode) {
+              print("WS: Соединение закрыто (onDone).");
+            }
             DebugLogger.warn('WS', 'Соединение закрыто (onDone)');
             _handleDisconnect();
           },
           onError: (error) {
-            print("WS ERROR: Ошибка сокета: $error");
+            if (kDebugMode) {
+              print("WS ERROR: Ошибка сокета: $error");
+            }
             DebugLogger.error('WS', 'Ошибка сокета: $error');
             _handleDisconnect();
           },
         );
       }).catchError((e) {
-        print("WS FATAL: Не удалось подключиться: $e");
+        if (kDebugMode) {
+          print("WS FATAL: Не удалось подключиться: $e");
+        }
         DebugLogger.error('WS', 'FATAL: Не удалось подключиться: $e');
         _rotateHost();
         _handleDisconnect();
       });
     } catch (e) {
-      print("WS EXCEPTION: $e");
+      if (kDebugMode) {
+        print("WS EXCEPTION: $e");
+      }
       DebugLogger.error('WS', 'EXCEPTION: $e');
       _rotateHost();
       _handleDisconnect();
@@ -178,7 +190,9 @@ class WebSocketService {
   void _sendFcmToken() {
     final token = NotificationService().fcmToken;
     if (token != null) {
-      print("WS: Отправка FCM токена на сервер...");
+      if (kDebugMode) {
+        print("WS: Отправка FCM токена на сервер...");
+      }
       DebugLogger.info('WS', 'Отправка FCM токена: ${token.substring(0, 20)}...');
       final msg = json.encode({
         "type": "register-fcm",
@@ -186,7 +200,9 @@ class WebSocketService {
       });
       _channel?.sink.add(msg);
     } else {
-      print("WS WARN: FCM токен не готов, пропускаем отправку.");
+      if (kDebugMode) {
+        print("WS WARN: FCM токен не готов, пропускаем отправку.");
+      }
       DebugLogger.warn('WS', 'FCM токен не готов, пропускаем отправку');
     }
   }
@@ -202,11 +218,15 @@ class WebSocketService {
     if (!_isDisconnectingIntentional) {
       final delay = _getReconnectDelay();
       _reconnectAttempt++;
-      print("WS: Планирование переподключения через $delay сек (попытка $_reconnectAttempt)...");
+      if (kDebugMode) {
+        print("WS: Планирование переподключения через $delay сек (попытка $_reconnectAttempt)...");
+      }
       DebugLogger.info('WS', 'Планирование переподключения через $delay сек (попытка $_reconnectAttempt)...');
       _reconnectTimer?.cancel();
       _reconnectTimer = Timer(Duration(seconds: delay), () {
-        print("WS: Попытка реконнекта #$_reconnectAttempt...");
+        if (kDebugMode) {
+          print("WS: Попытка реконнекта #$_reconnectAttempt...");
+        }
         DebugLogger.info('WS', 'Попытка реконнекта #$_reconnectAttempt...');
         _initConnection();
       });
@@ -221,7 +241,9 @@ class WebSocketService {
     _networkSubscription = null;
 
     if (_channel != null) {
-      print("WS: Отключение...");
+      if (kDebugMode) {
+        print("WS: Отключение...");
+      }
       _channel!.sink.close();
       _channel = null;
     }
@@ -242,7 +264,9 @@ class WebSocketService {
         try {
           _channel!.sink.add(json.encode({"type": "ping"}));
         } catch (e) {
-          print("WS: Ошибка отправки пинга: $e");
+          if (kDebugMode) {
+            print("WS: Ошибка отправки пинга: $e");
+          }
         }
       }
     });
@@ -310,18 +334,24 @@ class WebSocketService {
     final statusStr = currentStatus.toString().split('.').last;
     
     if (isImportant) {
-      print("📤📞 WS SEND [$type] → ${recipientPublicKey.substring(0, 8)}... | Status: $statusStr | Channel: ${_channel != null ? 'OK' : 'NULL'}");
+      if (kDebugMode) {
+        print("📤📞 WS SEND [$type] → ${recipientPublicKey.substring(0, 8)}... | Status: $statusStr | Channel: ${_channel != null ? 'OK' : 'NULL'}");
+      }
       DebugLogger.info('SIGNAL', '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}... | Status: $statusStr | Ch: ${_channel != null ? 'OK' : 'NULL'}');
       
       // Если WebSocket недоступен - сразу HTTP
       if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
-        print("⚠️ WS недоступен для [$type] - используем HTTP fallback");
+        if (kDebugMode) {
+          print("⚠️ WS недоступен для [$type] - используем HTTP fallback");
+        }
         DebugLogger.warn('SIGNAL', 'WS недоступен для [$type] - используем HTTP fallback');
         _sendSignalViaHttpWithData(recipientPublicKey, type, data);
         return;
       }
     } else {
-      print("📤 WS SEND $type → ${recipientPublicKey.substring(0, 8)}... Size: ${data.toString().length}");
+      if (kDebugMode) {
+        print("📤 WS SEND $type → ${recipientPublicKey.substring(0, 8)}... Size: ${data.toString().length}");
+      }
       DebugLogger.info('SIGNAL', '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}...');
     }
     
@@ -364,14 +394,20 @@ class WebSocketService {
       final successCount = results.where((r) => r).length;
       
       if (successCount > 0) {
-        print("✅ HTTP: [$signalType] доставлен на $successCount/${futures.length} хостов");
+        if (kDebugMode) {
+          print("✅ HTTP: [$signalType] доставлен на $successCount/${futures.length} хостов");
+        }
         DebugLogger.success('HTTP', '[$signalType] доставлен на $successCount/${futures.length} хостов');
       } else {
-        print("❌ HTTP: [$signalType] не удалось доставить ни на один хост");
+        if (kDebugMode) {
+          print("❌ HTTP: [$signalType] не удалось доставить ни на один хост");
+        }
         DebugLogger.error('HTTP', '[$signalType] не удалось доставить ни на один хост');
       }
     } catch (e) {
-      print("❌ HTTP: [$signalType] исключение: $e");
+      if (kDebugMode) {
+        print("❌ HTTP: [$signalType] исключение: $e");
+      }
       DebugLogger.error('HTTP', '[$signalType] исключение: $e');
     }
   }
@@ -407,9 +443,13 @@ class WebSocketService {
     
     if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
       if (isImportant) {
-        print("⚠️ WS ERROR: Не удалось отправить [$type] - нет соединения! Status: ${_statusController.value}");
+        if (kDebugMode) {
+          print("⚠️ WS ERROR: Не удалось отправить [$type] - нет соединения! Status: ${_statusController.value}");
+        }
       } else {
-        print("WS ERROR: Нет соединения для отправки сообщения.");
+        if (kDebugMode) {
+          print("WS ERROR: Нет соединения для отправки сообщения.");
+        }
       }
       return;
     }
@@ -417,7 +457,9 @@ class WebSocketService {
     _channel!.sink.add(json.encode(map));
     
     if (isImportant) {
-      print("✅ WS: [$type] успешно отправлен в канал");
+      if (kDebugMode) {
+        print("✅ WS: [$type] успешно отправлен в канал");
+      }
     }
   }
 }

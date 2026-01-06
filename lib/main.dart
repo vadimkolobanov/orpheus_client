@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
@@ -58,36 +59,52 @@ void main() async {
   Intl.defaultLocale = 'ru';
   await initializeDateFormatting('ru');
 
-  try {
-    // 1. Firebase
-    DebugLogger.info('APP', 'Инициализация Firebase...');
-    await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    DebugLogger.success('APP', 'Firebase инициализирован');
-    
-    // 2. Уведомления (простая инициализация)
-    DebugLogger.info('APP', 'Инициализация уведомлений...');
-    await notificationService.init();
-    DebugLogger.success('APP', 'Уведомления инициализированы');
+  // Инициализация сервисов: распараллеливаем независимые шаги,
+  // чтобы сократить время до первого кадра (без изменения итоговой логики).
+  final firebaseAndNotifications = () async {
+    try {
+      // 1. Firebase
+      DebugLogger.info('APP', 'Инициализация Firebase...');
+      await Firebase.initializeApp();
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      DebugLogger.success('APP', 'Firebase инициализирован');
 
-    // 3. BackgroundCallService (только инициализация, не запуск)
-    DebugLogger.info('APP', 'Инициализация BackgroundCallService...');
-    await BackgroundCallService.initialize();
-    DebugLogger.success('APP', 'BackgroundCallService инициализирован');
-  } catch (e) {
-    print("INIT ERROR: $e");
-    DebugLogger.error('APP', 'INIT ERROR: $e');
-  }
+      // 2. Уведомления
+      DebugLogger.info('APP', 'Инициализация уведомлений...');
+      await notificationService.init();
+      DebugLogger.success('APP', 'Уведомления инициализированы');
 
-  // 4. Криптография
+      // 3. BackgroundCallService (только инициализация, не запуск)
+      DebugLogger.info('APP', 'Инициализация BackgroundCallService...');
+      await BackgroundCallService.initialize();
+      DebugLogger.success('APP', 'BackgroundCallService инициализирован');
+    } catch (e) {
+      if (kDebugMode) {
+        // В релизе избегаем лишнего IO в stdout.
+        print("INIT ERROR: $e");
+      }
+      DebugLogger.error('APP', 'INIT ERROR: $e');
+    }
+  }();
+
+  // 4. Криптография (нужна до runApp для выбора стартового экрана)
   DebugLogger.info('APP', 'Инициализация криптографии...');
-  _hasKeys = await cryptoService.init();
-  DebugLogger.info('APP', 'Ключи: ${_hasKeys ? "ЕСТЬ" : "НЕТ"}');
+  final cryptoInit = cryptoService.init();
 
-  // 5. Сервис авторизации (PIN, duress)
+  // 5. AuthService (PIN/duress) — также нужен до runApp (LockScreen)
   DebugLogger.info('APP', 'Инициализация AuthService...');
-  await authService.init();
+  final authInit = authService.init();
+
+  // 7. Network Monitor Service (мониторинг сети для реконнекта)
+  DebugLogger.info('APP', 'Инициализация NetworkMonitorService...');
+  final networkInit = NetworkMonitorService.instance.init();
+
+  await Future.wait([firebaseAndNotifications, cryptoInit, authInit, networkInit]);
+
+  _hasKeys = await cryptoInit;
+  DebugLogger.info('APP', 'Ключи: ${_hasKeys ? "ЕСТЬ" : "НЕТ"}');
   DebugLogger.info('APP', 'AuthService: PIN=${authService.config.isPinEnabled}, duress=${authService.config.isDuressEnabled}');
+  DebugLogger.success('APP', 'NetworkMonitorService инициализирован');
 
   // 6. Panic Wipe Service (тройное нажатие кнопки питания)
   panicWipeService.init();
@@ -96,11 +113,6 @@ void main() async {
     // После wipe перезапускаем приложение
     _hasKeys = false;
   };
-
-  // 7. Network Monitor Service (мониторинг сети для реконнекта)
-  DebugLogger.info('APP', 'Инициализация NetworkMonitorService...');
-  await NetworkMonitorService.instance.init();
-  DebugLogger.success('APP', 'NetworkMonitorService инициализирован');
 
   // 8. WebSocket подключение
   if (_hasKeys && cryptoService.publicKeyBase64 != null) {
@@ -216,21 +228,27 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       }
     };
     
-    print("🔑 Keys exist: $_keysExist | Public key: ${cryptoService.publicKeyBase64?.substring(0, 20) ?? 'NULL'}...");
-    print("🔒 Locked: $_isLocked | PIN enabled: ${authService.config.isPinEnabled}");
+    if (kDebugMode) {
+      print("🔑 Keys exist: $_keysExist | Public key: ${cryptoService.publicKeyBase64?.substring(0, 20) ?? 'NULL'}...");
+      print("🔒 Locked: $_isLocked | PIN enabled: ${authService.config.isPinEnabled}");
+    }
 
     // Слушаем статус лицензии
     websocketService.stream.listen((message) {
       try {
         final data = json.decode(message);
         if (data['type'] == 'license-status') {
-          print("📋 License status received: ${data['status']}");
+          if (kDebugMode) {
+            print("📋 License status received: ${data['status']}");
+          }
           setState(() {
             _isLicensed = (data['status'] == 'active');
             _isCheckCompleted = true;
           });
         } else if (data['type'] == 'payment-confirmed') {
-          print("💳 Payment confirmed!");
+          if (kDebugMode) {
+            print("💳 Payment confirmed!");
+          }
           setState(() {
             _isLicensed = true;
             _isCheckCompleted = true;
@@ -243,7 +261,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // Если за это время не получили ответ — показываем экран лицензии
     Future.delayed(const Duration(seconds: 10), () {
       if (mounted && !_isCheckCompleted) {
-        print("⚠️ License check timeout - showing license screen");
+        if (kDebugMode) {
+          print("⚠️ License check timeout - showing license screen");
+        }
         setState(() {
           _isCheckCompleted = true;
           _isLicensed = false;
