@@ -19,4 +19,12 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+
+    <!-- Fullscreen incoming call UI (native) -->
+    <style name="IncomingCallTheme" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
 </resources>

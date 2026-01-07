@@ -9,6 +9,7 @@ import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/sound_service.dart';
+import 'package:orpheus_project/services/telecom_pending_actions_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
@@ -17,16 +18,20 @@ import 'package:orpheus_project/widgets/call/background_painters.dart';
 import 'package:orpheus_project/widgets/call/control_panel.dart';
 import 'package:orpheus_project/widgets/badge_widget.dart';
 
-enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed, Reconnecting }
+enum CallState { Dialing, Incoming, IncomingWaitingOffer, Connecting, Connected, Rejected, Failed, Reconnecting }
 
 class CallScreen extends StatefulWidget {
   final String contactPublicKey;
   final Map<String, dynamic>? offer;
+  /// Для Android Telecom: если пользователь нажал Answer в системном UI,
+  /// то при открытии CallScreen мы можем авто-нажать “Принять” (после получения offer по WS).
+  final bool autoAnswer;
 
   const CallScreen({
     super.key,
     required this.contactPublicKey,
     this.offer,
+    this.autoAnswer = false,
   });
 
   @override
@@ -47,6 +52,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   // Состояние звонка
   CallState _callState = CallState.Dialing;
+  Map<String, dynamic>? _lateIncomingOffer;
+  bool _autoAnswered = false;
   String _displayName = "Аноним";
   String _debugStatus = "Init";
   String _durationText = "00:00";
@@ -70,6 +77,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   // Флаги жизненного цикла
   bool _isDisposed = false;
   bool _messagesSent = false;
+  
+  // Защита от случайных тапов: время создания экрана
+  late final DateTime _screenCreatedAt;
+  
+  // Блокировка ввода для autoAnswer (защита от "остаточных" тапов)
+  // После нажатия Accept на нативном экране, палец ещё на экране
+  // и этот тап может попасть на кнопку Завершить в Flutter UI
+  bool _inputBlocked = false;
+  Timer? _inputBlockTimer;
 
   // Логирование
   bool _showDebugLogs = false;
@@ -92,6 +108,24 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    
+    // Защита от случайных тапов: запоминаем время создания
+    _screenCreatedAt = DateTime.now();
+    
+    // Защита от "остаточных" тапов для autoAnswer:
+    // После Accept на нативном экране палец ещё на экране,
+    // и этот тап может попасть на кнопку Завершить.
+    // Блокируем весь ввод на 2 секунды.
+    if (widget.autoAnswer) {
+      _inputBlocked = true;
+      _inputBlockTimer = Timer(const Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() => _inputBlocked = false);
+          DebugLogger.info('CALL', '🔓 Input unblocked after 2s');
+        }
+      });
+      DebugLogger.info('CALL', '🔒 Input blocked for 2s (autoAnswer protection)');
+    }
 
     // Гарантия: пока открыт CallScreen, автолок приложения не должен мешать ответу/разговору.
     CallStateService.instance.setCallActive(true);
@@ -102,10 +136,36 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _displayName = widget.contactPublicKey.substring(0, 8);
     _resolveContactName();
 
-    _callState = widget.offer != null ? CallState.Incoming : CallState.Dialing;
+    // ВАЖНО:
+    // - offer != null => обычный incoming
+    // - autoAnswer + offer == null => Accept был в нативном Telecom UI, но offer ещё не доставлен (WS/оффлайн).
+    //   В этом режиме мы НЕ начинаем исходящий звонок, а ждём call-offer по signaling.
+    _callState = widget.offer != null
+        ? CallState.Incoming
+        : (widget.autoAnswer ? CallState.IncomingWaitingOffer : CallState.Dialing);
 
-    // 1. Запуск foreground service для звонка
-    _startBackgroundMode();
+    DebugLogger.info('CALL', 'CallScreen init: autoAnswer=${widget.autoAnswer}, offer=${widget.offer != null}, state=$_callState');
+
+    // Android Telecom: авто-принятие возможно только когда появился offer.
+    // - Если offer пришёл сразу (в pending_accept) — отвечаем после первого кадра.
+    // - Если offer придёт позже по WS (call-offer) — ответим в обработчике signaling ниже.
+    if (widget.autoAnswer && widget.offer != null) {
+      DebugLogger.info('CALL', 'autoAnswer with offer — will accept on next frame');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_isDisposed) return;
+        _acceptCallWithOffer(widget.offer!);
+      });
+    } else if (widget.autoAnswer && widget.offer == null) {
+      DebugLogger.info('CALL', 'autoAnswer WITHOUT offer — waiting for late call-offer via WS');
+    }
+
+    // 1. Foreground service для активного звонка.
+    // ВАЖНО: для incoming, принятых через Android Telecom (autoAnswer), запуск flutter_background_service
+    // поднимает отдельный FlutterEngine/изолят и может мешать WebRTC (гонки/FlutterJNI detached).
+    // Для таких звонков service считаем best-effort и пропускаем.
+    if (!widget.autoAnswer) {
+      _startBackgroundMode();
+    }
 
     // 2. Скрываем уведомление о входящем звонке (экран уже открыт)
     NotificationService.hideCallNotification();
@@ -379,7 +439,25 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       final type = signal['type'];
       final data = signal['data'];
 
-      if (type == 'call-answer') {
+      if (type == 'call-offer') {
+        // Поздний offer: может прийти после нажатия Answer в нативном Telecom UI.
+        DebugLogger.info('CALL', 'Received call-offer signal: autoAnswer=${widget.autoAnswer}, autoAnswered=$_autoAnswered, state=$_callState');
+        if (data is Map<String, dynamic> &&
+            widget.autoAnswer &&
+            !_autoAnswered &&
+            (_callState == CallState.IncomingWaitingOffer || widget.offer == null)) {
+          _autoAnswered = true;
+          _lateIncomingOffer = data;
+          if (mounted) setState(() => _callState = CallState.Connecting);
+          _addLog("📥 call-offer (late) — autoAnswer");
+          DebugLogger.success('CALL', 'Late call-offer received, accepting automatically');
+          _acceptCallWithOffer(data);
+          // Теперь autoAnswer можно очищать: offer пришёл и мы начали реальный answer.
+          TelecomPendingActionsService.instance.markAutoAnswerConsumed();
+        } else {
+          DebugLogger.info('CALL', 'call-offer ignored: conditions not met');
+        }
+      } else if (type == 'call-answer') {
         if (mounted) setState(() => _debugStatus = "Answer received");
         await _webrtcService.handleAnswer(data);
         if (_callState != CallState.Connected && mounted) {
@@ -417,9 +495,12 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (_callState == CallState.Dialing) {
       SoundService.instance.playDialingSound();
       _startOutgoingCall();
-    } else {
+    } else if (_callState == CallState.Incoming) {
       // Входящий звонок: отдельный рингтон (не "гудок" исходящего).
       SoundService.instance.playIncomingRingtone();
+    } else if (_callState == CallState.IncomingWaitingOffer) {
+      // Accept уже был на нативной стороне. Рингтон не нужен, просто ждём offer.
+      SoundService.instance.stopAllSounds();
     }
   }
 
@@ -444,12 +525,18 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _acceptCall() async {
+    // legacy wrapper: оставить для старых путей
+    if (widget.offer == null) return;
+    _acceptCallWithOffer(widget.offer!);
+  }
+
+  void _acceptCallWithOffer(Map<String, dynamic> offer) async {
     SoundService.instance.stopAllSounds();
     if (mounted) setState(() => _callState = CallState.Connecting);
 
     try {
       await _webrtcService.answerCall(
-        offer: widget.offer!,
+        offer: offer,
         onAnswerCreated: (ans) {
           _addLog("📤 call-answer");
           websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', ans);
@@ -465,14 +552,39 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _endCallButton() async {
-    if (_messagesSent) return;  // Предотвращаем повторные вызовы
+    // Логируем stack trace для отладки кто вызвал
+    DebugLogger.info('CALL', '_endCallButton called, stack: ${StackTrace.current.toString().split('\n').take(5).join(' | ')}');
+    
+    // ЗАЩИТА ОТ СЛУЧАЙНЫХ ТАПОВ:
+    // Для autoAnswer звонков (из Telecom) игнорируем тапы в первые 5 секунд.
+    // Это предотвращает случайное завершение когда палец уже на экране при появлении UI.
+    // Также защищает от случайных тапов пока соединение устанавливается.
+    if (widget.autoAnswer && _callState != CallState.Connected) {
+      final elapsed = DateTime.now().difference(_screenCreatedAt);
+      if (elapsed.inSeconds < 5) {
+        DebugLogger.warn('CALL', '🛡️ _endCallButton BLOCKED: too early (${elapsed.inMilliseconds}ms < 5000ms, autoAnswer protection)');
+        return;
+      }
+    }
+    
+    if (_messagesSent) {
+      DebugLogger.info('CALL', '_endCallButton: already sent, ignoring');
+      return;  // Предотвращаем повторные вызовы
+    }
     _messagesSent = true;
+    
+    // КРИТИЧНО: очищаем pending чтобы следующий звонок не использовал старые данные
+    TelecomPendingActionsService.instance.markAutoAnswerConsumed();
 
     final currentState = _callState;
-    String signal = currentState == CallState.Incoming ? 'call-rejected' : 'hang-up';
+    String signal =
+        (currentState == CallState.Incoming || currentState == CallState.IncomingWaitingOffer)
+            ? 'call-rejected'
+            : 'hang-up';
 
     // СНАЧАЛА отправляем hang-up сигнал
     print("📞 Отправка $signal к ${widget.contactPublicKey.substring(0, 8)}...");
+    DebugLogger.info('CALL', 'Sending $signal (state=$currentState)');
     websocketService.sendSignalingMessage(widget.contactPublicKey, signal, {});
 
     // Небольшая задержка чтобы WebSocket успел отправить сообщение
@@ -482,7 +594,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (currentState == CallState.Connected) {
       _saveCallStatusMessageLocally("Исходящий звонок", true);
       _sendCallStatusMessageToContact("Входящий звонок");
-    } else if (currentState == CallState.Incoming) {
+    } else if (currentState == CallState.Incoming || currentState == CallState.IncomingWaitingOffer) {
       _saveCallStatusMessageLocally("Пропущен звонок", false);
     } else if (currentState == CallState.Dialing) {
       _saveCallStatusMessageLocally("Исходящий звонок", true);
@@ -637,6 +749,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         return "Вызов...";
       case CallState.Incoming:
         return "Входящий звонок";
+      case CallState.IncomingWaitingOffer:
+        return "Принято. Ожидание данных звонка...";
       case CallState.Connecting:
         return "Соединение...";
       case CallState.Reconnecting:
@@ -696,8 +810,16 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    DebugLogger.info('CALL', 'dispose() called, state=$_callState, messagesSent=$_messagesSent');
+    
+    // КРИТИЧНО: очищаем pending в памяти чтобы следующий звонок не использовал старые данные
+    TelecomPendingActionsService.instance.markAutoAnswerConsumed();
+    
     CallStateService.instance.setCallActive(false);
     CallNativeUiService.disableCallMode();
+    
+    // КРИТИЧНО: очищаем нативный active_call чтобы следующие звонки не блокировались.
+    CallNativeUiService.clearActiveTelecomCall();
 
     // 1. Останавливаем foreground service
     BackgroundCallService.stopCallService();
@@ -708,9 +830,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     // 3. Отправляем HangUp если закрыли свайпом (не через кнопку)
     if (!_messagesSent) {
       final finalState = _callState;
-      print("📞 Dispose: отправка hang-up (state=$finalState)");
-      
       if (finalState == CallState.Connected || finalState == CallState.Dialing) {
+        DebugLogger.info('CALL', 'Dispose: sending hang-up (state=$finalState)');
+        print("📞 Dispose: отправка hang-up (state=$finalState)");
         websocketService.sendSignalingMessage(widget.contactPublicKey, 'hang-up', {});
 
         if (finalState == CallState.Connected) {
@@ -720,7 +842,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           _saveCallStatusMessageLocally("Исходящий звонок", true);
           _sendCallStatusMessageToContact("Пропущен звонок");
         }
-      } else if (finalState == CallState.Incoming) {
+      } else if (finalState == CallState.Incoming || finalState == CallState.IncomingWaitingOffer) {
+        print("📞 Dispose: отправка call-rejected (state=$finalState)");
         websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-rejected', {});
         _saveCallStatusMessageLocally("Пропущен звонок", false);
       }
@@ -735,6 +858,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _stopwatch.stop();
     _durationTimer?.cancel();
     _waveTimer?.cancel();
+    _inputBlockTimer?.cancel();
     _signalingSubscription?.cancel();
     _webrtcLogSubscription?.cancel();
     _networkSubscription?.cancel();
@@ -748,8 +872,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
+    // Блокировка ввода для autoAnswer (защита от "остаточных" тапов)
+    return AbsorbPointer(
+      absorbing: _inputBlocked,
+      child: Scaffold(
+        body: Stack(
         fit: StackFit.expand,
         children: [
           // 1. Анимированный фон
@@ -1032,6 +1159,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               ),
             ),
         ],
+      ),
       ),
     );
   }

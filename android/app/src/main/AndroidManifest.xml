@@ -23,6 +23,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
+    <!-- Telecom (self-managed ConnectionService для VoIP звонков) -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+
     <!-- Автозапуск после перезагрузки (BootReceiver) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -78,6 +81,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Fullscreen incoming call UI for self-managed Telecom calls -->
+        <activity
+            android:name=".OrpheusIncomingCallActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/IncomingCallTheme" />
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
@@ -89,6 +102,29 @@
             android:exported="true"
             tools:replace="android:exported,android:foregroundServiceType"
             />
+
+        <!-- ===== Incoming calls via Telecom (ConnectionService) ===== -->
+        <service
+            android:name=".OrpheusConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+
+        <!-- ===== FCM: заменяем flutterfire FirebaseMessagingService на наш (для Telecom-call data-only) ===== -->
+        <service
+            android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService"
+            tools:node="remove" />
+
+        <service
+            android:name=".OrpheusFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <!-- Автозапуск после перезагрузки устройства -->
         <receiver

@@ -21,6 +21,8 @@ import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/panic_wipe_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
 import 'package:orpheus_project/services/presence_service.dart';
+import 'package:orpheus_project/services/call_native_ui_service.dart';
+import 'package:orpheus_project/services/telecom_pending_actions_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/theme/app_theme.dart';
 import 'package:orpheus_project/welcome_screen.dart';
@@ -49,7 +51,11 @@ bool _hasKeys = false;
 bool isAppInForeground = true;
 
 void main() async {
+  // КРИТИЧНО: самый ранний лог до любой инициализации
+  print('[MAIN] ========== main() STARTED ==========');
+  
   WidgetsFlutterBinding.ensureInitialized();
+  print('[MAIN] WidgetsFlutterBinding initialized');
   
   DebugLogger.info('APP', '🚀 Orpheus запускается...');
 
@@ -76,6 +82,13 @@ void main() async {
     print("INIT ERROR: $e");
     DebugLogger.error('APP', 'INIT ERROR: $e');
   }
+
+  // Android Telecom: если приложение стартует из системного incoming UI (Answer),
+  // важно съесть pending accept ДО того, как мы начнём обрабатывать WS call-offer,
+  // иначе возможна гонка (offer придёт раньше и autoAnswer не сработает).
+  try {
+    await TelecomPendingActionsService.instance.consumeNativePendingAccept();
+  } catch (_) {}
 
   // 4. Криптография
   DebugLogger.info('APP', 'Инициализация криптографии...');
@@ -120,13 +133,42 @@ void _listenForMessages() {
     notifications: _IncomingNotificationsAdapter(),
     callBuffer: incomingCallBuffer,
     openCallScreen: ({required contactPublicKey, required offer}) {
+      final shouldAutoAnswer =
+          TelecomPendingActionsService.instance.shouldAutoAnswerForCaller(contactPublicKey);
+      if (shouldAutoAnswer) {
+        TelecomPendingActionsService.instance.markAutoAnswerConsumed();
+      }
       navigatorKey.currentState?.push(MaterialPageRoute(
-        builder: (context) => CallScreen(contactPublicKey: contactPublicKey, offer: offer),
+        builder: (context) => CallScreen(
+          contactPublicKey: contactPublicKey,
+          offer: offer,
+          autoAnswer: shouldAutoAnswer,
+        ),
       ));
     },
     emitSignaling: (msg) => signalingStreamController.add(msg),
     emitChatUpdate: (senderKey) => messageUpdateController.add(senderKey),
     isAppInForeground: () => isAppInForeground,
+    isCallActive: () => CallStateService.instance.isCallActive.value,
+    suppressCallNotification: (senderKey) =>
+        TelecomPendingActionsService.instance.shouldAutoAnswerForCaller(senderKey),
+    tryShowTelecomIncoming: ({
+      required String senderPublicKey,
+      required String callerName,
+      required Map<String, dynamic> offer,
+      required int? serverTsMs,
+      required String? callId,
+    }) async {
+      // Best-effort: поднимаем Telecom UI в фоне, кешируя offer в native.
+      final ok = await CallNativeUiService.showTelecomIncomingCall(
+        callerKey: senderPublicKey,
+        callerName: callerName,
+        offerJson: json.encode(offer),
+        callId: callId,
+        serverTsMs: serverTsMs,
+      );
+      return ok;
+    },
   );
 
   websocketService.stream.listen((messageJson) async {
@@ -218,6 +260,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     print("🔑 Keys exist: $_keysExist | Public key: ${cryptoService.publicKeyBase64?.substring(0, 20) ?? 'NULL'}...");
     print("🔒 Locked: $_isLocked | PIN enabled: ${authService.config.isPinEnabled}");
 
+    // Android Telecom: забираем pending Answer/Reject из нативной части (best-effort).
+    _consumeTelecomPendingActionsBestEffort();
+
     // Слушаем статус лицензии
     _licenseSubscription = websocketService.stream.listen((message) {
       try {
@@ -256,6 +301,65 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         });
       }
     });
+  }
+
+  Future<void> _consumeTelecomPendingActionsBestEffort() async {
+    try {
+      DebugLogger.info('MAIN', '_consumeTelecomPendingActionsBestEffort started');
+      
+      // ВАЖНО: consumeNativePendingAccept() уже был вызван в main() при старте.
+      // Здесь мы сначала проверяем, есть ли уже pending в ПАМЯТИ (от предыдущего consume).
+      // Если нет — пробуем снова из native (на случай если resumed без полного перезапуска).
+      
+      var callerKey = TelecomPendingActionsService.instance.peekPendingAcceptedCallerKey();
+      DebugLogger.info('MAIN', 'Existing pending in memory: ${callerKey != null ? "yes ($callerKey)" : "no"}');
+      
+      if (callerKey == null) {
+        // Пробуем забрать из native (возможно resumed без перезапуска)
+        final hasAccept = await TelecomPendingActionsService.instance.consumeNativePendingAccept();
+        DebugLogger.info('MAIN', 'consumeNativePendingAccept: hasAccept=$hasAccept');
+        if (hasAccept) {
+          callerKey = TelecomPendingActionsService.instance.peekPendingAcceptedCallerKey();
+        }
+      }
+      
+      if (callerKey != null && callerKey.isNotEmpty) {
+        DebugLogger.info('MAIN', 'Pending accept for callerKey=$callerKey');
+        
+        final offer =
+            TelecomPendingActionsService.instance.takePendingAcceptedOfferIfMatches(callerKey);
+        DebugLogger.info('MAIN', 'Offer from pending: ${offer != null ? "present" : "null"}');
+        
+        // Если offer_data уже есть (кеш из native/WS) — откроем CallScreen и сразу ответим.
+        // Если offer_data НЕТ (часто при FCM data-only из-за лимита 4KB), всё равно открываем CallScreen,
+        // но он будет ждать поздний call-offer по WS (IncomingWaitingOffer) и авто-ответит когда offer появится.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          DebugLogger.info('MAIN', 'Opening CallScreen for Telecom accept (offer=${offer != null})');
+          navigatorKey.currentState?.push(MaterialPageRoute(
+            builder: (context) => CallScreen(
+              contactPublicKey: callerKey!,
+              offer: offer, // может быть null
+              autoAnswer: true,
+            ),
+          ));
+          // НЕ очищаем autoAnswer сразу, если offer нет — он нужен чтобы подавить нотификации/дубли,
+          // пока offer не придёт и CallScreen не ответит.
+          if (offer != null) {
+            TelecomPendingActionsService.instance.markAutoAnswerConsumed();
+          }
+        });
+      }
+
+      // 2) Reject: best-effort отправка по WS (если соединение поднято/поднимется быстро).
+      final rejectedCallerKey =
+          await TelecomPendingActionsService.instance.consumeNativePendingRejectCallerKey();
+      if (rejectedCallerKey != null && rejectedCallerKey.isNotEmpty) {
+        DebugLogger.info('MAIN', 'Sending call-rejected for $rejectedCallerKey');
+        websocketService.sendSignalingMessage(rejectedCallerKey, 'call-rejected', {});
+      }
+    } catch (e) {
+      DebugLogger.error('MAIN', '_consumeTelecomPendingActionsBestEffort error: $e');
+    }
   }
 
   void _onAuthComplete() {
@@ -307,6 +411,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     
     if (state == AppLifecycleState.resumed) {
       DebugLogger.info('LIFECYCLE', 'Приложение в foreground, переподключение WS...');
+      // ВАЖНО: если пользователь нажал Answer/Reject в нативном incoming UI,
+      // приложение может просто "resumed" (без полного перезапуска) — нужно забрать pending действия здесь.
+      _consumeTelecomPendingActionsBestEffort();
       // Переподключение WebSocket при возврате в приложение
       if (cryptoService.publicKeyBase64 != null) {
         websocketService.connect(cryptoService.publicKeyBase64!);

@@ -34,3 +34,4 @@
 Формат и автоматизация: `docs/COMMIT_PROCESS.md`.
 
 
+

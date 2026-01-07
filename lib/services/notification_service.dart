@@ -223,9 +223,17 @@ class NotificationService {
   static bool shouldShowLocalNotification({
     required bool hasNotificationPayload,
     required Map<String, dynamic> data,
+    @visibleForTesting bool? isAndroid,
   }) {
     if (hasNotificationPayload) return false;
     final type = data['type'];
+    // Telecom-mode: для входящих звонков native (data-only) — не показываем локальную call-нотификацию,
+    // иначе получим дубли с системным incoming UI.
+    final nativeTelecom = (data['native_telecom']?.toString() == '1' || data['native_telecom']?.toString() == 'true');
+    final android = isAndroid ?? (!kIsWeb && Platform.isAndroid);
+    if (android && nativeTelecom && (type == 'incoming_call' || type == 'call')) {
+      return false;
+    }
     return type == 'incoming_call' ||
         type == 'call' ||
         type == 'new_message' ||

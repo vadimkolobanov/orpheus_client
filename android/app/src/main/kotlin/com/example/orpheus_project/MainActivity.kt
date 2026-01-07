@@ -9,22 +9,49 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.util.Log
 import android.provider.Settings
 import android.content.Context
 import android.os.Bundle
 import android.app.NotificationManager
 import android.app.KeyguardManager
 import android.os.Build.VERSION_CODES
-
 class MainActivity: FlutterFragmentActivity() {
+    private val TAG = "MainActivity"
     private val BATTERY_CHANNEL = "com.example.orpheus_project/battery"
     private val SETTINGS_CHANNEL = "com.example.orpheus_project/settings"
     private val CALL_CHANNEL = "com.example.orpheus_project/call"
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Log.i(TAG, "onCreate: intent=${intent?.action}, from_telecom=${intent?.getBooleanExtra("from_telecom", false)}")
         super.onCreate(savedInstanceState)
         // Флаги showWhenLocked и turnScreenOn теперь применяются только во время звонков
         // через MethodChannel, чтобы не мешать нормальной работе приложения
+
+        // Telecom: регистрируем PhoneAccount best-effort (без падений).
+        try {
+            OrpheusCallManager.ensurePhoneAccountRegistered(applicationContext)
+        } catch (_: Exception) {
+            // best-effort
+        }
+        
+        // Если запущены из Telecom — включаем режим звонка (show on lockscreen)
+        if (intent?.getBooleanExtra("from_telecom", false) == true) {
+            Log.i(TAG, "Enabling call mode from Telecom launch")
+            enableCallMode()
+        }
+    }
+    
+    override fun onNewIntent(intent: Intent) {
+        Log.i(TAG, "onNewIntent: action=${intent.action}, from_telecom=${intent.getBooleanExtra("from_telecom", false)}")
+        super.onNewIntent(intent)
+        setIntent(intent)
+        
+        // Если запущены из Telecom — включаем режим звонка
+        if (intent.getBooleanExtra("from_telecom", false)) {
+            Log.i(TAG, "Enabling call mode from Telecom (onNewIntent)")
+            enableCallMode()
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -96,6 +123,54 @@ class MainActivity: FlutterFragmentActivity() {
                 }
                 "disableCallMode" -> {
                     disableCallMode()
+                    result.success(true)
+                }
+                // Telecom bridge: Flutter забирает pending call/reject после действий в системном UI.
+                "getAndClearPendingCall" -> {
+                    val pending = OrpheusCallStore.getAndClearPendingAcceptedCall(applicationContext)
+                    Log.i("MainActivity", "getAndClearPendingCall: ${if (pending != null) "found (len=${pending.length})" else "null"}")
+                    result.success(pending)
+                }
+                "getAndClearPendingReject" -> {
+                    result.success(OrpheusCallStore.getAndClearPendingRejectedCall(applicationContext))
+                }
+                // WS background -> Telecom incoming (как Telegram)
+                "showTelecomIncomingCall" -> {
+                    val args = call.arguments as? Map<*, *>
+                    val callerKey = args?.get("caller_key")?.toString()?.trim().orEmpty()
+                    if (callerKey.isEmpty()) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+                    val callerName = args?.get("caller_name")?.toString()
+                    val callId = args?.get("call_id")?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                    val serverTsMs = (args?.get("server_ts_ms") as? Number)?.toLong()
+                        ?: args?.get("server_ts_ms")?.toString()?.toLongOrNull()
+                    val offerJson = args?.get("offer_json")?.toString()
+
+                    if (!offerJson.isNullOrBlank()) {
+                        OrpheusCallStore.cacheIncomingOffer(
+                            applicationContext,
+                            callerKey = callerKey,
+                            callId = callId,
+                            serverTsMs = serverTsMs,
+                            offerJson = offerJson,
+                        )
+                    }
+
+                    val model = OrpheusIncomingCallModel(
+                        callId = callId,
+                        callerKey = callerKey,
+                        callerName = callerName,
+                        serverTsMs = serverTsMs,
+                        nativeTelecom = true,
+                    )
+                    val ok = OrpheusCallManager.tryShowIncomingCall(applicationContext, model)
+                    result.success(ok)
+                }
+                "clearActiveTelecomCall" -> {
+                    OrpheusCallStore.clearActiveCall(applicationContext)
+                    OrpheusCallStore.clearCachedOffer(applicationContext)
                     result.success(true)
                 }
                 else -> result.notImplemented()

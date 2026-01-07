@@ -35,6 +35,12 @@ class WebSocketService {
   // Подписка на изменения сети
   StreamSubscription? _networkSubscription;
 
+  // === Pending signaling (для случаев, когда WS временно недоступен) ===
+  // Важно: это НЕ чат-сообщения (для них есть PendingActionsService),
+  // а сигнальные пакеты звонка (ICE), которые могут прийти/сгенерироваться до восстановления WS.
+  final List<Map<String, dynamic>> _pendingSignaling = [];
+  static const int _maxPendingSignaling = 200;
+
   // Exponential backoff для реконнекта
   int _reconnectAttempt = 0;
   static const int _minReconnectDelay = 1; // секунды
@@ -131,6 +137,8 @@ class WebSocketService {
         
         // Отправляем pending сообщения после восстановления соединения
         _sendPendingMessages();
+        // Отправляем pending сигнальные пакеты (например ICE candidates)
+        _sendPendingSignaling();
 
         _channel!.stream.listen(
               (message) {
@@ -182,7 +190,11 @@ class WebSocketService {
       DebugLogger.info('WS', 'Отправка FCM токена: ${token.substring(0, 20)}...');
       final msg = json.encode({
         "type": "register-fcm",
-        "token": token
+        "token": token,
+        // Backward-compatible: сервер может игнорировать.
+        "platform": (!kIsWeb && Platform.isAndroid) ? "android" : (!kIsWeb && Platform.isIOS) ? "ios" : "unknown",
+        // Флаг поддержки Android Telecom incoming UI (новые клиенты).
+        "android_native_telecom": (!kIsWeb && Platform.isAndroid),
       });
       _channel?.sink.add(msg);
     } else {
@@ -233,6 +245,34 @@ class WebSocketService {
     _channel = channel;
     if (currentPublicKey != null) _currentPublicKey = currentPublicKey;
     _statusController.add(ConnectionStatus.Connected);
+    _sendPendingSignaling();
+  }
+
+  void _enqueuePendingSignaling(Map<String, dynamic> msg) {
+    // Ограничиваем память. Для звонка обычно достаточно десятков ICE кандидатов.
+    if (_pendingSignaling.length >= _maxPendingSignaling) {
+      _pendingSignaling.removeAt(0);
+    }
+    _pendingSignaling.add(msg);
+  }
+
+  void _sendPendingSignaling() {
+    if (_pendingSignaling.isEmpty) return;
+    if (_channel == null || _statusController.value != ConnectionStatus.Connected) return;
+
+    final toSend = List<Map<String, dynamic>>.from(_pendingSignaling);
+    _pendingSignaling.clear();
+
+    DebugLogger.info('WS', '📤 Отправка ${toSend.length} pending signaling пакетов...');
+
+    for (final msg in toSend) {
+      // Если соединение потеряно посередине — вернём остаток в очередь.
+      if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
+        _pendingSignaling.addAll(toSend.skipWhile((m) => m != msg));
+        break;
+      }
+      _sendMessage(msg);
+    }
   }
 
   void _startPingPong() {
@@ -305,8 +345,11 @@ class WebSocketService {
     
     // Важные сигналы - используем HTTP fallback для гарантии доставки
     // Включая ice-restart, т.к. при смене сети клиенты могут быть на разных серверах
-    final isImportant = type == 'hang-up' || type == 'call-rejected' || 
-                        type == 'ice-restart' || type == 'ice-restart-answer';
+    final isImportant = type == 'hang-up' || type == 'call-rejected' ||
+                        type == 'ice-restart' || type == 'ice-restart-answer' ||
+                        // КРИТИЧНО: если пользователь нажал Answer, но WS ещё не Connected (часто в фоне),
+                        // call-answer нельзя терять — иначе соединение никогда не установится.
+                        type == 'call-answer';
     final statusStr = currentStatus.toString().split('.').last;
     
     if (isImportant) {
@@ -323,6 +366,14 @@ class WebSocketService {
     } else {
       print("📤 WS SEND $type → ${recipientPublicKey.substring(0, 8)}... Size: ${data.toString().length}");
       DebugLogger.info('SIGNAL', '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}...');
+    }
+
+    // Если WS недоступен — не теряем ICE кандидаты: буферизуем до реконнекта.
+    if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
+      if (type == 'ice-candidate') {
+        _enqueuePendingSignaling(msg);
+      }
+      return;
     }
     
     _sendMessage(msg);
@@ -403,7 +454,7 @@ class WebSocketService {
 
   void _sendMessage(Map<String, dynamic> map) {
     final type = map['type'] as String?;
-    final isImportant = type == 'hang-up' || type == 'call-rejected';
+    final isImportant = type == 'hang-up' || type == 'call-rejected' || type == 'call-answer';
     
     if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
       if (isImportant) {

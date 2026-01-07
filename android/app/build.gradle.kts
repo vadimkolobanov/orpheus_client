@@ -61,4 +61,10 @@ dependencies {
 
     implementation(platform("com.google.firebase:firebase-bom:34.6.0"))
     implementation("com.google.firebase:firebase-analytics")
+    // Явно добавляем messaging, чтобы Kotlin-код (RemoteMessage/FirebaseMessagingService) компилировался
+    // независимо от транзитивных зависимостей плагина.
+    implementation("com.google.firebase:firebase-messaging")
+
+    // Unit tests (pure Kotlin logic: дедуп/TTL, парсинг payload).
+    testImplementation("junit:junit:4.13.2")
 }

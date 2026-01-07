@@ -123,15 +123,24 @@ class AudioplayersSoundBackend implements SoundBackend {
     final notif = _notificationPlayer;
     if (dialing == null || notif == null) return;
     try {
-      if (dialing.state == PlayerState.playing) {
-        await dialing.pause().timeout(_timeout);
-      }
-      if (notif.state == PlayerState.playing) {
-        await notif.stop().timeout(_timeout);
-      }
+      // Важно: на некоторых девайсах/эмуляторах MediaPlayer может быть в "переходном" состоянии,
+      // и pause() кидает низкоуровневую ошибку (-38). stop() обычно безопаснее.
+      // Делаем best-effort и гасим любые ошибки, чтобы не спамить логами.
+      await dialing.stop().timeout(_timeout);
+      await notif.stop().timeout(_timeout);
     } catch (e) {
       // ignore: avoid_print
       print('SOUND: stopAll failed: $e');
+    } finally {
+      // Если плеер ушёл в неконсистентное состояние — проще его пересоздать.
+      try {
+        await dialing.dispose();
+      } catch (_) {}
+      try {
+        await notif.dispose();
+      } catch (_) {}
+      _dialingPlayer = null;
+      _notificationPlayer = null;
     }
   }
 }

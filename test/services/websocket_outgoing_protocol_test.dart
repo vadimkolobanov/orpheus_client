@@ -135,6 +135,42 @@ void main() {
       expect(bodyDecoded['recipient_pubkey'], equals('RECIPIENT'));
       expect(bodyDecoded['signal_type'], equals('hang-up'));
     });
+
+    test('call-answer без WS уходит через HTTP fallback (иначе звонок в фоне не установится)', () async {
+      final httpClient = _RecordingHttpClient();
+      final service = WebSocketService(httpClient: httpClient);
+
+      // WS не подключен (channel == null)
+      service.sendSignalingMessage('RECIPIENT', 'call-answer', {'sdp': 'v=0', 'type': 'answer'});
+
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(httpClient.requests, isNotEmpty);
+      expect(httpClient.bodies, isNotEmpty);
+      final bodyDecoded = json.decode(httpClient.bodies.first) as Map<String, dynamic>;
+      expect(bodyDecoded['recipient_pubkey'], equals('RECIPIENT'));
+      expect(bodyDecoded['signal_type'], equals('call-answer'));
+      expect(bodyDecoded['data'], isA<Map>());
+    });
+
+    test('ice-candidate без WS буферизуется и отправляется после восстановления соединения', () async {
+      final sent = <dynamic>[];
+      final ws = _RecordingWebSocketChannel(sent);
+
+      final service = WebSocketService();
+
+      // Пока WS нет — candidate должен уйти в pending (не в sink).
+      service.sendSignalingMessage('RECIPIENT', 'ice-candidate', {'candidate': 'c1'});
+      expect(sent, isEmpty);
+
+      // Восстанавливаем соединение — pending должны отправиться в sink.
+      service.debugAttachConnectedChannel(ws, currentPublicKey: 'ME');
+
+      expect(sent, hasLength(1));
+      final decoded = json.decode(sent.single as String) as Map<String, dynamic>;
+      expect(decoded['type'], equals('ice-candidate'));
+      expect(decoded['recipient_pubkey'], equals('RECIPIENT'));
+    });
   });
 }
 

@@ -169,6 +169,132 @@ void main() {
       expect(openCalls, equals(2));
     });
 
+    test('call-offer: suppressCallNotification=true (Telecom Accept ждёт поздний offer) — НЕ открывает CallScreen, а шлёт в signaling', () async {
+      // Сценарий: пользователь нажал Accept в нативном Telecom UI, но offer ещё не дошёл.
+      // CallScreen уже открыт в режиме IncomingWaitingOffer.
+      // Когда offer приходит по WS, мы НЕ должны открывать второй CallScreen,
+      // а пробросить offer в signalingStream для уже открытого CallScreen.
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb()..contactNames['SENDER_KEY'] = 'Alice';
+      final notif = _FakeNotif();
+
+      int openCalls = 0;
+      final signalingMessages = <Map<String, dynamic>>[];
+      
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, __) async => 'x'),
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer}) {
+          openCalls += 1;
+        },
+        emitSignaling: (msg) => signalingMessages.add(msg),
+        emitChatUpdate: (_) {},
+        isAppInForeground: () => true,
+        isCallActive: () => false,
+        // suppressCallNotification=true означает: был Telecom Accept, CallScreen уже ждёт
+        suppressCallNotification: (_) => true,
+        nowMs: () => 1000000,
+      );
+
+      await handler.handleDecoded({
+        'type': 'call-offer',
+        'sender_pubkey': 'SENDER_KEY',
+        'data': {'sdp': 'v=0...', 'type': 'offer'},
+      });
+
+      // CallScreen НЕ открывается (он уже открыт из Telecom pending accept)
+      expect(openCalls, equals(0));
+      // Нотификация НЕ показывается
+      expect(notif.calls.where((c) => c.startsWith('showCall:')), isEmpty);
+      // Offer пробрасывается в signaling stream для уже открытого CallScreen
+      expect(signalingMessages.length, equals(1));
+      expect(signalingMessages[0]['type'], equals('call-offer'));
+    });
+
+    test('call-offer: в фоне tryShowTelecomIncoming=true не открывает CallScreen и не показывает локальную call-нотификацию', () async {
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb()..contactNames['SENDER_KEY'] = 'Alice';
+      final notif = _FakeNotif();
+
+      int openCalls = 0;
+      int telecomCalls = 0;
+
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, __) async => 'x'),
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer}) {
+          openCalls += 1;
+        },
+        emitSignaling: (_) {},
+        emitChatUpdate: (_) {},
+        isAppInForeground: () => false,
+        isCallActive: () => false,
+        tryShowTelecomIncoming: ({
+          required String senderPublicKey,
+          required String callerName,
+          required Map<String, dynamic> offer,
+          required int? serverTsMs,
+          required String? callId,
+        }) async {
+          telecomCalls += 1;
+          return true;
+        },
+        nowMs: () => 1000000,
+      );
+
+      await handler.handleDecoded({
+        'type': 'call-offer',
+        'sender_pubkey': 'SENDER_KEY',
+        'server_ts_ms': 1000000,
+        'call_id': 'c1',
+        'data': {'sdp': 'v=0...', 'type': 'offer'},
+      });
+
+      expect(telecomCalls, equals(1));
+      expect(openCalls, equals(0));
+      expect(notif.calls.where((c) => c.startsWith('showCall:')), isEmpty);
+    });
+
+    test('call-offer: одинаковый call_id обрабатывается один раз (дедуп)', () async {
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb()..contactNames['SENDER_KEY'] = 'Alice';
+      final notif = _FakeNotif();
+
+      int openCalls = 0;
+
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, __) async => 'x'),
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer}) {
+          openCalls += 1;
+        },
+        emitSignaling: (_) {},
+        emitChatUpdate: (_) {},
+        isAppInForeground: () => true,
+        isCallActive: () => false,
+        nowMs: () => 1000000,
+      );
+
+      final msg = {
+        'type': 'call-offer',
+        'sender_pubkey': 'SENDER_KEY',
+        'server_ts_ms': 1000000,
+        'call_id': 'CALL_1',
+        'data': {'sdp': 'v=0...', 'type': 'offer'},
+      };
+
+      await handler.handleDecoded(msg);
+      await handler.handleDecoded(msg); // повтор
+
+      expect(openCalls, equals(1));
+    });
+
     test('call-offer: TTL по server_ts_ms (слишком старый offer игнорируется)', () async {
       final buffer = IncomingCallBuffer.instance;
       final db = _FakeDb();
