@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:orpheus_project/call_screen.dart';
 import 'package:orpheus_project/license_screen.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
@@ -48,7 +49,40 @@ bool _hasKeys = false;
 /// Глобальный флаг: приложение в foreground (активно)?
 bool isAppInForeground = true;
 
-void main() async {
+/// Sentry DSN для мониторинга ошибок
+const String _sentryDsn = 'https://7d6801508e29bc2e4f5b93b986147cdc@o4509485705265152.ingest.de.sentry.io/4510682122879056';
+
+Future<void> main() async {
+  // Sentry инициализация с перехватом всех ошибок
+  await SentryFlutter.init(
+    (options) {
+      options.dsn = _sentryDsn;
+      // Версия приложения для отслеживания регрессий
+      options.release = 'orpheus@1.1.1+7';
+      options.environment = 'production';
+      // Отслеживание производительности (10% транзакций)
+      options.tracesSampleRate = 0.1;
+      // Отключаем отправку PII (персональных данных)
+      options.sendDefaultPii = false;
+      // Фильтруем breadcrumbs от чувствительных данных
+      options.beforeBreadcrumb = (breadcrumb, {hint}) {
+        // Не логируем содержимое сообщений
+        if (breadcrumb?.category == 'message' || 
+            breadcrumb?.message?.contains('encrypted') == true) {
+          return null;
+        }
+        return breadcrumb;
+      };
+    },
+    appRunner: () async {
+      await _initializeApp();
+      runApp(const MyApp());
+    },
+  );
+}
+
+/// Основная инициализация приложения
+Future<void> _initializeApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   DebugLogger.info('APP', '🚀 Orpheus запускается...');
@@ -72,9 +106,11 @@ void main() async {
 
     // 3. BackgroundCallService — НЕ инициализируем на старте.
     // Он будет lazy-инициализирован при первом звонке (см. BackgroundCallService.startCallService()).
-  } catch (e) {
+  } catch (e, stackTrace) {
     print("INIT ERROR: $e");
     DebugLogger.error('APP', 'INIT ERROR: $e');
+    // Отправляем ошибку инициализации в Sentry
+    await Sentry.captureException(e, stackTrace: stackTrace);
   }
 
   // 4. Криптография
@@ -110,7 +146,6 @@ void main() async {
   _listenForMessages();
 
   DebugLogger.success('APP', '✅ Приложение запущено');
-  runApp(const MyApp());
 }
 
 void _listenForMessages() {
@@ -132,8 +167,10 @@ void _listenForMessages() {
   websocketService.stream.listen((messageJson) async {
     try {
       await handler.handleRawMessage(messageJson);
-    } catch (e) {
+    } catch (e, stackTrace) {
       DebugLogger.error('MAIN', 'Message Handler Error: $e');
+      // Отправляем ошибку обработки сообщений в Sentry
+      Sentry.captureException(e, stackTrace: stackTrace);
     }
   });
 }

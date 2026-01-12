@@ -32,3 +32,4 @@ Orpheus — приватная коммуникация “по умолчани
 - **Публичные release notes**: `OPHEUS_ADMIN` → «Версии» (`app_versions`), см. `docs/RELEASES.md`.
 
 
+
