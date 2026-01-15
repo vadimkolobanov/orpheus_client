@@ -91,7 +91,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       // Проверяем наличие заголовка
-      expect(find.text('КОНТАКТЫ'), findsOneWidget);
+      expect(find.text('Контакты'), findsOneWidget);
 
       // Проверяем наличие кнопки добавления контакта (иконка "+")
       expect(find.byIcon(Icons.add), findsOneWidget);

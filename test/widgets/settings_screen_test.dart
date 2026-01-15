@@ -89,9 +89,9 @@ void main() {
       });
       await tester.pump();
 
-      expect(find.text('ПРОФИЛЬ'), findsOneWidget);
+      expect(find.text('Профиль'), findsOneWidget);
       expect(find.text('Безопасность'), findsOneWidget);
-      expect(find.text('Написать разработчику'), findsOneWidget);
+      expect(find.text('Поддержка'), findsOneWidget);
       expect(find.text('Как пользоваться'), findsOneWidget);
       expect(find.text('История обновлений'), findsOneWidget);
     });
@@ -118,9 +118,9 @@ void main() {
       });
       await tester.pump();
 
-      // Заголовок AppBar содержит текст "ПРОФИЛЬ" внутри GestureDetector.
+      // Заголовок AppBar содержит текст "Профиль" внутри GestureDetector.
       for (var i = 0; i < 5; i++) {
-        await tester.tap(find.text('ПРОФИЛЬ'));
+        await tester.tap(find.text('Профиль'));
         await tester.pump(const Duration(milliseconds: 50));
       }
 

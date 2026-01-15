@@ -3,8 +3,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/screens/pin_setup_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
+import 'package:orpheus_project/services/message_cleanup_service.dart';
 
 class SecuritySettingsScreen extends StatefulWidget {
   final AuthService auth;
@@ -71,6 +73,59 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
     
     if (result == true && mounted) {
       _refresh();
+    }
+  }
+
+  Future<void> _onRetentionPolicyChanged(MessageRetentionPolicy newPolicy) async {
+    // Получаем preview количества сообщений для удаления
+    final toDelete = await MessageCleanupService.instance.getCleanupPreview(newPolicy);
+    
+    // Если будут удалены сообщения — запрашиваем подтверждение
+    if (toDelete > 0) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text('Подтверждение'),
+          content: Text(
+            'При включении этой политики будет удалено $toDelete сообщений.\n\n'
+            'Это действие необратимо. Продолжить?',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Удалить'),
+            ),
+          ],
+        ),
+      );
+      
+      if (confirmed != true) return;
+    }
+    
+    // Применяем новую политику
+    await _auth.setMessageRetention(newPolicy);
+    
+    // Запускаем очистку по новой политике
+    final result = await MessageCleanupService.instance.onRetentionPolicyChanged(newPolicy);
+    
+    if (mounted) {
+      _refresh();
+      
+      // Показываем результат
+      final message = result.isSuccess && result.deletedCount > 0
+          ? 'Удалено ${result.deletedCount} сообщений'
+          : 'Политика применена: ${newPolicy.displayName}';
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     }
   }
 
@@ -310,6 +365,26 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
               isMultiLine: true,
             ),
             
+            const SizedBox(height: 32),
+            
+            // Секция автоудаления сообщений
+            _buildSectionHeader('АВТОУДАЛЕНИЕ СООБЩЕНИЙ', Icons.auto_delete),
+            const SizedBox(height: 12),
+            
+            _buildInfoCard(
+              icon: Icons.info_outline,
+              text: 'Автоматическое удаление старых сообщений повышает приватность. '
+                    'Сообщения старше выбранного периода будут удалены безвозвратно.',
+              color: Colors.blue,
+              isMultiLine: true,
+            ),
+            const SizedBox(height: 12),
+            
+            _MessageRetentionSelector(
+              currentPolicy: _auth.messageRetention,
+              onPolicyChanged: _onRetentionPolicyChanged,
+            ),
+            
             const SizedBox(height: 40),
           ],
         ),
@@ -505,3 +580,124 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
   }
 }
 
+/// Виджет выбора политики автоудаления сообщений
+class _MessageRetentionSelector extends StatelessWidget {
+  const _MessageRetentionSelector({
+    required this.currentPolicy,
+    required this.onPolicyChanged,
+  });
+
+  final MessageRetentionPolicy currentPolicy;
+  final ValueChanged<MessageRetentionPolicy> onPolicyChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < MessageRetentionPolicy.values.length; i++) ...[
+            if (i > 0)
+              Divider(height: 1, color: Colors.white.withOpacity(0.05)),
+            _buildOption(MessageRetentionPolicy.values[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOption(MessageRetentionPolicy policy) {
+    final isSelected = policy == currentPolicy;
+    final icon = _getIconForPolicy(policy);
+    final color = _getColorForPolicy(policy);
+    
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => onPolicyChanged(policy),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(isSelected ? 0.2 : 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      policy.displayName,
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.white70,
+                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      policy.subtitle,
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isSelected)
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6AD394).withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check,
+                    color: Color(0xFF6AD394),
+                    size: 16,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _getIconForPolicy(MessageRetentionPolicy policy) {
+    switch (policy) {
+      case MessageRetentionPolicy.all:
+        return Icons.all_inclusive;
+      case MessageRetentionPolicy.day:
+        return Icons.today;
+      case MessageRetentionPolicy.week:
+        return Icons.date_range;
+      case MessageRetentionPolicy.month:
+        return Icons.calendar_month;
+    }
+  }
+
+  Color _getColorForPolicy(MessageRetentionPolicy policy) {
+    switch (policy) {
+      case MessageRetentionPolicy.all:
+        return const Color(0xFFB0BEC5);
+      case MessageRetentionPolicy.day:
+        return Colors.red.shade400;
+      case MessageRetentionPolicy.week:
+        return Colors.orange.shade400;
+      case MessageRetentionPolicy.month:
+        return Colors.blue.shade400;
+    }
+  }
+}

@@ -1,6 +1,8 @@
 // lib/models/security_config.dart
 // Модель конфигурации безопасности приложения
 
+import 'package:orpheus_project/models/message_retention_policy.dart';
+
 /// Конфигурация безопасности приложения
 class SecurityConfig {
   /// Включена ли защита PIN-кодом
@@ -49,6 +51,12 @@ class SecurityConfig {
   /// ВАЖНО: это приближение, а не “перехват кнопки питания”.
   final bool isPanicGestureEnabled;
 
+  /// Политика автоудаления сообщений по времени
+  final MessageRetentionPolicy messageRetention;
+  
+  /// Время последней очистки сообщений (для оптимизации — не чистить слишком часто)
+  final DateTime? lastMessageCleanupAt;
+
   const SecurityConfig({
     this.isPinEnabled = false,
     this.pinHash,
@@ -65,6 +73,8 @@ class SecurityConfig {
     this.isAutoWipeEnabled = false,
     this.autoWipeAttempts = 10,
     this.isPanicGestureEnabled = false,
+    this.messageRetention = MessageRetentionPolicy.all,
+    this.lastMessageCleanupAt,
   });
 
   /// Пустая конфигурация (без защиты)
@@ -87,10 +97,13 @@ class SecurityConfig {
     bool? isAutoWipeEnabled,
     int? autoWipeAttempts,
     bool? isPanicGestureEnabled,
+    MessageRetentionPolicy? messageRetention,
+    DateTime? lastMessageCleanupAt,
     bool clearPinHash = false,
     bool clearDuressHash = false,
     bool clearWipeCodeHash = false,
     bool clearLastFailedAttempt = false,
+    bool clearLastMessageCleanupAt = false,
   }) {
     return SecurityConfig(
       isPinEnabled: isPinEnabled ?? this.isPinEnabled,
@@ -108,6 +121,8 @@ class SecurityConfig {
       isAutoWipeEnabled: isAutoWipeEnabled ?? this.isAutoWipeEnabled,
       autoWipeAttempts: autoWipeAttempts ?? this.autoWipeAttempts,
       isPanicGestureEnabled: isPanicGestureEnabled ?? this.isPanicGestureEnabled,
+      messageRetention: messageRetention ?? this.messageRetention,
+      lastMessageCleanupAt: clearLastMessageCleanupAt ? null : (lastMessageCleanupAt ?? this.lastMessageCleanupAt),
     );
   }
 
@@ -129,6 +144,8 @@ class SecurityConfig {
       'isAutoWipeEnabled': isAutoWipeEnabled,
       'autoWipeAttempts': autoWipeAttempts,
       'isPanicGestureEnabled': isPanicGestureEnabled,
+      'messageRetention': messageRetention.configValue,
+      'lastMessageCleanupAt': lastMessageCleanupAt?.toIso8601String(),
     };
   }
 
@@ -152,6 +169,10 @@ class SecurityConfig {
       isAutoWipeEnabled: map['isAutoWipeEnabled'] ?? false,
       autoWipeAttempts: map['autoWipeAttempts'] ?? 10,
       isPanicGestureEnabled: map['isPanicGestureEnabled'] ?? false,
+      messageRetention: MessageRetentionPolicyExtension.fromConfigValue(map['messageRetention']),
+      lastMessageCleanupAt: map['lastMessageCleanupAt'] != null 
+          ? DateTime.tryParse(map['lastMessageCleanupAt']) 
+          : null,
     );
   }
 
@@ -203,7 +224,7 @@ class SecurityConfig {
 
   @override
   String toString() {
-    return 'SecurityConfig(pin: $isPinEnabled, duress: $isDuressEnabled, wipeCode: $isWipeCodeEnabled, bio: $isBiometricEnabled, panicGesture: $isPanicGestureEnabled, attempts: $failedAttempts)';
+    return 'SecurityConfig(pin: $isPinEnabled, duress: $isDuressEnabled, wipeCode: $isWipeCodeEnabled, bio: $isBiometricEnabled, panicGesture: $isPanicGestureEnabled, attempts: $failedAttempts, retention: $messageRetention)';
   }
 }
 

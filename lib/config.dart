@@ -1,6 +1,6 @@
 class AppConfig {
   // ФИНАЛЬНЫЙ РЕЛИЗ 1.0.0
-  static const String appVersion = "v1.1.1";
+  static const String appVersion = "v1.1.2";
 
   // === ХОСТЫ (миграция домена) ===
   // Старый домен остаётся рабочим для уже выпущенных клиентов.

@@ -9,6 +9,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:orpheus_project/call_screen.dart';
 import 'package:orpheus_project/license_screen.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
+import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/screens/lock_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
 import 'package:orpheus_project/services/background_call_service.dart';
@@ -20,6 +21,7 @@ import 'package:orpheus_project/services/incoming_message_handler.dart';
 import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/panic_wipe_service.dart';
+import 'package:orpheus_project/services/message_cleanup_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
 import 'package:orpheus_project/services/presence_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
@@ -34,6 +36,7 @@ final presenceService = PresenceService(websocketService);
 final notificationService = NotificationService();
 final authService = AuthService.instance;
 final panicWipeService = PanicWipeService.instance;
+final messageCleanupService = MessageCleanupService.instance;
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -65,7 +68,7 @@ Future<void> main() async {
       // Отключаем отправку PII (персональных данных)
       options.sendDefaultPii = false;
       // Фильтруем breadcrumbs от чувствительных данных
-      options.beforeBreadcrumb = (breadcrumb, {hint}) {
+      options.beforeBreadcrumb = (Breadcrumb? breadcrumb, Hint _hint) {
         // Не логируем содержимое сообщений
         if (breadcrumb?.category == 'message' || 
             breadcrumb?.message?.contains('encrypted') == true) {
@@ -123,6 +126,11 @@ Future<void> _initializeApp() async {
   await authService.init();
   DebugLogger.info('APP', 'AuthService: PIN=${authService.config.isPinEnabled}, duress=${authService.config.isDuressEnabled}');
 
+  // 5.5. Сервис автоочистки сообщений (зависит от AuthService)
+  DebugLogger.info('APP', 'Инициализация MessageCleanupService...');
+  await messageCleanupService.init();
+  DebugLogger.info('APP', 'MessageCleanupService: retention=${authService.messageRetention.displayName}');
+
   // 6. Panic Wipe Service (тройное нажатие кнопки питания)
   panicWipeService.init();
   panicWipeService.onPanicWipe = () async {
@@ -132,7 +140,7 @@ Future<void> _initializeApp() async {
   };
 
   // 7. Network Monitor Service (мониторинг сети для реконнекта)
-  DebugLogger.info('APP', 'Инициализация NetworkMonitorService...');
+  DebugLogger.info('APP', 'Инициализация NetworkMonitorService.');
   await NetworkMonitorService.instance.init();
   DebugLogger.success('APP', 'NetworkMonitorService инициализирован');
 
@@ -348,6 +356,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       if (cryptoService.publicKeyBase64 != null) {
         websocketService.connect(cryptoService.publicKeyBase64!);
       }
+      // Проверка автоочистки сообщений при возвращении в foreground
+      messageCleanupService.onAppResumed();
     } else if (state == AppLifecycleState.paused) {
       DebugLogger.info('LIFECYCLE', 'Приложение в background');
       // Блокируем приложение при сворачивании (если PIN включен),

@@ -11,19 +11,19 @@ class GlassColors {
   // CORE - Красный кристалл (рубин)
   static const Color coreGlass = Color(0xFFFF1744);
   static const Color coreGlow = Color(0xFFFF5252);
-  
+
   // OWNER - Тёмный рубин (гранат)
   static const Color ownerGlass = Color(0xFFD32F2F);
   static const Color ownerGlow = Color(0xFFEF5350);
-  
+
   // PATRON - Фиолетовый аметист
   static const Color patronGlass = Color(0xFF9C27B0);
   static const Color patronGlow = Color(0xFFBA68C8);
-  
+
   // BENEFACTOR - Золотой топаз / янтарь
   static const Color benefactorGlass = Color(0xFFFFB300);
   static const Color benefactorGlow = Color(0xFFFFD54F);
-  
+
   // EARLY - Дымчатый кварц (серый)
   static const Color earlyGlass = Color(0xFF546E7A);
   static const Color earlyGlow = Color(0xFF78909C);
@@ -55,22 +55,22 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
   @override
   void initState() {
     super.initState();
-    
+
     _shimmerController = AnimationController(
       duration: const Duration(milliseconds: 2800),
       vsync: this,
     );
-    
+
     _glowController = AnimationController(
       duration: const Duration(milliseconds: 2200),
       vsync: this,
     );
-    
+
     _pulseController = AnimationController(
       duration: const Duration(milliseconds: 1800),
       vsync: this,
     );
-    
+
     if (widget.enableAnimations) {
       _shimmerController.repeat();
       _glowController.repeat(reverse: true);
@@ -90,23 +90,35 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
 
   Color _getGlassColor() {
     switch (widget.badge.typeString) {
-      case 'core': return GlassColors.coreGlass;
-      case 'owner': return GlassColors.ownerGlass;
-      case 'patron': return GlassColors.patronGlass;
-      case 'benefactor': return GlassColors.benefactorGlass;
-      case 'early': return GlassColors.earlyGlass;
-      default: return GlassColors.earlyGlass;
+      case 'core':
+        return GlassColors.coreGlass;
+      case 'owner':
+        return GlassColors.ownerGlass;
+      case 'patron':
+        return GlassColors.patronGlass;
+      case 'benefactor':
+        return GlassColors.benefactorGlass;
+      case 'early':
+        return GlassColors.earlyGlass;
+      default:
+        return GlassColors.earlyGlass;
     }
   }
 
   Color _getGlowColor() {
     switch (widget.badge.typeString) {
-      case 'core': return GlassColors.coreGlow;
-      case 'owner': return GlassColors.ownerGlow;
-      case 'patron': return GlassColors.patronGlow;
-      case 'benefactor': return GlassColors.benefactorGlow;
-      case 'early': return GlassColors.earlyGlow;
-      default: return GlassColors.earlyGlow;
+      case 'core':
+        return GlassColors.coreGlow;
+      case 'owner':
+        return GlassColors.ownerGlow;
+      case 'patron':
+        return GlassColors.patronGlow;
+      case 'benefactor':
+        return GlassColors.benefactorGlow;
+      case 'early':
+        return GlassColors.earlyGlow;
+      default:
+        return GlassColors.earlyGlow;
     }
   }
 
@@ -114,19 +126,49 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
   Widget build(BuildContext context) {
     final glassColor = _getGlassColor();
     final glowColor = _getGlowColor();
-    
+
     final hPad = widget.compact ? 10.0 : 14.0;
     final vPad = widget.compact ? 5.0 : 7.0;
     final fontSize = widget.compact ? 9.0 : 11.0;
     final radius = widget.compact ? 6.0 : 8.0;
     final blurAmount = widget.compact ? 8.0 : 12.0;
 
+    // В компактном режиме (списки/аппбар) убираем blur + тяжелые слои.
+    // “Стекло” остаётся только для крупного бейджа (вариант B: фирменный момент в 1-2 местах).
+    if (widget.compact || !widget.enableAnimations) {
+      return Container(
+        padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(radius),
+          color: glassColor.withOpacity(0.14),
+          border: Border.all(color: glassColor.withOpacity(0.30)),
+          boxShadow: [
+            BoxShadow(
+              color: glowColor.withOpacity(0.12),
+              blurRadius: 14,
+              spreadRadius: -6,
+            ),
+          ],
+        ),
+        child: Text(
+          widget.badge.label,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: fontSize,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.1,
+          ),
+        ),
+      );
+    }
+
     return AnimatedBuilder(
-      animation: Listenable.merge([_shimmerController, _glowController, _pulseController]),
+      animation: Listenable.merge(
+          [_shimmerController, _glowController, _pulseController]),
       builder: (context, child) {
         final glowPulse = 0.5 + 0.5 * _glowController.value;
-        final coreScale = widget.badge.typeString == 'core' 
-            ? 1.0 + 0.02 * _pulseController.value 
+        final coreScale = widget.badge.typeString == 'core'
+            ? 1.0 + 0.02 * _pulseController.value
             : 1.0;
 
         return Transform.scale(
@@ -164,16 +206,17 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                   Positioned.fill(
                     child: BackdropFilter(
                       filter: ImageFilter.blur(
-                        sigmaX: blurAmount, 
+                        sigmaX: blurAmount,
                         sigmaY: blurAmount,
                       ),
                       child: Container(color: Colors.transparent),
                     ),
                   ),
-                  
+
                   // === СЛОЙ 1: ПОЛУПРОЗРАЧНОЕ СТЕКЛО ===
                   Container(
-                    padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+                    padding:
+                        EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
                     decoration: BoxDecoration(
                       // Основа — очень прозрачный цвет
                       color: glassColor.withOpacity(0.25),
@@ -210,7 +253,7 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                       ),
                     ),
                   ),
-                  
+
                   // === СЛОЙ 2: ВНУТРЕННЕЕ СВЕЧЕНИЕ ===
                   Positioned.fill(
                     child: Container(
@@ -227,7 +270,7 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                       ),
                     ),
                   ),
-                  
+
                   // === СЛОЙ 3: СТЕКЛЯННЫЙ БЛИК СВЕРХУ ===
                   Positioned(
                     top: 0,
@@ -236,7 +279,8 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                     child: Container(
                       height: vPad + fontSize * 0.6,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(radius)),
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(radius)),
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
@@ -251,7 +295,7 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                       ),
                     ),
                   ),
-                  
+
                   // === СЛОЙ 4: ГОРИЗОНТАЛЬНЫЙ БЛИК ===
                   Positioned(
                     top: 2,
@@ -274,7 +318,7 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                       ),
                     ),
                   ),
-                  
+
                   // === СЛОЙ 5: ДИАГОНАЛЬНЫЕ ГРАНИ ===
                   Positioned.fill(
                     child: CustomPaint(
@@ -284,7 +328,7 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                       ),
                     ),
                   ),
-                  
+
                   // === СЛОЙ 6: БЕГУЩИЙ SHIMMER ===
                   Positioned.fill(
                     child: ClipRRect(
@@ -296,7 +340,7 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                       ),
                     ),
                   ),
-                  
+
                   // === СЛОЙ 7: СТЕКЛЯННАЯ РАМКА ===
                   Positioned.fill(
                     child: Container(
@@ -309,7 +353,7 @@ class _LuxuryBadgeWidgetState extends State<LuxuryBadgeWidget>
                       ),
                     ),
                   ),
-                  
+
                   // === СЛОЙ 8: ВНУТРЕННЯЯ ТОНКАЯ РАМКА ===
                   Positioned.fill(
                     child: Container(
@@ -348,7 +392,7 @@ class _GlassFacetPainter extends CustomPainter {
       ..lineTo(size.width * 0.4, 0)
       ..lineTo(0, size.height * 0.7)
       ..close();
-    
+
     final paint1 = Paint()
       ..shader = LinearGradient(
         begin: Alignment.topLeft,
@@ -358,7 +402,7 @@ class _GlassFacetPainter extends CustomPainter {
           color.withOpacity(0.03),
         ],
       ).createShader(Rect.fromLTWH(0, 0, size.width * 0.4, size.height * 0.7));
-    
+
     canvas.drawPath(path1, paint1);
 
     // Правая нижняя грань
@@ -367,7 +411,7 @@ class _GlassFacetPainter extends CustomPainter {
       ..lineTo(size.width * 0.6, size.height)
       ..lineTo(size.width, size.height * 0.4)
       ..close();
-    
+
     final paint2 = Paint()
       ..shader = LinearGradient(
         begin: Alignment.bottomRight,
@@ -376,10 +420,11 @@ class _GlassFacetPainter extends CustomPainter {
           color.withOpacity(0.08 * glowPulse),
           color.withOpacity(0.02),
         ],
-      ).createShader(Rect.fromLTWH(size.width * 0.6, size.height * 0.4, size.width * 0.4, size.height * 0.6));
-    
+      ).createShader(Rect.fromLTWH(size.width * 0.6, size.height * 0.4,
+          size.width * 0.4, size.height * 0.6));
+
     canvas.drawPath(path2, paint2);
-    
+
     // Центральная вертикальная грань
     final path3 = Path()
       ..moveTo(size.width * 0.5, 0)
@@ -387,12 +432,13 @@ class _GlassFacetPainter extends CustomPainter {
       ..lineTo(size.width * 0.55, size.height)
       ..lineTo(size.width * 0.5, size.height)
       ..close();
-    
-    canvas.drawPath(path3, Paint()..color = color.withOpacity(0.04 * glowPulse));
+
+    canvas.drawPath(
+        path3, Paint()..color = color.withOpacity(0.04 * glowPulse));
   }
 
   @override
-  bool shouldRepaint(_GlassFacetPainter oldDelegate) => 
+  bool shouldRepaint(_GlassFacetPainter oldDelegate) =>
       oldDelegate.glowPulse != glowPulse;
 }
 
@@ -407,7 +453,7 @@ class _GlassShimmerPainter extends CustomPainter {
     final shimmerWidth = size.width * 0.6;
     final totalTravel = size.width + shimmerWidth * 2;
     final startX = -shimmerWidth + totalTravel * progress;
-    
+
     final paint = Paint()
       ..shader = LinearGradient(
         colors: [
@@ -426,16 +472,17 @@ class _GlassShimmerPainter extends CustomPainter {
     canvas.translate(size.width / 2, size.height / 2);
     canvas.rotate(-0.35); // Наклон блика
     canvas.translate(-size.width / 2, -size.height / 2);
-    
+
     canvas.drawRect(
-      Rect.fromLTWH(startX - size.width, -size.height, shimmerWidth, size.height * 3),
+      Rect.fromLTWH(
+          startX - size.width, -size.height, shimmerWidth, size.height * 3),
       paint,
     );
     canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_GlassShimmerPainter oldDelegate) => 
+  bool shouldRepaint(_GlassShimmerPainter oldDelegate) =>
       oldDelegate.progress != progress;
 }
 
@@ -462,7 +509,7 @@ class BadgeWidget extends StatelessWidget {
 class UserBadge extends StatefulWidget {
   final String pubkey;
   final bool compact;
-  
+
   const UserBadge({super.key, required this.pubkey, this.compact = false});
 
   @override
@@ -488,32 +535,46 @@ class _UserBadgeState extends State<UserBadge> {
   Future<void> _loadBadge() async {
     final cached = BadgeService.instance.getBadgeCached(widget.pubkey);
     if (cached != null) {
-      if (mounted) setState(() { _badge = cached; _loading = false; });
+      if (mounted)
+        setState(() {
+          _badge = cached;
+          _loading = false;
+        });
       return;
     }
     setState(() => _loading = true);
     final badge = await BadgeService.instance.getBadge(widget.pubkey);
-    if (mounted) setState(() { _badge = badge; _loading = false; });
+    if (mounted)
+      setState(() {
+        _badge = badge;
+        _loading = false;
+      });
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading || _badge == null) return const SizedBox.shrink();
-    return LuxuryBadgeWidget(badge: _badge!, compact: widget.compact);
+    final disableAnimations = MediaQuery.of(context).disableAnimations;
+    return LuxuryBadgeWidget(
+      badge: _badge!,
+      compact: widget.compact,
+      enableAnimations: !disableAnimations && !widget.compact,
+    );
   }
 }
 
 class AnimatedUserBadge extends StatefulWidget {
   final String pubkey;
   final bool compact;
-  
-  const AnimatedUserBadge({super.key, required this.pubkey, this.compact = false});
+
+  const AnimatedUserBadge(
+      {super.key, required this.pubkey, this.compact = false});
 
   @override
   State<AnimatedUserBadge> createState() => _AnimatedUserBadgeState();
 }
 
-class _AnimatedUserBadgeState extends State<AnimatedUserBadge> 
+class _AnimatedUserBadgeState extends State<AnimatedUserBadge>
     with SingleTickerProviderStateMixin {
   BadgeInfo? _badge;
   late AnimationController _controller;
@@ -558,9 +619,11 @@ class _AnimatedUserBadgeState extends State<AnimatedUserBadge>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        final curve = Curves.elasticOut.transform(_controller.value.clamp(0.0, 1.0));
-        final fade = Curves.easeOut.transform((_controller.value * 2).clamp(0.0, 1.0));
-        
+        final curve =
+            Curves.elasticOut.transform(_controller.value.clamp(0.0, 1.0));
+        final fade =
+            Curves.easeOut.transform((_controller.value * 2).clamp(0.0, 1.0));
+
         return Opacity(
           opacity: fade,
           child: Transform.scale(

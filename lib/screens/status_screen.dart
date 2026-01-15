@@ -1,28 +1,36 @@
+// lib/screens/status_screen.dart
+// Системный монитор Orpheus — полезные данные для пользователя
+
 import 'dart:async';
-import 'dart:convert';
-import 'dart:math';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:orpheus_project/config.dart';
-import 'package:orpheus_project/services/database_service.dart';
-import 'package:orpheus_project/services/websocket_service.dart';
+import 'package:flutter/services.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:orpheus_project/main.dart';
+import 'package:orpheus_project/services/crypto_service.dart';
+import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/pending_actions_service.dart';
+import 'package:orpheus_project/services/websocket_service.dart';
+import 'package:orpheus_project/theme/app_tokens.dart';
+import 'package:orpheus_project/widgets/app_card.dart';
+import 'package:orpheus_project/widgets/app_scaffold.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class StatusScreen extends StatefulWidget {
   const StatusScreen({
     super.key,
     this.httpClient,
     this.databaseService,
-    this.websocket,
     this.messageUpdates,
     this.debugPublicKeyBase64,
     this.disableTimersForTesting = false,
   });
 
-  /// DI для widget-тестов: чтобы не ходить в сеть и не зависеть от глобальных singleton’ов.
   final http.Client? httpClient;
   final DatabaseService? databaseService;
-  final WebSocketService? websocket;
   final Stream<void>? messageUpdates;
   final String? debugPublicKeyBase64;
   final bool disableTimersForTesting;
@@ -31,854 +39,588 @@ class StatusScreen extends StatefulWidget {
   State<StatusScreen> createState() => _StatusScreenState();
 }
 
-class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMixin {
-  late AnimationController _pulseController;
-  late AnimationController _scannerController;
-  late AnimationController _glowController;
-  late AnimationController _cardRevealController;
-  late AnimationController _regionPulseController;
-  late AnimationController _threatScanController;
+class _StatusScreenState extends State<StatusScreen>
+    with TickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  http.Client? _ownedHttpClient;
+  Timer? _timer;
+  StreamSubscription<void>? _updatesSub;
 
-  // График
-  final List<double> _signalHistory = List.generate(40, (_) => 0.85);
+  // Соединение
+  int _pendingCount = 0;
+  DateTime? _sessionStart;
+  int _reconnectCount = 0;
 
-  final Random _rnd = Random();
-  Timer? _updateTimer;
-  Timer? _keyIdAnimTimer;
-  Timer? _threatScanTimer;
-  StreamSubscription<ConnectionStatus>? _wsStatusSub;
-  StreamSubscription<void>? _messageUpdatesSub;
+  // Регион
+  String _country = '...';
+  String _countryCode = '--';
+  bool _isTrafficControlRegion = false;
 
-  // Данные сессии
-  final DateTime _sessionStart = DateTime.now();
-  String _uptime = "00:00:00";
-  int _currentPing = 0;
-  String _turnStatusText = "ОЖИДАНИЕ";
-  Color _turnStatusColor = Colors.grey;
+  // Безопасность
+  String _fingerprint = '...';
+  DateTime? _keyCreatedAt;
 
-  // KEY ID анимация
-  String _displayedKeyId = "--------";
-  bool _isKeyIdScanning = false;
-  int _keyIdScanIndex = 0;
+  // Устройство
+  String _appVersion = '...';
+  String _deviceModel = '...';
+  String _osVersion = '...';
 
-  // Статистика
+  // Хранилище
+  int _messagesCount = 0;
   int _contactsCount = 0;
-  int _sessionMessages = 0;
 
-  // Threat scan
-  bool _isThreatScanning = false;
-  String _threatStatus = "СКАНИРОВАНИЕ...";
-  int _threatScanProgress = 0;
-
-  // Геолокация
-  String _countryCode = "";
-  String _countryName = "Определение...";
-  bool _isRestrictedRegion = false;
-  bool _isGeoLoading = true;
-
-  // Список стран с усиленным контролем трафика
-  static const _restrictedCountries = ['RU', 'BY', 'CN', 'IR', 'KZ', 'TM', 'UZ'];
-  static const _countryNames = {
-    'RU': 'Россия',
-    'BY': 'Беларусь',
-    'CN': 'Китай',
-    'IR': 'Иран',
-    'KZ': 'Казахстан',
-    'TM': 'Туркменистан',
-    'UZ': 'Узбекистан',
-    'UA': 'Украина',
-    'US': 'США',
-    'DE': 'Германия',
-    'GB': 'Великобритания',
-    'FR': 'Франция',
-    'NL': 'Нидерланды',
-    'PL': 'Польша',
-    'FI': 'Финляндия',
-    'EE': 'Эстония',
-    'LV': 'Латвия',
-    'LT': 'Литва',
-    'GE': 'Грузия',
-    'AM': 'Армения',
-    'AZ': 'Азербайджан',
-    'TR': 'Турция',
-    'AE': 'ОАЭ',
-    'IL': 'Израиль',
-  };
-
-  ConnectionStatus _currentStatus = ConnectionStatus.Disconnected;
+  DatabaseService get _db =>
+      widget.databaseService ?? DatabaseService.instance;
 
   @override
   void initState() {
     super.initState();
 
-    // Анимации
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-
-    _scannerController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-
-    _glowController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2500),
-    )..repeat(reverse: true);
-
-    _cardRevealController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..forward();
-
-    _regionPulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-
-    _threatScanController = AnimationController(
-      vsync: this,
       duration: const Duration(milliseconds: 1500),
-    );
+    )..repeat(reverse: true);
 
-    _displayedKeyId = _getKeyFingerprint();
-    _loadStats();
-    _detectCountry();
-    if (!widget.disableTimersForTesting) {
-      _startThreatScan();
-    }
+    _ownedHttpClient = widget.httpClient == null ? http.Client() : null;
+    _sessionStart = DateTime.now();
 
-    final ws = widget.websocket ?? websocketService;
-    _wsStatusSub = ws.status.distinct().listen((status) {
-      if (!mounted) return;
-      if (_currentStatus == status) return;
-      setState(() => _currentStatus = status);
-    });
-
-    final msgStream = widget.messageUpdates ?? messageUpdateController.stream;
-    _messageUpdatesSub = msgStream.listen((_) {
-      if (mounted) {
-        setState(() => _sessionMessages++);
-      }
-    });
+    _loadAll();
 
     if (!widget.disableTimersForTesting) {
-      _updateTimer = Timer.periodic(const Duration(milliseconds: 1000), (timer) {
-        if (mounted) {
-          setState(() => _updateRealtimeData());
-        }
-      });
-
-      _keyIdAnimTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-        if (mounted && _currentStatus == ConnectionStatus.Connected) {
-          _animateKeyIdScan();
-        }
-      });
-
-      _threatScanTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-        if (mounted) _startThreatScan();
-      });
-    }
-  }
-
-  /// Определение страны пользователя по IP
-  Future<void> _detectCountry() async {
-    try {
-      final client = widget.httpClient ?? http.Client();
-      // Пробуем ip-api.com (бесплатный, без ключа)
-      final response = await client.get(
-        Uri.parse('http://ip-api.com/json/?fields=countryCode,country'),
-      ).timeout(const Duration(seconds: 5));
-
-      if (response.statusCode == 200 && mounted) {
-        final data = json.decode(response.body);
-        final code = data['countryCode'] as String? ?? '';
-        
-        setState(() {
-          _countryCode = code;
-          _countryName = _countryNames[code] ?? data['country'] ?? code;
-          _isRestrictedRegion = _restrictedCountries.contains(code);
-          _isGeoLoading = false;
-        });
-      }
-    } catch (e) {
-      // Fallback - не удалось определить
-      if (mounted) {
-        setState(() {
-          _countryCode = "??";
-          _countryName = "Не определено";
-          _isRestrictedRegion = false;
-          _isGeoLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _loadStats() async {
-    try {
-      final db = widget.databaseService ?? DatabaseService.instance;
-      final contacts = await db.getContacts();
-      if (mounted) {
-        setState(() => _contactsCount = contacts.length);
-      }
-    } catch (_) {}
-  }
-
-  void _startThreatScan() async {
-    if (_isThreatScanning) return;
-    setState(() {
-      _isThreatScanning = true;
-      _threatStatus = "СКАНИРОВАНИЕ...";
-      _threatScanProgress = 0;
-    });
-
-    _threatScanController.reset();
-    _threatScanController.forward();
-
-    for (int i = 0; i <= 100; i += 5) {
-      if (!mounted) return;
-      await Future.delayed(const Duration(milliseconds: 40));
-      setState(() => _threatScanProgress = i);
+      _timer = Timer.periodic(const Duration(seconds: 10), (_) => _tick());
     }
 
-    await Future.delayed(const Duration(milliseconds: 200));
-    if (mounted) {
-      setState(() {
-        _isThreatScanning = false;
-        _threatStatus = "0 ОБНАРУЖЕНО";
-      });
-    }
-  }
-
-  void _animateKeyIdScan() async {
-    if (_isKeyIdScanning) return;
-    _isKeyIdScanning = true;
-
-    final realKeyId = _getKeyFingerprint();
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    
-    for (int i = 0; i < 8; i++) {
-      if (!mounted) return;
-      for (int j = 0; j < 3; j++) {
-        if (!mounted) return;
-        setState(() {
-          _keyIdScanIndex = i;
-          _displayedKeyId = realKeyId.substring(0, i) + 
-              chars[_rnd.nextInt(chars.length)] + 
-              (i < 7 ? realKeyId.substring(i + 1) : "");
-        });
-        await Future.delayed(const Duration(milliseconds: 50));
-      }
-      setState(() {
-        _displayedKeyId = realKeyId.substring(0, i + 1) + 
-            (i < 7 ? realKeyId.substring(i + 1) : "");
-      });
-      await Future.delayed(const Duration(milliseconds: 80));
-    }
-
-    _isKeyIdScanning = false;
-    _keyIdScanIndex = -1;
-  }
-
-  void _updateRealtimeData() {
-    final duration = DateTime.now().difference(_sessionStart);
-    final h = duration.inHours.toString().padLeft(2, '0');
-    final m = (duration.inMinutes % 60).toString().padLeft(2, '0');
-    final s = (duration.inSeconds % 60).toString().padLeft(2, '0');
-    _uptime = "$h:$m:$s";
-
-    if (_currentStatus == ConnectionStatus.Connected) {
-      _turnStatusText = "АКТИВЕН (TLS)";
-      _turnStatusColor = const Color(0xFF6AD394);
-      _currentPing = 35 + _rnd.nextInt(50);
-      double signal = 0.85 + (_rnd.nextDouble() * 0.15);
-      _addToHistory(signal.clamp(0.0, 1.0));
-    } else if (_currentStatus == ConnectionStatus.Connecting) {
-      _turnStatusText = "ПРОВЕРКА...";
-      _turnStatusColor = Colors.orangeAccent;
-      _currentPing = 0;
-      _addToHistory(0.3 + _rnd.nextDouble() * 0.2);
-    } else {
-      _turnStatusText = "НЕДОСТУПЕН";
-      _turnStatusColor = Colors.redAccent;
-      _currentPing = 0;
-      _addToHistory(0.0);
-    }
-  }
-
-  void _addToHistory(double value) {
-    _signalHistory.removeAt(0);
-    _signalHistory.add(value);
-  }
-
-  String _getKeyFingerprint() {
-    final publicKey = widget.debugPublicKeyBase64 ?? cryptoService.publicKeyBase64;
-    if (publicKey == null || publicKey.length < 8) return "--------";
-    return publicKey.substring(0, 8).toUpperCase();
+    _updatesSub =
+        (widget.messageUpdates ?? messageUpdateController.stream.map((_) {}))
+            .listen((_) => _loadStorage());
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
+    _updatesSub?.cancel();
+    _ownedHttpClient?.close();
     _pulseController.dispose();
-    _scannerController.dispose();
-    _glowController.dispose();
-    _cardRevealController.dispose();
-    _regionPulseController.dispose();
-    _threatScanController.dispose();
-    _updateTimer?.cancel();
-    _keyIdAnimTimer?.cancel();
-    _threatScanTimer?.cancel();
-    _wsStatusSub?.cancel();
-    _messageUpdatesSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadAll() async {
+    await Future.wait<void>([
+      _loadRegion(),
+      _loadPending(),
+      _loadSecurity(),
+      _loadDevice(),
+      _loadStorage(),
+    ]);
+  }
+
+  void _tick() {
+    _loadPending();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadRegion() async {
+    final client = widget.httpClient ?? _ownedHttpClient ?? http.Client();
+    try {
+      final resp = await client
+          .get(Uri.parse('http://ip-api.com/json/'))
+          .timeout(const Duration(seconds: 3));
+      if (resp.statusCode != 200) throw Exception();
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final country = (data['country'] as String?)?.trim() ?? 'Не определено';
+      final code =
+          ((data['countryCode'] as String?)?.trim() ?? '--').toUpperCase();
+
+      if (!mounted) return;
+      setState(() {
+        _country = country;
+        _countryCode = code;
+        _isTrafficControlRegion = _trafficControlCountries.contains(code);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _country = 'Не определено';
+        _countryCode = '--';
+      });
+    }
+  }
+
+  Future<void> _loadPending() async {
+    try {
+      final pending = await PendingActionsService.getPendingMessages();
+      if (!mounted) return;
+      setState(() => _pendingCount = pending.length);
+    } catch (_) {}
+  }
+
+  Future<void> _loadSecurity() async {
+    try {
+      final crypto = CryptoService();
+      await crypto.init();
+
+      final pubKey = widget.debugPublicKeyBase64 ?? crypto.publicKeyBase64;
+      final regDate = crypto.registrationDate;
+
+      if (!mounted) return;
+      setState(() {
+        // Fingerprint — последние 8 символов публичного ключа
+        if (pubKey != null && pubKey.length >= 8) {
+          _fingerprint = pubKey.substring(pubKey.length - 8).toUpperCase();
+        } else {
+          _fingerprint = '--------';
+        }
+        _keyCreatedAt = regDate;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _fingerprint = 'Ошибка');
+    }
+  }
+
+  Future<void> _loadDevice() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      final deviceInfo = DeviceInfoPlugin();
+
+      String model = 'Неизвестно';
+      String os = 'Неизвестно';
+
+      if (Platform.isAndroid) {
+        final android = await deviceInfo.androidInfo;
+        model = '${android.manufacturer} ${android.model}';
+        os = 'Android ${android.version.release}';
+      } else if (Platform.isIOS) {
+        final ios = await deviceInfo.iosInfo;
+        model = ios.utsname.machine;
+        os = '${ios.systemName} ${ios.systemVersion}';
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _appVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+        _deviceModel = model;
+        _osVersion = os;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadStorage() async {
+    try {
+      final stats = await _db.getProfileStats();
+      if (!mounted) return;
+      setState(() {
+        _messagesCount = stats['messages'] ?? 0;
+        _contactsCount = stats['contacts'] ?? 0;
+      });
+    } catch (_) {}
+  }
+
+  String _formatUptime() {
+    if (_sessionStart == null) return '--';
+    final diff = DateTime.now().difference(_sessionStart!);
+    if (diff.inHours > 0) {
+      return '${diff.inHours}ч ${diff.inMinutes % 60}м';
+    } else if (diff.inMinutes > 0) {
+      return '${diff.inMinutes}м';
+    }
+    return '${diff.inSeconds}с';
+  }
+
+  String _formatDate(DateTime? date) {
+    if (date == null) return 'Неизвестно';
+    return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
+  }
+
+  void _copyFingerprint() {
+    Clipboard.setData(ClipboardData(text: _fingerprint));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Fingerprint скопирован'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    Color stateColor;
-    String stateText;
-    String subText;
-
-    switch (_currentStatus) {
-      case ConnectionStatus.Connected:
-        stateColor = const Color(0xFF6AD394);
-        stateText = "СИСТЕМА В НОРМЕ";
-        subText = "Туннель шифрования стабилен";
-        break;
-      case ConnectionStatus.Connecting:
-        stateColor = Colors.orangeAccent;
-        stateText = "ПОИСК СЕТИ...";
-        subText = "Согласование ключей";
-        break;
-      case ConnectionStatus.Disconnected:
-        stateColor = Colors.redAccent;
-        stateText = "НЕТ СВЯЗИ";
-        subText = "Ожидание подключения";
-        break;
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
+    return AppScaffold(
+      safeArea: false,
+      appBar: AppBar(title: const Text('Система')),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          // Фоновые частицы
-          ..._buildBackgroundParticles(),
-          
-          // Основной контент
-          SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(stateColor),
-                  const SizedBox(height: 12),
-
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: Text(
-                      stateText,
-                      key: ValueKey(stateText),
-                      style: TextStyle(color: stateColor, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 0.5),
-                    ),
-                  ),
-                  Text(subText, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-
-                  const SizedBox(height: 20),
-
-                  // РЕГИОН + РЕЖИМ ЗАЩИТЫ
-                  _buildRegionBlock(),
-
-                  const SizedBox(height: 16),
-
-                  // THREAT SCAN + STATS
-                  Row(
-                    children: [
-                      Expanded(child: _buildThreatScanner()),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildStatsBlock()),
-                    ],
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // ГРАФИК
-                  _buildSignalChart(stateColor),
-
-                  const SizedBox(height: 12),
-
-                  // RELAY BLOCK
-                  _buildRelayBlock(),
-
-                  const SizedBox(height: 12),
-
-                  // ИНФО-СЕТКА
-                  _buildInfoGrid(),
-                  
-                  const SizedBox(height: 20),
-                ],
-              ),
-            ),
+          // ═══════════════════════════════════════════════════════════
+          // СОЕДИНЕНИЕ
+          // ═══════════════════════════════════════════════════════════
+          _ConnectionCard(
+            pulse: _pulseController,
+            pendingCount: _pendingCount,
+            uptime: _formatUptime(),
           ),
+          const SizedBox(height: 12),
+
+          // ═══════════════════════════════════════════════════════════
+          // РЕГИОН + РЕЖИМ (в строку)
+          // ═══════════════════════════════════════════════════════════
+          Row(
+            children: [
+              Expanded(
+                child: _InfoCard(
+                  title: 'Регион',
+                  icon: Icons.public_rounded,
+                  value: _countryCode,
+                  subtitle: _country,
+                  valueColor: _isTrafficControlRegion
+                      ? AppColors.warning
+                      : AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _InfoCard(
+                  title: 'Режим',
+                  icon: _isTrafficControlRegion
+                      ? Icons.shield_rounded
+                      : Icons.verified_user_rounded,
+                  value: _isTrafficControlRegion ? 'Усиленный' : 'Стандарт',
+                  subtitle: _isTrafficControlRegion
+                      ? 'Повышенная защита'
+                      : 'Стабильное соединение',
+                  valueColor: _isTrafficControlRegion
+                      ? AppColors.warning
+                      : AppColors.success,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // ═══════════════════════════════════════════════════════════
+          // БЕЗОПАСНОСТЬ
+          // ═══════════════════════════════════════════════════════════
+          _SecurityCard(
+            fingerprint: _fingerprint,
+            createdAt: _formatDate(_keyCreatedAt),
+            onCopy: _copyFingerprint,
+          ),
+          const SizedBox(height: 12),
+
+          // ═══════════════════════════════════════════════════════════
+          // ХРАНИЛИЩЕ + УСТРОЙСТВО (в строку)
+          // ═══════════════════════════════════════════════════════════
+          Row(
+            children: [
+              Expanded(
+                child: _InfoCard(
+                  title: 'Хранилище',
+                  icon: Icons.storage_rounded,
+                  value: '$_messagesCount',
+                  subtitle: 'сообщений',
+                  secondaryValue: '$_contactsCount контактов',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _InfoCard(
+                  title: 'Приложение',
+                  icon: Icons.info_outline_rounded,
+                  value: 'v$_appVersion',
+                  subtitle: _osVersion,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // ═══════════════════════════════════════════════════════════
+          // УСТРОЙСТВО (полное)
+          // ═══════════════════════════════════════════════════════════
+          _DeviceCard(
+            model: _deviceModel,
+            os: _osVersion,
+            appVersion: _appVersion,
+          ),
+
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
+}
 
-  List<Widget> _buildBackgroundParticles() {
-    return List.generate(12, (i) {
-      final top = (i * 67.0) % 600 + 50;
-      final left = (i * 43.0) % 350;
-      final size = 2.0 + (i % 3);
-      final delay = i * 0.15;
-      
-      return Positioned(
-        top: top,
-        left: left,
-        child: AnimatedBuilder(
-          animation: _regionPulseController,
-          builder: (context, child) {
-            final progress = ((_regionPulseController.value + delay) % 1.0);
-            return Opacity(
-              opacity: (0.1 + 0.2 * sin(progress * 2 * pi)).clamp(0.0, 1.0),
-              child: Container(
-                width: size,
-                height: size,
+// ═══════════════════════════════════════════════════════════════════════════
+// ВИДЖЕТЫ КАРТОЧЕК
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ConnectionCard extends StatelessWidget {
+  const _ConnectionCard({
+    required this.pulse,
+    required this.pendingCount,
+    required this.uptime,
+  });
+
+  final Animation<double> pulse;
+  final int pendingCount;
+  final String uptime;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    return StreamBuilder<ConnectionStatus>(
+      stream: websocketService.status,
+      initialData: websocketService.currentStatus,
+      builder: (context, snap) {
+        final status = snap.data ?? ConnectionStatus.Disconnected;
+        final (label, color, icon) = switch (status) {
+          ConnectionStatus.Connected => (
+              'Подключено',
+              AppColors.success,
+              Icons.cloud_done_rounded
+            ),
+          ConnectionStatus.Connecting => (
+              'Подключение…',
+              AppColors.warning,
+              Icons.cloud_sync_rounded
+            ),
+          ConnectionStatus.Disconnected => (
+              'Отключено',
+              AppColors.danger,
+              Icons.cloud_off_rounded
+            ),
+        };
+
+        return AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  AnimatedBuilder(
+                    animation: pulse,
+                    builder: (context, _) {
+                      return Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.12 + 0.08 * pulse.value),
+                          borderRadius: AppRadii.sm,
+                        ),
+                        child: Icon(icon, color: color, size: 22),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Соединение',
+                            style: t.labelMedium
+                                ?.copyWith(color: AppColors.textTertiary)),
+                        const SizedBox(height: 2),
+                        Text(label,
+                            style: t.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Сессия: $uptime',
+                          style: t.labelSmall
+                              ?.copyWith(color: AppColors.textTertiary)),
+                      const SizedBox(height: 2),
+                      Text('Очередь: $pendingCount',
+                          style: t.labelSmall
+                              ?.copyWith(color: AppColors.textTertiary)),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: _isRestrictedRegion ? Colors.orangeAccent : const Color(0xFF6AD394),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: (_isRestrictedRegion ? Colors.orangeAccent : const Color(0xFF6AD394)).withOpacity(0.3),
-                      blurRadius: 4,
+                  color: AppColors.surface2,
+                  borderRadius: AppRadii.sm,
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.dns_rounded,
+                        size: 14, color: AppColors.textTertiary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        websocketService.currentHost,
+                        style: t.labelSmall?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
               ),
-            );
-          },
-        ),
-      );
-    });
-  }
-
-  Widget _buildHeader(Color stateColor) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(
-          children: [
-            AnimatedBuilder(
-              animation: _pulseController,
-              builder: (context, child) {
-                return Container(
-                  width: 10, height: 10,
-                  decoration: BoxDecoration(
-                    color: stateColor.withOpacity(0.6 + 0.4 * _pulseController.value),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: stateColor.withOpacity(0.4 + 0.3 * _pulseController.value),
-                        blurRadius: 8 + 6 * _pulseController.value,
-                        spreadRadius: 1 + 2 * _pulseController.value,
-                      )
-                    ],
-                  ),
-                );
-              },
-            ),
-            const SizedBox(width: 10),
-            Text("СИСТЕМНЫЙ МОНИТОР", style: TextStyle(color: Colors.grey[600], fontSize: 9, letterSpacing: 2, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        Row(
-          children: [
-            AnimatedBuilder(
-              animation: _pulseController,
-              builder: (context, child) {
-                return Container(
-                  width: 4, height: 4,
-                  margin: const EdgeInsets.only(right: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2 + 0.3 * _pulseController.value),
-                    shape: BoxShape.circle,
-                  ),
-                );
-              },
-            ),
-            Text(_uptime, style: const TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 11)),
-          ],
-        ),
-      ],
-    );
-  }
-
-  /// Блок определения региона и режима защиты
-  Widget _buildRegionBlock() {
-    final Color accentColor = _isRestrictedRegion ? Colors.orangeAccent : const Color(0xFF6AD394);
-    
-    return AnimatedBuilder(
-      animation: _glowController,
-      builder: (context, child) {
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0A0A0A),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: accentColor.withOpacity(0.2 + 0.1 * _glowController.value),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: accentColor.withOpacity(0.05 + 0.05 * _glowController.value),
-                blurRadius: 20,
-                spreadRadius: -5,
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Заголовок с регионом
-              Row(
-                children: [
-                  // Анимированная иконка
-                  AnimatedBuilder(
-                    animation: _regionPulseController,
-                    builder: (context, child) {
-                      return Icon(
-                        _isRestrictedRegion ? Icons.shield : Icons.public,
-                        size: 16,
-                        color: accentColor.withOpacity(0.7 + 0.3 * sin(_regionPulseController.value * 2 * pi)),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    "РЕГИОН: ",
-                    style: TextStyle(color: Colors.grey[600], fontSize: 10, letterSpacing: 1),
-                  ),
-                  _isGeoLoading
-                      ? SizedBox(
-                          width: 12, height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 1.5, color: accentColor),
-                        )
-                      : Text(
-                          _countryName.toUpperCase(),
-                          style: TextStyle(
-                            color: accentColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                  const Spacer(),
-                  // Код страны
-                  if (!_isGeoLoading)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: accentColor.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        _countryCode,
-                        style: TextStyle(
-                          color: accentColor,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              
-              const SizedBox(height: 12),
-              
-              // Режим защиты
-              Row(
-                children: [
-                  Container(
-                    width: 8, height: 8,
-                    decoration: BoxDecoration(
-                      color: accentColor,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(color: accentColor.withOpacity(0.5), blurRadius: 4),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _isRestrictedRegion ? "УСИЛЕННАЯ ЗАЩИТА" : "СТАНДАРТНЫЙ РЕЖИМ",
-                    style: TextStyle(
-                      color: accentColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
-              ),
-              
-              const SizedBox(height: 8),
-              
-              // Описание методов защиты
-              if (_isRestrictedRegion) ...[
-                Text(
-                  "Обнаружен регион с контролем трафика",
-                  style: TextStyle(color: Colors.grey[500], fontSize: 10),
-                ),
-                const SizedBox(height: 10),
-                // Методы защиты
-                _buildProtectionMethod(Icons.lock_outline, "TLS 1.3 маскировка", "Трафик неотличим от HTTPS", accentColor),
-                const SizedBox(height: 6),
-                _buildProtectionMethod(Icons.shuffle, "Обфускация заголовков", "Скрытие сигнатур протокола", accentColor),
-                const SizedBox(height: 6),
-                _buildProtectionMethod(Icons.schedule, "Случайные интервалы", "Защита от анализа паттернов", accentColor),
-              ] else ...[
-                Text(
-                  "Ограничений не обнаружено",
-                  style: TextStyle(color: Colors.grey[500], fontSize: 10),
-                ),
-                const SizedBox(height: 10),
-                _buildProtectionMethod(Icons.verified_user, "E2E шифрование", "ChaCha20-Poly1305", accentColor),
-                const SizedBox(height: 6),
-                _buildProtectionMethod(Icons.security, "Защищённый канал", "WebSocket Secure (WSS)", accentColor),
-              ],
             ],
           ),
         );
       },
     );
   }
+}
 
-  Widget _buildProtectionMethod(IconData icon, String title, String subtitle, Color color) {
-    return Row(
-      children: [
-        Container(
-          width: 28, height: 28,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Icon(icon, size: 14, color: color.withOpacity(0.8)),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-              Text(subtitle, style: TextStyle(color: Colors.grey[600], fontSize: 9)),
-            ],
-          ),
-        ),
-        AnimatedBuilder(
-          animation: _glowController,
-          builder: (context, child) {
-            return Icon(
-              Icons.check_circle,
-              size: 14,
-              color: color.withOpacity(0.5 + 0.3 * _glowController.value),
-            );
-          },
-        ),
-      ],
-    );
-  }
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({
+    required this.title,
+    required this.icon,
+    required this.value,
+    required this.subtitle,
+    this.valueColor,
+    this.secondaryValue,
+  });
 
-  Widget _buildThreatScanner() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A0A0A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
-      ),
+  final String title;
+  final IconData icon;
+  final String value;
+  final String subtitle;
+  final Color? valueColor;
+  final String? secondaryValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    return AppCard(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              if (_isThreatScanning)
-                AnimatedBuilder(
-                  animation: _threatScanController,
-                  builder: (context, child) {
-                    return Transform.rotate(
-                      angle: _threatScanController.value * 2 * pi,
-                      child: Icon(Icons.radar, size: 12, color: Colors.orangeAccent.withOpacity(0.8)),
-                    );
-                  },
-                )
-              else
-                const Icon(Icons.shield, size: 12, color: Color(0xFF6AD394)),
+              Icon(icon, size: 16, color: AppColors.accent),
               const SizedBox(width: 6),
-              const Text("АНАЛИЗ УГРОЗ", style: TextStyle(color: Colors.grey, fontSize: 8, letterSpacing: 1.5)),
+              Text(title,
+                  style:
+                      t.labelMedium?.copyWith(color: AppColors.textTertiary)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: t.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: valueColor ?? AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(subtitle,
+              style: t.bodySmall?.copyWith(color: AppColors.textTertiary)),
+          if (secondaryValue != null) ...[
+            const SizedBox(height: 2),
+            Text(secondaryValue!,
+                style: t.labelSmall?.copyWith(color: AppColors.textTertiary)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityCard extends StatelessWidget {
+  const _SecurityCard({
+    required this.fingerprint,
+    required this.createdAt,
+    required this.onCopy,
+  });
+
+  final String fingerprint;
+  final String createdAt;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.success.withOpacity(0.12),
+                  borderRadius: AppRadii.sm,
+                ),
+                child:
+                    const Icon(Icons.key_rounded, color: AppColors.success, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Шифрование',
+                        style: t.labelMedium
+                            ?.copyWith(color: AppColors.textTertiary)),
+                    const SizedBox(height: 2),
+                    Text('X25519 + ChaCha20-Poly1305',
+                        style:
+                            t.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: onCopy,
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                tooltip: 'Копировать fingerprint',
+                color: AppColors.textTertiary,
+              ),
             ],
           ),
           const SizedBox(height: 14),
-          Container(
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.white10,
-              borderRadius: BorderRadius.circular(2),
-            ),
-            child: AnimatedBuilder(
-              animation: _glowController,
-              builder: (context, child) {
-                return FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: _isThreatScanning ? _threatScanProgress / 100 : 1.0,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: _isThreatScanning ? Colors.orangeAccent : const Color(0xFF6AD394),
-                      borderRadius: BorderRadius.circular(2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: (_isThreatScanning ? Colors.orangeAccent : const Color(0xFF6AD394))
-                              .withOpacity(0.5 + 0.3 * _glowController.value),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: _SecurityItem(
+                  label: 'Fingerprint',
+                  value: fingerprint,
+                  isMono: true,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _SecurityItem(
+                  label: 'Ключ создан',
+                  value: createdAt,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: Text(
-              _threatStatus,
-              key: ValueKey(_threatStatus),
-              style: TextStyle(
-                color: _isThreatScanning ? Colors.orangeAccent : const Color(0xFF6AD394),
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'monospace',
-              ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.success.withOpacity(0.08),
+              borderRadius: AppRadii.sm,
+              border: Border.all(color: AppColors.success.withOpacity(0.2)),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatsBlock() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A0A0A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("СТАТИСТИКА", style: TextStyle(color: Colors.grey, fontSize: 8, letterSpacing: 1.5)),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text("Контакты", style: TextStyle(color: Colors.grey, fontSize: 10)),
-              Text("$_contactsCount", style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 12, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text("Сообщений", style: TextStyle(color: Colors.grey, fontSize: 10)),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: Text(
-                  "$_sessionMessages",
-                  key: ValueKey(_sessionMessages),
-                  style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSignalChart(Color stateColor) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A0A0A),
-        border: Border.all(color: Colors.white10),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  AnimatedBuilder(
-                    animation: _scannerController,
-                    builder: (context, child) {
-                      return Container(
-                        width: 6, height: 6,
-                        margin: const EdgeInsets.only(right: 8),
-                        decoration: BoxDecoration(
-                          color: stateColor.withOpacity(0.5 + 0.5 * sin(_scannerController.value * 2 * pi)),
-                          shape: BoxShape.circle,
-                        ),
-                      );
-                    },
-                  ),
-                  const Text("МЕТРИКА СТАБИЛЬНОСТИ", style: TextStyle(color: Colors.grey, fontSize: 8, letterSpacing: 1)),
-                ],
-              ),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: Text(
-                  "${(_signalHistory.last * 100).toInt()}%",
-                  key: ValueKey((_signalHistory.last * 100).toInt()),
-                  style: TextStyle(color: stateColor, fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 60,
-            child: Stack(
+            child: Row(
               children: [
-                CustomPaint(
-                  size: Size.infinite,
-                  painter: SignalChartPainter(history: _signalHistory, color: stateColor),
-                ),
-                if (_currentStatus == ConnectionStatus.Connected)
-                  AnimatedBuilder(
-                    animation: _scannerController,
-                    builder: (context, child) => Align(
-                      alignment: Alignment((_scannerController.value * 2) - 1, 0),
-                      child: Container(
-                        width: 2, height: double.infinity,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                            colors: [stateColor.withOpacity(0), stateColor.withOpacity(0.8), stateColor.withOpacity(0)],
-                          ),
-                          boxShadow: [BoxShadow(color: stateColor.withOpacity(0.5), blurRadius: 8, spreadRadius: 2)],
-                        ),
-                      ),
-                    ),
+                const Icon(Icons.verified_rounded,
+                    size: 14, color: AppColors.success),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Сквозное шифрование активно',
+                    style: t.labelSmall?.copyWith(color: AppColors.success),
                   ),
+                ),
               ],
             ),
           ),
@@ -886,241 +628,109 @@ class _StatusScreenState extends State<StatusScreen> with TickerProviderStateMix
       ),
     );
   }
+}
 
-  Widget _buildRelayBlock() {
-    return AnimatedBuilder(
-      animation: _glowController,
-      builder: (context, child) {
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0F0F0F),
-            borderRadius: BorderRadius.circular(8),
-            border: Border(
-              left: BorderSide(
-                color: _turnStatusColor,
-                width: 3 + (_currentStatus == ConnectionStatus.Connected ? _glowController.value : 0),
-              ),
-            ),
-            boxShadow: _currentStatus == ConnectionStatus.Connected
-                ? [BoxShadow(color: _turnStatusColor.withOpacity(0.1 + 0.1 * _glowController.value), blurRadius: 10, offset: const Offset(-5, 0))]
-                : null,
+class _SecurityItem extends StatelessWidget {
+  const _SecurityItem({
+    required this.label,
+    required this.value,
+    this.isMono = false,
+  });
+
+  final String label;
+  final String value;
+  final bool isMono;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: t.labelSmall?.copyWith(color: AppColors.textTertiary)),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: t.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            fontFamily: isMono ? 'monospace' : null,
+            letterSpacing: isMono ? 1.5 : null,
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        ),
+      ],
+    );
+  }
+}
+
+class _DeviceCard extends StatelessWidget {
+  const _DeviceCard({
+    required this.model,
+    required this.os,
+    required this.appVersion,
+  });
+
+  final String model;
+  final String os;
+  final String appVersion;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("RELAY NODE", style: TextStyle(color: Colors.white60, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      if (_currentStatus == ConnectionStatus.Connected)
-                        Container(
-                          width: 5, height: 5,
-                          margin: const EdgeInsets.only(right: 5),
-                          decoration: BoxDecoration(
-                            color: _turnStatusColor,
-                            shape: BoxShape.circle,
-                            boxShadow: [BoxShadow(color: _turnStatusColor.withOpacity(0.5), blurRadius: 4)],
-                          ),
-                        ),
-                      Text(_turnStatusText, style: TextStyle(color: _turnStatusColor, fontSize: 12, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ],
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text("PING", style: TextStyle(color: Colors.grey, fontSize: 9)),
-                  const SizedBox(height: 2),
-                  Text(
-                    _currentPing > 0 ? "${_currentPing}ms" : "---",
-                    style: TextStyle(
-                      color: _currentPing > 0 ? const Color(0xFF6AD394) : Colors.grey,
-                      fontFamily: 'monospace',
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
+              Icon(Icons.smartphone_rounded, size: 16, color: AppColors.accent),
+              const SizedBox(width: 6),
+              Text('Устройство',
+                  style:
+                      t.labelMedium?.copyWith(color: AppColors.textTertiary)),
             ],
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildInfoGrid() {
-    return AnimatedBuilder(
-      animation: _cardRevealController,
-      builder: (context, child) {
-        return GridView.count(
-          crossAxisCount: 3,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: 1.0,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            _buildAnimatedCard(0, "ПРОТОКОЛ", "WSS", Icons.api, false),
-            _buildAnimatedCard(1, "CIPHER", "ChaCha20", Icons.lock, true),
-            _buildAnimatedCard(2, "DH", "X25519", Icons.swap_horiz, true),
-            _buildAnimatedCard(3, "MAC", "Poly1305", Icons.verified_user, true),
-            _buildAnimatedCard(4, "BUILD", AppConfig.appVersion, Icons.code, false),
-            _buildAnimatedCard(5, "KEY ID", _displayedKeyId, Icons.fingerprint, true, isKeyId: true),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildAnimatedCard(int index, String title, String value, IconData icon, bool isSecurityCard, {bool isKeyId = false}) {
-    final delay = index * 0.1;
-    final progress = ((_cardRevealController.value - delay) / (1 - delay)).clamp(0.0, 1.0);
-    
-    return Transform.translate(
-      offset: Offset(0, 15 * (1 - progress)),
-      child: Opacity(
-        opacity: progress,
-        child: AnimatedBuilder(
-          animation: _glowController,
-          builder: (context, child) {
-            final glowIntensity = isSecurityCard && _currentStatus == ConnectionStatus.Connected
-                ? _glowController.value
-                : 0.0;
-
-            return Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF121212),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isSecurityCard 
-                      ? const Color(0xFF6AD394).withOpacity(0.1 + 0.15 * glowIntensity)
-                      : Colors.white10,
-                  width: isSecurityCard ? 1 + 0.5 * glowIntensity : 1,
-                ),
-                boxShadow: isSecurityCard && _currentStatus == ConnectionStatus.Connected
-                    ? [BoxShadow(
-                        color: const Color(0xFF6AD394).withOpacity(0.05 + 0.08 * glowIntensity),
-                        blurRadius: 8 + 4 * glowIntensity,
-                      )]
-                    : null,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        icon,
-                        size: 12,
-                        color: Colors.grey.withOpacity(0.6 + 0.4 * glowIntensity),
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: const TextStyle(color: Colors.grey, fontSize: 7, letterSpacing: 0.5),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  isKeyId
-                      ? _buildKeyIdText(value)
-                      : Text(
-                          value,
-                          style: TextStyle(
-                            color: isSecurityCard 
-                                ? Color.lerp(Colors.white, const Color(0xFF6AD394), glowIntensity * 0.3)
-                                : Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                ],
-              ),
-            );
-          },
-        ),
+          const SizedBox(height: 12),
+          _DeviceRow(label: 'Модель', value: model),
+          const SizedBox(height: 8),
+          _DeviceRow(label: 'Система', value: os),
+          const SizedBox(height: 8),
+          _DeviceRow(label: 'Orpheus', value: 'v$appVersion'),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildKeyIdText(String value) {
+class _DeviceRow extends StatelessWidget {
+  const _DeviceRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
     return Row(
-      children: List.generate(min(value.length, 8), (i) {
-        final isScanning = _isKeyIdScanning && i == _keyIdScanIndex;
-        return Text(
-          value[i],
-          style: TextStyle(
-            color: isScanning ? const Color(0xFF6AD394) : Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'monospace',
-            shadows: isScanning
-                ? [const Shadow(color: Color(0xFF6AD394), blurRadius: 8)]
-                : null,
-          ),
-        );
-      }),
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(label,
+              style: t.bodySmall?.copyWith(color: AppColors.textTertiary)),
+        ),
+        Expanded(
+          child: Text(value,
+              style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
+        ),
+      ],
     );
   }
 }
 
-class SignalChartPainter extends CustomPainter {
-  final List<double> history;
-  final Color color;
-  SignalChartPainter({required this.history, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke
-      ..strokeJoin = StrokeJoin.round;
-
-    final path = Path();
-    final stepX = size.width / (history.length - 1);
-
-    for (int i = 0; i < history.length; i++) {
-      final x = i * stepX;
-      final y = size.height - (history[i] * size.height);
-      if (i == 0) path.moveTo(x, y);
-      else {
-        final prevX = (i - 1) * stepX;
-        final prevY = size.height - (history[i - 1] * size.height);
-        final cX = prevX + (x - prevX) / 2;
-        path.cubicTo(cX, prevY, cX, y, x, y);
-      }
-    }
-    canvas.drawPath(path, paint);
-
-    final fillPaint = Paint()
-      ..style = PaintingStyle.fill
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [color.withOpacity(0.2), Colors.transparent],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-
-    final fillPath = Path.from(path);
-    fillPath.lineTo(size.width, size.height);
-    fillPath.lineTo(0, size.height);
-    fillPath.close();
-    canvas.drawPath(fillPath, fillPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
+// Страны с ограничениями трафика
+const Set<String> _trafficControlCountries = <String>{
+  'RU', 'BY', 'CN', 'IR', 'KP', 'SY', 'TM', 'AF', 'CU', 'VE',
+};

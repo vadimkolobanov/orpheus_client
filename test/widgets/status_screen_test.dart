@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:orpheus_project/screens/status_screen.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _FakeHttpClient extends http.BaseClient {
   _FakeHttpClient(this._handler);
@@ -23,10 +24,17 @@ class _FakeHttpClient extends http.BaseClient {
 }
 
 void main() {
-  testWidgets('StatusScreen: smoke (без таймеров) и отображает заголовок', (tester) async {
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
+
+  testWidgets('StatusScreen: smoke (без таймеров) и отображает заголовок',
+      (tester) async {
     final client = _FakeHttpClient((req) async {
       if (req.url.toString().startsWith('http://ip-api.com/json/')) {
-        return http.Response(jsonEncode({'countryCode': 'US', 'country': 'United States'}), 200);
+        return http.Response(
+            jsonEncode({'countryCode': 'US', 'country': 'United States'}), 200);
       }
       return http.Response('not found', 404);
     });
@@ -44,12 +52,6 @@ void main() {
 
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('СИСТЕМНЫЙ МОНИТОР'), findsOneWidget);
+    expect(find.text('Система'), findsOneWidget);
   });
 }
-
-
-
-
-
-

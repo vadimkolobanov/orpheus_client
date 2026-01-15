@@ -1,223 +1,232 @@
 // lib/theme/app_theme.dart
+// Quiet Premium — серебро + зелёный акцент
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:orpheus_project/theme/app_tokens.dart';
 
 class AppTheme {
-  // Основные цвета
-  static const Color background = Color(0xFF050505);
-  static const Color surface = Color(0xFF121212);
-  static const Color surfaceLight = Color(0xFF1A1A1A);
-  static const Color primarySilver = Color(0xFFB0BEC5);
-  static const Color accentSilver = Color(0xFFECEFF1);
-  static const Color accentGreen = Color(0xFF6AD394);
-  static const Color accentBlue = Color(0xFF4A90D9);
-  static const Color textWhite = Color(0xFFEEEEEE);
-  static const Color textGrey = Color(0xFFAAAAAA);
-  static const Color errorRed = Color(0xFFCF6679);
-
   static ThemeData get darkTheme {
-    final baseTheme = ThemeData.dark();
+    final baseTheme = ThemeData.dark(useMaterial3: true);
 
     return baseTheme.copyWith(
-      scaffoldBackgroundColor: background,
-      colorScheme: const ColorScheme.dark(
-        primary: primarySilver,
+      scaffoldBackgroundColor: AppColors.bg,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.action,
+        brightness: Brightness.dark,
+        primary: AppColors.action,
         onPrimary: Colors.black,
-        secondary: accentSilver,
-        surface: surface,
-        onSurface: textWhite,
-        error: errorRed,
+        secondary: AppColors.primary,
+        onSecondary: Colors.black,
+        surface: AppColors.surface,
+        onSurface: AppColors.textPrimary,
+        error: AppColors.danger,
+        onError: Colors.white,
       ),
 
       // ТИПОГРАФИКА
-      textTheme: GoogleFonts.interTextTheme(baseTheme.textTheme).copyWith(
-        titleLarge: const TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.bold,
-          color: textWhite,
-          letterSpacing: 0.5,
-        ),
-        titleMedium: const TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
-          color: textWhite,
-        ),
-        bodyLarge: const TextStyle(
-          fontSize: 16,
-          height: 1.4,
-          color: textWhite,
-        ),
-        bodyMedium: const TextStyle(
-          fontSize: 14,
-          color: textGrey,
-        ),
-        labelLarge: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 1.2,
-        ),
-      ),
+      textTheme: AppTypography.textTheme(GoogleFonts.interTextTheme(baseTheme.textTheme)),
 
-      // APP BAR
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.black,
-        foregroundColor: primarySilver,
+      // APP BAR — чистый, без лишнего
+      appBarTheme: AppBarTheme(
+        backgroundColor: AppColors.bg,
+        foregroundColor: AppColors.textPrimary,
         elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: true,
-        titleTextStyle: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: primarySilver,
-          letterSpacing: 2,
+        titleTextStyle: GoogleFonts.inter(
+          color: AppColors.textPrimary,
+          fontWeight: FontWeight.w600,
+          fontSize: 17,
+          letterSpacing: 0.2,
         ),
       ),
 
       // КАРТОЧКИ
       cardTheme: CardThemeData(
-        color: surface,
+        color: AppColors.surface,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
+          borderRadius: AppRadii.md,
+          side: BorderSide(color: AppColors.outline, width: 1),
         ),
         margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
       ),
 
       // ДИАЛОГИ
       dialogTheme: DialogThemeData(
-        backgroundColor: const Color(0xFF151515),
+        backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: primarySilver.withOpacity(0.2)),
+          borderRadius: AppRadii.lg,
+          side: BorderSide(color: AppColors.outline),
         ),
-        titleTextStyle: const TextStyle(
+        titleTextStyle: GoogleFonts.inter(
+          color: AppColors.textPrimary,
+          fontWeight: FontWeight.w600,
           fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: primarySilver,
-          letterSpacing: 0.5,
         ),
-        contentTextStyle: const TextStyle(
-          color: textWhite,
-          fontSize: 15,
-          height: 1.4,
+        contentTextStyle: GoogleFonts.inter(
+          color: AppColors.textSecondary,
+          fontSize: 14,
+          height: 1.5,
         ),
       ),
 
       // ПОЛЯ ВВОДА
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFF1E1E1E),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        hintStyle: TextStyle(color: Colors.grey.shade600),
+        fillColor: AppColors.surface2,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        hintStyle: TextStyle(color: AppColors.textTertiary),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppRadii.md,
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.05)),
+          borderRadius: AppRadii.md,
+          borderSide: BorderSide(color: AppColors.outline),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: primarySilver, width: 1.5),
+          borderRadius: AppRadii.md,
+          borderSide: BorderSide(color: AppColors.action.withOpacity(0.6), width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: errorRed),
+          borderRadius: AppRadii.md,
+          borderSide: BorderSide(color: AppColors.danger),
         ),
       ),
 
-      // КНОПКИ
+      // КНОПКИ — зелёный action как primary CTA
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: primarySilver,
+          backgroundColor: AppColors.action,
           foregroundColor: Colors.black,
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          textStyle: const TextStyle(
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
+          minimumSize: const Size(double.infinity, 52),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: AppRadii.md),
+          textStyle: GoogleFonts.inter(
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+            letterSpacing: 0.3,
           ),
         ),
       ),
 
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: primarySilver,
-          textStyle: const TextStyle(
-            fontWeight: FontWeight.w500,
-          ),
+          foregroundColor: AppColors.action,
+          textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
         ),
       ),
 
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: primarySilver,
-          side: BorderSide(color: primarySilver.withOpacity(0.3)),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+          foregroundColor: AppColors.primary,
+          side: BorderSide(color: AppColors.outline),
+          minimumSize: const Size(double.infinity, 52),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: AppRadii.md),
+          textStyle: GoogleFonts.inter(
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
           ),
         ),
       ),
 
       // FAB
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: primarySilver,
+        backgroundColor: AppColors.action,
         foregroundColor: Colors.black,
         elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: AppRadii.md),
+      ),
+
+      // NAVIGATION BAR — серебряные иконки, зелёный индикатор
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: AppColors.surface,
+        indicatorColor: AppColors.action.withOpacity(0.15),
+        surfaceTintColor: Colors.transparent,
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return GoogleFonts.inter(
+              color: AppColors.action,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            );
+          }
+          return GoogleFonts.inter(
+            color: AppColors.textTertiary,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          );
+        }),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return const IconThemeData(color: AppColors.action, size: 24);
+          }
+          return const IconThemeData(color: AppColors.textTertiary, size: 24);
+        }),
       ),
 
       // ИКОНКИ
-      iconTheme: const IconThemeData(color: primarySilver),
+      iconTheme: const IconThemeData(color: AppColors.textSecondary),
 
       // SNACKBAR
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: const Color(0xFF1E1E1E),
-        contentTextStyle: const TextStyle(color: textWhite),
+        backgroundColor: AppColors.surface2,
+        contentTextStyle: GoogleFonts.inter(color: AppColors.textPrimary),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: AppRadii.sm),
       ),
 
       // DIVIDER
       dividerTheme: DividerThemeData(
-        color: Colors.white.withOpacity(0.05),
+        color: AppColors.divider,
         thickness: 1,
       ),
 
-      // PROGRESS INDICATOR
+      // PROGRESS INDICATOR — зелёный
       progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: accentGreen,
-        linearTrackColor: surface,
+        color: AppColors.action,
+        linearTrackColor: AppColors.surface,
       ),
 
       // SLIDER
       sliderTheme: SliderThemeData(
-        activeTrackColor: primarySilver,
-        inactiveTrackColor: surface,
-        thumbColor: primarySilver,
-        overlayColor: primarySilver.withOpacity(0.2),
+        activeTrackColor: AppColors.action,
+        inactiveTrackColor: AppColors.surface,
+        thumbColor: AppColors.action,
+        overlayColor: AppColors.action.withOpacity(0.15),
       ),
 
       // SWITCH
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return accentGreen;
-          return Colors.grey;
+          if (states.contains(WidgetState.selected)) return AppColors.action;
+          return AppColors.primaryDark;
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return accentGreen.withOpacity(0.3);
-          return Colors.grey.withOpacity(0.3);
+          if (states.contains(WidgetState.selected)) {
+            return AppColors.action.withOpacity(0.35);
+          }
+          return AppColors.surface2;
         }),
+        trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return Colors.transparent;
+          return AppColors.outline;
+        }),
+      ),
+
+      // CHECKBOX
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return AppColors.action;
+          return Colors.transparent;
+        }),
+        checkColor: WidgetStateProperty.all(Colors.black),
+        side: BorderSide(color: AppColors.outline, width: 1.5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
       ),
 
       // PAGE TRANSITIONS

@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:crypto/crypto.dart';
 import 'package:orpheus_project/models/security_config.dart';
+import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 
@@ -326,6 +327,46 @@ class AuthService {
     _config = _config.copyWith(isPanicGestureEnabled: enabled);
     await _saveConfig();
     print("AUTH: Panic gesture ${enabled ? 'включен' : 'выключен'}");
+  }
+
+  // === АВТОУДАЛЕНИЕ СООБЩЕНИЙ ===
+
+  /// Текущая политика хранения сообщений
+  MessageRetentionPolicy get messageRetention => _config.messageRetention;
+
+  /// Время последней очистки сообщений
+  DateTime? get lastMessageCleanupAt => _config.lastMessageCleanupAt;
+
+  /// Установить политику хранения сообщений
+  Future<void> setMessageRetention(MessageRetentionPolicy policy) async {
+    _config = _config.copyWith(messageRetention: policy);
+    await _saveConfig();
+    print("AUTH: Message retention установлен: ${policy.displayName}");
+  }
+
+  /// Обновить время последней очистки сообщений
+  Future<void> updateLastMessageCleanup([DateTime? time]) async {
+    _config = _config.copyWith(lastMessageCleanupAt: time ?? _now());
+    await _saveConfig();
+  }
+
+  /// Проверить, нужна ли очистка сообщений
+  /// Возвращает true если:
+  /// 1. Политика != all (есть ограничение)
+  /// 2. Прошло больше часа с последней очистки (или очистка не выполнялась)
+  bool get shouldRunMessageCleanup {
+    if (_config.messageRetention == MessageRetentionPolicy.all) {
+      return false; // Храним всё — очистка не нужна
+    }
+    
+    final lastCleanup = _config.lastMessageCleanupAt;
+    if (lastCleanup == null) {
+      return true; // Очистка ни разу не выполнялась
+    }
+    
+    // Не чистить чаще чем раз в час (оптимизация)
+    const cleanupInterval = Duration(hours: 1);
+    return _now().difference(lastCleanup) >= cleanupInterval;
   }
 
   // === БЛОКИРОВКА И РАЗБЛОКИРОВКА ===

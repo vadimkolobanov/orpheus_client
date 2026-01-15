@@ -1,9 +1,13 @@
-// lib/welcome_screen.dart
-
 import 'dart:async';
-import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:orpheus_project/main.dart';
+import 'package:orpheus_project/theme/app_tokens.dart';
+import 'package:orpheus_project/widgets/app_button.dart';
+import 'package:orpheus_project/widgets/app_card.dart';
+import 'package:orpheus_project/widgets/app_dialog.dart';
+import 'package:orpheus_project/widgets/app_text_field.dart';
 
 class WelcomeScreen extends StatefulWidget {
   final VoidCallback onAuthComplete;
@@ -13,285 +17,271 @@ class WelcomeScreen extends StatefulWidget {
   State<WelcomeScreen> createState() => _WelcomeScreenState();
 }
 
-class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateMixin {
+class _WelcomeScreenState extends State<WelcomeScreen>
+    with TickerProviderStateMixin {
   final _importController = TextEditingController();
 
   Timer? _revealTimer;
-  
-  // Анимации
-  late AnimationController _particlesController;
-  late AnimationController _glowController;
-  late AnimationController _revealController;
-  late AnimationController _pulseController;
-  late AnimationController _scanLineController;
-  
-  // Анимации появления элементов
-  late Animation<double> _logoOpacity;
-  late Animation<double> _logoScale;
-  late Animation<double> _titleOpacity;
-  late Animation<Offset> _titleSlide;
-  late Animation<double> _subtitleOpacity;
-  late Animation<double> _buttonsOpacity;
-  late Animation<Offset> _buttonsSlide;
+  late final AnimationController _introController;
+  late final AnimationController _haloController;
+  bool _animationsStarted = false;
+
+  late final Animation<double> _logoOpacity;
+  late final Animation<double> _logoScale;
+  late final Animation<double> _titleOpacity;
+  late final Animation<Offset> _titleSlide;
+  late final Animation<double> _buttonsOpacity;
+  late final Animation<Offset> _buttonsSlide;
 
   @override
   void initState() {
     super.initState();
-    
-    // Контроллер частиц
-    _particlesController = AnimationController(
+
+    _introController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 20),
-    )..repeat();
-    
-    // Контроллер glow эффекта
-    _glowController = AnimationController(
+      duration: const Duration(milliseconds: 1050),
+    );
+
+    _haloController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2500),
-    )..repeat(reverse: true);
-    
-    // Контроллер reveal анимации
-    _revealController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2000),
+      duration: const Duration(seconds: 9),
     );
-    
-    // Пульсация кнопки
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat(reverse: true);
-    
-    // Scanning line на логотипе
-    _scanLineController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-    
-    // Настройка staggered анимаций
-    _logoOpacity = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _revealController, curve: const Interval(0.0, 0.4, curve: Curves.easeOut)),
+
+    _logoOpacity = CurvedAnimation(
+      parent: _introController,
+      curve: const Interval(0.0, 0.45, curve: Curves.easeOut),
     );
-    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _revealController, curve: const Interval(0.0, 0.4, curve: Curves.elasticOut)),
+    _logoScale = Tween<double>(begin: 0.92, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _introController,
+        curve: const Interval(0.0, 0.55, curve: Curves.easeOutCubic),
+      ),
     );
-    _titleOpacity = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _revealController, curve: const Interval(0.25, 0.55, curve: Curves.easeOut)),
+    _titleOpacity = CurvedAnimation(
+      parent: _introController,
+      curve: const Interval(0.20, 0.80, curve: Curves.easeOut),
     );
-    _titleSlide = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
-      CurvedAnimation(parent: _revealController, curve: const Interval(0.25, 0.55, curve: Curves.easeOut)),
+    _titleSlide =
+        Tween<Offset>(begin: const Offset(0, 0.10), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _introController,
+        curve: const Interval(0.20, 0.80, curve: Curves.easeOutCubic),
+      ),
     );
-    _subtitleOpacity = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _revealController, curve: const Interval(0.4, 0.7, curve: Curves.easeOut)),
+    _buttonsOpacity = CurvedAnimation(
+      parent: _introController,
+      curve: const Interval(0.55, 1.0, curve: Curves.easeOut),
     );
-    _buttonsOpacity = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _revealController, curve: const Interval(0.6, 1.0, curve: Curves.easeOut)),
+    _buttonsSlide =
+        Tween<Offset>(begin: const Offset(0, 0.10), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _introController,
+        curve: const Interval(0.55, 1.0, curve: Curves.easeOutCubic),
+      ),
     );
-    _buttonsSlide = Tween<Offset>(begin: const Offset(0, 0.5), end: Offset.zero).animate(
-      CurvedAnimation(parent: _revealController, curve: const Interval(0.6, 1.0, curve: Curves.easeOut)),
-    );
-    
-    // Запуск reveal анимации
+
     _revealTimer?.cancel();
-    _revealTimer = Timer(const Duration(milliseconds: 300), () {
+    _revealTimer = Timer(const Duration(milliseconds: 180), () {
       if (!mounted) return;
-      _revealController.forward();
+      _introController.forward();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_animationsStarted) return;
+    _animationsStarted = true;
+
+    final disableAnimations = MediaQuery.of(context).disableAnimations;
+    if (!disableAnimations) {
+      _haloController.repeat(reverse: true);
+    }
   }
 
   @override
   void dispose() {
     _revealTimer?.cancel();
-    _particlesController.dispose();
-    _glowController.dispose();
-    _revealController.dispose();
-    _pulseController.dispose();
-    _scanLineController.dispose();
+    _importController.dispose();
+    _introController.dispose();
+    _haloController.dispose();
     super.dispose();
   }
 
-  void _createNewAccount() async {
+  Future<void> _createNewAccount() async {
+    HapticFeedback.mediumImpact();
     await cryptoService.generateNewKeys();
     widget.onAuthComplete();
   }
 
+  Future<void> _importAccount(String key) async {
+    HapticFeedback.lightImpact();
+    await cryptoService.importPrivateKey(key);
+    widget.onAuthComplete();
+  }
+
   void _showImportDialog() {
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("ВОССТАНОВЛЕНИЕ"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("Введите ваш Приватный ключ:", style: TextStyle(color: Colors.white70)),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _importController,
-              maxLines: 4,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-              decoration: const InputDecoration(
-                hintText: "Вставьте ключ...",
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("ОТМЕНА")),
-          ElevatedButton(
-            onPressed: () async {
-              final key = _importController.text.trim();
-              if (key.isEmpty) return;
-              try {
-                await cryptoService.importPrivateKey(key);
-                if (mounted) {
-                  Navigator.pop(context);
-                  widget.onAuthComplete();
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red),
-                  );
-                }
-              }
-            },
-            child: const Text("ИМПОРТ"),
-          ),
-        ],
-      ),
+      builder: (context) {
+        return _ImportKeyDialog(
+          controller: _importController,
+          onImport: () async {
+            final key = _importController.text.trim();
+            if (key.isEmpty) return;
+            try {
+              await _importAccount(key);
+              if (context.mounted) Navigator.pop(context);
+            } catch (e) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Ошибка: $e'),
+                  backgroundColor: AppColors.danger,
+                ),
+              );
+            }
+          },
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final disableAnimations = MediaQuery.of(context).disableAnimations;
+
     return Scaffold(
+      backgroundColor: AppColors.bg,
       body: Stack(
         children: [
-          // Градиентный фон
-          Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF0A0A0A), Color(0xFF000000)],
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    AppColors.bg,
+                    AppColors.bg.withOpacity(0.94),
+                    const Color(0xFF06070A),
+                  ],
+                ),
               ),
             ),
           ),
-          
-          // Частицы на фоне
-          AnimatedBuilder(
-            animation: _particlesController,
-            builder: (context, child) => CustomPaint(
-              size: Size.infinite,
-              painter: _WelcomeParticlesPainter(_particlesController.value),
+
+          // Signature moment (B): один “дышащий” нимб у логотипа, без частиц/сканлайнов.
+          if (!disableAnimations)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: RepaintBoundary(
+                    child: AnimatedBuilder(
+                      animation: _haloController,
+                      builder: (context, _) {
+                        final v =
+                            Curves.easeInOut.transform(_haloController.value);
+                        return Container(
+                          width: 320 + 26 * v,
+                          height: 320 + 26 * v,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: RadialGradient(
+                              colors: [
+                                AppColors.accent.withOpacity(0.10 + 0.05 * v),
+                                AppColors.info.withOpacity(0.06 + 0.04 * v),
+                                Colors.transparent,
+                              ],
+                              stops: const [0.0, 0.45, 1.0],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
             ),
-          ),
-          
-          // Основной контент
+
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32.0),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Логотип с glow эффектом
                   AnimatedBuilder(
-                    animation: Listenable.merge([_revealController, _glowController, _scanLineController]),
-                    builder: (context, child) {
+                    animation: _introController,
+                    builder: (context, _) {
                       return Opacity(
                         opacity: _logoOpacity.value,
                         child: Transform.scale(
                           scale: _logoScale.value,
-                          child: Stack(
-                            alignment: Alignment.center,
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface.withOpacity(0.72),
+                              borderRadius:
+                                  const BorderRadius.all(Radius.circular(28)),
+                              border: Border.all(
+                                  color: AppColors.outline.withOpacity(0.85)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.accent.withOpacity(0.12),
+                                  blurRadius: 26,
+                                  spreadRadius: -12,
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius:
+                                  const BorderRadius.all(Radius.circular(20)),
+                              child: Image.asset(
+                                'assets/images/logo.png',
+                                height: 88,
+                                width: 88,
+                                fit: BoxFit.cover,
+                                errorBuilder: (c, e, s) {
+                                  return Container(
+                                    width: 88,
+                                    height: 88,
+                                    color: AppColors.surface2,
+                                    alignment: Alignment.center,
+                                    child: const Icon(Icons.shield,
+                                        size: 44, color: AppColors.accent),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 18),
+                  AnimatedBuilder(
+                    animation: _introController,
+                    builder: (context, _) {
+                      return SlideTransition(
+                        position: _titleSlide,
+                        child: Opacity(
+                          opacity: _titleOpacity.value,
+                          child: Column(
                             children: [
-                              // Glow rings
-                              ...List.generate(3, (i) {
-                                final size = 180.0 + i * 30;
-                                return Container(
-                                  width: size,
-                                  height: size,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: const Color(0xFFB0BEC5).withOpacity(
-                                        (0.1 - i * 0.03) * (0.5 + 0.5 * _glowController.value)
-                                      ),
-                                      width: 1,
-                                    ),
-                                  ),
-                                );
-                              }),
-                              // Основной glow
-                              Container(
-                                width: 200,
-                                height: 200,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFFB0BEC5).withOpacity(0.15 + 0.1 * _glowController.value),
-                                      blurRadius: 40 + 20 * _glowController.value,
-                                      spreadRadius: 5,
-                                    ),
-                                  ],
+                              Text(
+                                'Orpheus',
+                                style: t.displaySmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1.6,
                                 ),
                               ),
-                              // Логотип
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(80),
-                                child: Stack(
-                                  children: [
-                                    Image.asset(
-                                      'assets/images/logo.png',
-                                      height: 160,
-                                      errorBuilder: (c, e, s) {
-                                        return Container(
-                                          width: 160,
-                                          height: 160,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            gradient: RadialGradient(
-                                              colors: [
-                                                const Color(0xFFB0BEC5).withOpacity(0.3),
-                                                Colors.transparent,
-                                              ],
-                                            ),
-                                          ),
-                                          child: const Icon(Icons.shield, size: 80, color: Color(0xFFB0BEC5)),
-                                        );
-                                      },
-                                    ),
-                                    // Scanning line
-                                    Positioned(
-                                      top: _scanLineController.value * 160,
-                                      left: 0,
-                                      right: 0,
-                                      child: Container(
-                                        height: 2,
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: [
-                                              Colors.transparent,
-                                              const Color(0xFFB0BEC5).withOpacity(0.8),
-                                              Colors.transparent,
-                                            ],
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: const Color(0xFFB0BEC5).withOpacity(0.5),
-                                              blurRadius: 10,
-                                              spreadRadius: 2,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Защищённая связь без лишнего шума',
+                                style: t.bodyMedium
+                                    ?.copyWith(color: AppColors.textSecondary),
+                                textAlign: TextAlign.center,
                               ),
                             ],
                           ),
@@ -299,196 +289,60 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
                       );
                     },
                   ),
-
-                  const SizedBox(height: 40),
-
-                  // Название ORPHEUS
+                  const SizedBox(height: 28),
                   AnimatedBuilder(
-                    animation: _revealController,
-                    builder: (context, child) {
-                      return SlideTransition(
-                        position: _titleSlide,
-                        child: Opacity(
-                          opacity: _titleOpacity.value,
-                          child: ShaderMask(
-                            shaderCallback: (bounds) => LinearGradient(
-                              colors: [
-                                const Color(0xFFEEEEEE),
-                                const Color(0xFFB0BEC5),
-                                const Color(0xFFEEEEEE),
-                              ],
-                              stops: [
-                                0.0,
-                                0.5 + 0.5 * sin(_glowController.value * pi),
-                                1.0,
-                              ],
-                            ).createShader(bounds),
-                            child: const Text(
-                              "ORPHEUS",
-                              style: TextStyle(
-                                fontSize: 42,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 8.0,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  
-                  const SizedBox(height: 8),
-                  
-                  // Подзаголовок
-                  AnimatedBuilder(
-                    animation: _revealController,
-                    builder: (context, child) {
-                      return Opacity(
-                        opacity: _subtitleOpacity.value,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _buildAnimatedDot(0),
-                            const SizedBox(width: 8),
-                            const Text(
-                              "SECURE COMMUNICATION",
-                              style: TextStyle(
-                                fontSize: 11,
-                                letterSpacing: 4.0,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            _buildAnimatedDot(0.5),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 80),
-
-                  // Кнопки
-                  AnimatedBuilder(
-                    animation: Listenable.merge([_revealController, _pulseController, _glowController]),
-                    builder: (context, child) {
+                    animation: _introController,
+                    builder: (context, _) {
                       return SlideTransition(
                         position: _buttonsSlide,
                         child: Opacity(
                           opacity: _buttonsOpacity.value,
                           child: Column(
                             children: [
-                              // Кнопка создания аккаунта с glow
-                              Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFFB0BEC5).withOpacity(0.2 + 0.15 * _pulseController.value),
-                                      blurRadius: 20 + 10 * _pulseController.value,
-                                      spreadRadius: -2,
+                              AppButton(
+                                label: 'Создать аккаунт',
+                                icon: Icons.add_circle_outline,
+                                onPressed: _createNewAccount,
+                              ),
+                              const SizedBox(height: 10),
+                              AppButton(
+                                label: 'Восстановить из ключа',
+                                variant: AppButtonVariant.secondary,
+                                icon: Icons.key,
+                                onPressed: _showImportDialog,
+                              ),
+                              const SizedBox(height: 16),
+                              AppCard(
+                                radius: AppRadii.lg,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 36,
+                                      height: 36,
+                                      decoration: BoxDecoration(
+                                        color:
+                                            AppColors.success.withOpacity(0.12),
+                                        borderRadius: AppRadii.sm,
+                                        border: Border.all(
+                                            color: AppColors.success
+                                                .withOpacity(0.22)),
+                                      ),
+                                      child: const Icon(Icons.lock_outline,
+                                          color: AppColors.success, size: 18),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        'End‑to‑end шифрование',
+                                        style: t.bodyMedium?.copyWith(
+                                            fontWeight: FontWeight.w600),
+                                      ),
                                     ),
                                   ],
-                                ),
-                                child: SizedBox(
-                                  width: double.infinity,
-                                  height: 60,
-                                  child: ElevatedButton(
-                                    onPressed: _createNewAccount,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFFCFD8DC),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.add_circle_outline,
-                                          color: Colors.black.withOpacity(0.8),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        const Text(
-                                          "СОЗДАТЬ АККАУНТ",
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                            letterSpacing: 1.5,
-                                            color: Colors.black,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                              const SizedBox(height: 20),
-
-                              // Кнопка восстановления
-                              SizedBox(
-                                width: double.infinity,
-                                height: 56,
-                                child: OutlinedButton(
-                                  onPressed: _showImportDialog,
-                                  style: OutlinedButton.styleFrom(
-                                    side: BorderSide(
-                                      color: Colors.grey.withOpacity(0.3 + 0.2 * _glowController.value),
-                                      width: 1,
-                                    ),
-                                    foregroundColor: Colors.white70,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.key, size: 18, color: Colors.grey.shade500),
-                                      const SizedBox(width: 10),
-                                      const Text(
-                                        "ВОССТАНОВИТЬ ИЗ КЛЮЧА",
-                                        style: TextStyle(letterSpacing: 1),
-                                      ),
-                                    ],
-                                  ),
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                  
-                  const SizedBox(height: 40),
-                  
-                  // Индикатор версии внизу
-                  AnimatedBuilder(
-                    animation: _revealController,
-                    builder: (context, child) {
-                      return Opacity(
-                        opacity: _buttonsOpacity.value * 0.5,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 4,
-                              height: 4,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF6AD394).withOpacity(0.5 + 0.5 * _glowController.value),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              "END-TO-END ENCRYPTED",
-                              style: TextStyle(
-                                fontSize: 9,
-                                letterSpacing: 2,
-                                color: Colors.grey.shade700,
-                              ),
-                            ),
-                          ],
                         ),
                       );
                     },
@@ -501,88 +355,82 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
       ),
     );
   }
-  
-  Widget _buildAnimatedDot(double phaseOffset) {
-    return AnimatedBuilder(
-      animation: _glowController,
-      builder: (context, child) {
-        final phase = (_glowController.value + phaseOffset) % 1.0;
-        return Container(
-          width: 4,
-          height: 4,
-          decoration: BoxDecoration(
-            color: const Color(0xFFB0BEC5).withOpacity(0.3 + 0.4 * phase),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFB0BEC5).withOpacity(0.3 * phase),
-                blurRadius: 4,
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
 }
 
-// Частицы на фоне приветственного экрана
-class _WelcomeParticlesPainter extends CustomPainter {
-  final double animationValue;
-  _WelcomeParticlesPainter(this.animationValue);
+class _ImportKeyDialog extends StatelessWidget {
+  const _ImportKeyDialog({
+    required this.controller,
+    required this.onImport,
+  });
+
+  final TextEditingController controller;
+  final VoidCallback onImport;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..style = PaintingStyle.fill;
-    final random = Random(42); // Фиксированный seed для стабильности
-    
-    for (int i = 0; i < 50; i++) {
-      final baseX = random.nextDouble() * size.width;
-      final baseY = random.nextDouble() * size.height;
-      final speed = 0.3 + random.nextDouble() * 0.7;
-      final particleSize = 1.0 + random.nextDouble() * 2;
-      
-      // Движение вверх с wrap-around
-      final y = (baseY - animationValue * size.height * speed) % size.height;
-      
-      // Легкое колебание по X
-      final x = baseX + sin(animationValue * 2 * pi + i) * 20;
-      
-      // Пульсация прозрачности
-      final opacity = 0.1 + 0.15 * sin(animationValue * 2 * pi + i * 0.5);
-      
-      canvas.drawCircle(
-        Offset(x, y),
-        particleSize,
-        paint..color = const Color(0xFFB0BEC5).withOpacity(opacity.clamp(0.05, 0.3)),
-      );
-    }
-    
-    // Добавляем несколько более ярких частиц
-    for (int i = 0; i < 8; i++) {
-      final baseX = random.nextDouble() * size.width;
-      final baseY = random.nextDouble() * size.height;
-      final speed = 0.2 + random.nextDouble() * 0.3;
-      
-      final y = (baseY - animationValue * size.height * speed) % size.height;
-      final x = baseX + sin(animationValue * pi + i * 0.7) * 30;
-      
-      final opacity = 0.3 + 0.3 * sin(animationValue * 3 * pi + i);
-      
-      // Glow эффект
-      canvas.drawCircle(
-        Offset(x, y),
-        6,
-        paint..color = const Color(0xFFB0BEC5).withOpacity(opacity.clamp(0.0, 0.15)),
-      );
-      canvas.drawCircle(
-        Offset(x, y),
-        2,
-        paint..color = const Color(0xFFB0BEC5).withOpacity(opacity.clamp(0.1, 0.5)),
-      );
-    }
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: AppRadii.lg,
+        side: BorderSide(color: AppColors.outline),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withOpacity(0.12),
+                    borderRadius: AppRadii.sm,
+                  ),
+                  child: const Icon(Icons.key, color: AppColors.warning, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Восстановление',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Приватный ключ даёт полный доступ к аккаунту. Никому его не показывайте.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 14),
+            AppTextField(
+              controller: controller,
+              hintText: 'Вставьте приватный ключ…',
+              prefixIcon: Icons.vpn_key_outlined,
+              maxLines: 4,
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    label: 'Отмена',
+                    variant: AppButtonVariant.secondary,
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: AppButton(
+                    label: 'Импорт',
+                    onPressed: onImport,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

@@ -17,7 +17,8 @@ void main() {
       binding.window.clearDevicePixelRatioTestValue();
     });
 
-    testWidgets('Отображает основные элементы интерфейса', (WidgetTester tester) async {
+    testWidgets('Отображает основные элементы интерфейса',
+        (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: WelcomeScreen(
@@ -28,20 +29,16 @@ void main() {
       // Даем анимациям дойти до состояния, когда кнопки в видимой области.
       await tester.pump(const Duration(seconds: 3));
 
-      // Проверяем наличие текста "ORPHEUS"
-      expect(find.text('ORPHEUS'), findsOneWidget);
-      
-      // Проверяем наличие текста "SECURE COMMUNICATION"
-      expect(find.text('SECURE COMMUNICATION'), findsOneWidget);
+      // Заголовок
+      expect(find.text('Orpheus'), findsOneWidget);
 
-      // Проверяем наличие кнопки "СОЗДАТЬ АККАУНТ"
-      expect(find.text('СОЗДАТЬ АККАУНТ'), findsOneWidget);
-
-      // Проверяем наличие кнопки "ВОССТАНОВИТЬ ИЗ КЛЮЧА"
-      expect(find.text('ВОССТАНОВИТЬ ИЗ КЛЮЧА'), findsOneWidget);
+      // Кнопки
+      expect(find.text('Создать аккаунт'), findsOneWidget);
+      expect(find.text('Восстановить из ключа'), findsOneWidget);
     });
 
-    testWidgets('Кнопка создания аккаунта вызывает callback', (WidgetTester tester) async {
+    testWidgets('Кнопка создания аккаунта вызывает callback',
+        (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: WelcomeScreen(
@@ -52,7 +49,8 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
 
       // Находим кнопку создания аккаунта
-      final createButton = find.widgetWithText(ElevatedButton, 'СОЗДАТЬ АККАУНТ');
+      final createButton =
+          find.widgetWithText(ElevatedButton, 'Создать аккаунт');
       expect(createButton, findsOneWidget);
 
       // В тестовой среде нет смысла реально вызывать cryptoService,
@@ -61,7 +59,8 @@ void main() {
       expect(btn.onPressed, isNotNull);
     });
 
-    testWidgets('Кнопка восстановления открывает диалог', (WidgetTester tester) async {
+    testWidgets('Кнопка восстановления открывает диалог',
+        (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: WelcomeScreen(
@@ -72,7 +71,8 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
 
       // Находим и нажимаем кнопку восстановления
-      final restoreButton = find.widgetWithText(OutlinedButton, 'ВОССТАНОВИТЬ ИЗ КЛЮЧА');
+      final restoreButton =
+          find.widgetWithText(OutlinedButton, 'Восстановить из ключа');
       expect(restoreButton, findsOneWidget);
 
       // Вызываем onPressed напрямую (из-за сложной анимации/opacity в welcome экране,
@@ -82,13 +82,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Должен появиться диалог восстановления
-      expect(find.text('ВОССТАНОВЛЕНИЕ'), findsOneWidget);
-      expect(find.text('Введите ваш Приватный ключ:'), findsOneWidget);
-      expect(find.text('ОТМЕНА'), findsOneWidget);
-      expect(find.text('ИМПОРТ'), findsOneWidget);
+      expect(find.text('Восстановление'), findsOneWidget);
+      expect(find.textContaining('Приватный ключ'), findsOneWidget);
+      expect(find.text('Отмена'), findsOneWidget);
+      expect(find.text('Импорт'), findsOneWidget);
     });
 
-    testWidgets('Диалог восстановления можно закрыть', (WidgetTester tester) async {
+    testWidgets('Диалог восстановления можно закрыть',
+        (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: WelcomeScreen(
@@ -99,22 +100,24 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
 
       // Открываем диалог
-      final restoreButton = find.widgetWithText(OutlinedButton, 'ВОССТАНОВИТЬ ИЗ КЛЮЧА');
+      final restoreButton =
+          find.widgetWithText(OutlinedButton, 'Восстановить из ключа');
       final btn = tester.widget<OutlinedButton>(restoreButton);
       btn.onPressed?.call();
       await tester.pump(const Duration(milliseconds: 200));
 
       // Закрываем диалог
-      final cancelBtnFinder = find.widgetWithText(TextButton, 'ОТМЕНА');
+      final cancelBtnFinder = find.widgetWithText(TextButton, 'Отмена');
       final cancelBtn = tester.widget<TextButton>(cancelBtnFinder);
       cancelBtn.onPressed?.call();
       await tester.pump(const Duration(milliseconds: 200));
 
       // Диалог должен исчезнуть
-      expect(find.text('ВОССТАНОВЛЕНИЕ'), findsNothing);
+      expect(find.text('Восстановление'), findsNothing);
     });
 
-    testWidgets('Экран использует градиентный фон', (WidgetTester tester) async {
+    testWidgets('Экран использует градиентный фон',
+        (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: WelcomeScreen(
@@ -124,15 +127,25 @@ void main() {
       );
       await tester.pump(const Duration(seconds: 1));
 
-      // Проверяем наличие Container с decoration
-      final container = tester.widget<Container>(
-        find.byType(Container).first,
-      );
-
-      expect(container.decoration, isA<BoxDecoration>());
-      final decoration = container.decoration as BoxDecoration;
-      expect(decoration.gradient, isA<LinearGradient>());
+      // Ищем любой BoxDecoration с LinearGradient (нимб может быть RadialGradient).
+      bool foundLinear = false;
+      for (final w in tester.widgetList(find.byType(DecoratedBox))) {
+        final d = (w as DecoratedBox).decoration;
+        if (d is BoxDecoration && d.gradient is LinearGradient) {
+          foundLinear = true;
+          break;
+        }
+      }
+      if (!foundLinear) {
+        for (final w in tester.widgetList(find.byType(Container))) {
+          final d = (w as Container).decoration;
+          if (d is BoxDecoration && d.gradient is LinearGradient) {
+            foundLinear = true;
+            break;
+          }
+        }
+      }
+      expect(foundLinear, isTrue);
     });
   });
 }
-

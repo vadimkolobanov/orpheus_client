@@ -122,7 +122,19 @@ class DatabaseService {
     if (_isDuressMode) return [];
     
     final db = await instance.database;
-    final maps = await db.query('contacts', orderBy: 'name');
+    
+    // Сортировка по дате последнего сообщения (как в Telegram/WhatsApp):
+    // 1. Контакты с недавними сообщениями — сверху
+    // 2. Контакты без сообщений — снизу (по имени)
+    final maps = await db.rawQuery('''
+      SELECT c.id, c.name, c.publicKey,
+             COALESCE(MAX(m.timestamp), 0) as lastMessageTime
+      FROM contacts c
+      LEFT JOIN messages m ON c.publicKey = m.contactPublicKey
+      GROUP BY c.id, c.name, c.publicKey
+      ORDER BY lastMessageTime DESC, c.name ASC
+    ''');
+    
     return List.generate(maps.length, (i) {
       return Contact(
         id: maps[i]['id'] as int,
@@ -167,6 +179,20 @@ class DatabaseService {
       await txn.delete('messages', where: 'contactPublicKey = ?', whereArgs: [publicKey]);
       await txn.delete('contacts', where: 'id = ?', whereArgs: [id]);
     });
+  }
+
+  /// Обновить имя контакта
+  Future<void> updateContactName(int id, String newName) async {
+    // В duress mode не обновляем
+    if (_isDuressMode) return;
+    
+    final db = await instance.database;
+    await db.update(
+      'contacts',
+      {'name': newName},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   // --- Сообщения ---
@@ -245,9 +271,84 @@ class DatabaseService {
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
+  /// Получить непрочитанные счётчики сразу для списка контактов.
+  ///
+  /// Важно для UI: вместо `FutureBuilder` на каждый элемент списка — один запрос и один rebuild.
+  Future<Map<String, int>> getUnreadCountsForContacts(List<String> contactKeys) async {
+    // В duress mode ничего не показываем.
+    if (_isDuressMode) return <String, int>{};
+    if (contactKeys.isEmpty) return <String, int>{};
+
+    final db = await instance.database;
+    final placeholders = List.filled(contactKeys.length, '?').join(',');
+    final rows = await db.rawQuery(
+      'SELECT contactPublicKey, COUNT(*) as cnt '
+      'FROM messages '
+      'WHERE isRead = 0 AND contactPublicKey IN ($placeholders) '
+      'GROUP BY contactPublicKey',
+      contactKeys,
+    );
+
+    final Map<String, int> result = <String, int>{};
+    for (final row in rows) {
+      final key = row['contactPublicKey'] as String?;
+      final cnt = row['cnt'];
+      if (key == null) continue;
+      result[key] = (cnt is int) ? cnt : (cnt is num ? cnt.toInt() : 0);
+    }
+    return result;
+  }
+
   Future<void> clearChatHistory(String contactKey) async {
     final db = await instance.database;
     await db.delete('messages', where: 'contactPublicKey = ?', whereArgs: [contactKey]);
+  }
+
+  /// Удалить все сообщения старше указанной даты.
+  /// 
+  /// Используется для автоматической очистки сообщений по политике retention.
+  /// Возвращает количество удалённых сообщений.
+  Future<int> deleteMessagesOlderThan(DateTime cutoff) async {
+    // В duress mode не удаляем — это может быть подозрительно
+    // (пользователь под давлением не должен запускать необратимые действия)
+    if (_isDuressMode) return 0;
+    
+    try {
+      final db = await instance.database;
+      final cutoffMs = cutoff.millisecondsSinceEpoch;
+      
+      final deletedCount = await db.delete(
+        'messages',
+        where: 'timestamp < ?',
+        whereArgs: [cutoffMs],
+      );
+      
+      print("DB: Удалено $deletedCount сообщений старше ${cutoff.toIso8601String()}");
+      return deletedCount;
+    } catch (e) {
+      print("DB ERROR: Ошибка удаления старых сообщений: $e");
+      return 0;
+    }
+  }
+
+  /// Получить количество сообщений, которые будут удалены при данном cutoff.
+  /// Используется для preview в UI перед включением политики.
+  Future<int> countMessagesOlderThan(DateTime cutoff) async {
+    if (_isDuressMode) return 0;
+    
+    try {
+      final db = await instance.database;
+      final cutoffMs = cutoff.millisecondsSinceEpoch;
+      
+      final result = await db.rawQuery(
+        'SELECT COUNT(*) FROM messages WHERE timestamp < ?',
+        [cutoffMs],
+      );
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print("DB ERROR: Ошибка подсчёта старых сообщений: $e");
+      return 0;
+    }
   }
 
   Future close() async {

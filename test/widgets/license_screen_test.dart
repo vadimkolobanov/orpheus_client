@@ -20,8 +20,8 @@ void main() {
       ),
     );
 
-    expect(find.text('АКТИВАЦИЯ'), findsOneWidget);
-    expect(find.text('АКТИВИРОВАТЬ'), findsOneWidget);
+    expect(find.text('Активация'), findsOneWidget);
+    expect(find.text('Активировать'), findsOneWidget);
     expect(confirmed, isFalse);
   });
 }
