@@ -9,6 +9,7 @@ import 'package:orpheus_project/models/security_config.dart';
 import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Абстракция для secure storage (нужна для unit-тестов без MethodChannel).
 abstract class AuthSecureStorage {
@@ -412,13 +413,18 @@ class AuthService {
       await cryptoService.deleteAccount();
       
       // 2. Закрываем и удаляем базу данных
-      await DatabaseService.instance.close();
-      // База данных будет пересоздана при следующем запуске
+      await DatabaseService.instance.deleteDatabaseFile();
       
-      // 3. Удаляем конфигурацию безопасности
+      // 3. Удаляем локальные настройки (SharedPreferences)
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.clear();
+      } catch (_) {}
+
+      // 4. Удаляем конфигурацию безопасности
       await _secureStorage.delete(key: _configKey);
       
-      // 4. Сбрасываем состояние
+      // 5. Сбрасываем состояние
       _config = SecurityConfig.empty;
       _isUnlocked = false;
       _isDuressMode = false;

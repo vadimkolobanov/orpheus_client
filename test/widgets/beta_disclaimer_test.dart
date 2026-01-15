@@ -89,15 +89,15 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 350));
         await tester.pump();
 
-        expect(find.text('ВАЖНО'), findsOneWidget);
-        expect(find.text('Вы используете бета-версию приложения'), findsOneWidget);
+        expect(find.text('Бета-версия'), findsOneWidget);
+        expect(find.textContaining('закрытое тестирование'), findsOneWidget);
 
         await tester.tap(find.text('Больше не показывать'));
         await tester.pump();
-        await tester.tap(find.text('Я понял(а)'));
+        await tester.tap(find.text('Понятно'));
         await tester.pump(const Duration(milliseconds: 300));
 
-        expect(find.text('ВАЖНО'), findsNothing);
+        expect(find.text('Бета-версия'), findsNothing);
 
         final prefs = await SharedPreferences.getInstance();
         expect(prefs.getBool('beta_disclaimer_dismissed_v1'), isTrue);
@@ -115,7 +115,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 350));
         await tester.pump();
 
-        expect(find.text('ВАЖНО'), findsNothing);
+        expect(find.text('Бета-версия'), findsNothing);
 
         await Future<void>.delayed(const Duration(seconds: 3));
         await tester.pump();
@@ -134,8 +134,8 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 350));
         await tester.pump();
 
-        expect(find.text('ВАЖНО'), findsNothing);
-        expect(find.text('Вы используете бета-версию приложения'), findsNothing);
+        expect(find.text('Бета-версия'), findsNothing);
+        expect(find.textContaining('закрытое тестирование'), findsNothing);
 
         // Даем отработать delay(2s) из _checkDeviceSettings(), чтобы не было pending timers.
         await Future<void>.delayed(const Duration(seconds: 3));

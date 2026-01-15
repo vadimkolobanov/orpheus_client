@@ -9,6 +9,7 @@ import 'package:orpheus_project/services/auth_service.dart';
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
   static Database? _database;
+  static const String _dbFileName = 'orpheus.db';
   DatabaseService._init();
 
   /// Проверка: находимся ли мы в duress mode (показываем пустой профиль)
@@ -21,7 +22,7 @@ class DatabaseService {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('orpheus.db');
+    _database = await _initDB(_dbFileName);
     return _database!;
   }
 
@@ -47,6 +48,11 @@ class DatabaseService {
       print("DB: КРИТИЧЕСКАЯ ОШИБКА инициализации: $e");
       rethrow;
     }
+  }
+
+  Future<String> _dbPath() async {
+    final dbPath = await getDatabasesPath();
+    return join(dbPath, _dbFileName);
   }
 
   Future _createDB(Database db, int version) async {
@@ -355,6 +361,18 @@ class DatabaseService {
     if (_database != null) {
       await _database!.close();
       _database = null;
+    }
+  }
+
+  /// Полное удаление локальной БД (для wipe).
+  Future<void> deleteDatabaseFile() async {
+    try {
+      await close();
+      final path = await _dbPath();
+      await deleteDatabase(path);
+      print("DB: База данных удалена");
+    } catch (e) {
+      print("DB ERROR: Ошибка удаления базы данных: $e");
     }
   }
 

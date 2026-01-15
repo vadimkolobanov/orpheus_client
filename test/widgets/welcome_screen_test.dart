@@ -107,8 +107,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Закрываем диалог
-      final cancelBtnFinder = find.widgetWithText(TextButton, 'Отмена');
-      final cancelBtn = tester.widget<TextButton>(cancelBtnFinder);
+      final cancelBtnFinder = find.widgetWithText(OutlinedButton, 'Отмена');
+      final cancelBtn = tester.widget<OutlinedButton>(cancelBtnFinder);
       cancelBtn.onPressed?.call();
       await tester.pump(const Duration(milliseconds: 200));
 

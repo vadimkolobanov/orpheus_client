@@ -146,8 +146,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirmed != true) return;
 
-    await cryptoService.deleteAccount();
-    await DatabaseService.instance.close();
+    await authService.performWipe();
 
     if (!mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
