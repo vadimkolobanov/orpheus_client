@@ -491,21 +491,39 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
   incomingCallBuffer.clearLastIncomingCall();
   
   DebugLogger.info('CALLKIT', '📞 Навигация на CallScreen для $callerKey, hasOffer=${offerData != null}, autoAnswer=$autoAnswer');
-  navigatorKey.currentState?.push(MaterialPageRoute(
-    builder: (context) => CallScreen(
-      contactPublicKey: callerKey,
-      offer: offerData,
-      autoAnswer: autoAnswer,
-    ),
-  ));
   
-  // Скрываем CallKit UI после успешной навигации
-  FlutterCallkitIncoming.endAllCalls();
-  
-  // Сбрасываем флаг после успешной навигации
-  // Небольшая задержка чтобы CallScreen успел вызвать setCallActive(true)
-  Future.delayed(const Duration(milliseconds: 100), () {
-    _isProcessingCallKitAnswer = false;
+  // ВАЖНО: При возврате из background, Navigator может быть не готов к навигации.
+  // Ждём следующий кадр чтобы гарантировать что UI восстановлен.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    // Ещё раз проверяем состояние
+    if (CallStateService.instance.isCallActive.value) {
+      DebugLogger.warn('CALLKIT', 'Звонок уже активен после postFrame, пропускаю');
+      _isProcessingCallKitAnswer = false;
+      return;
+    }
+    
+    if (navigatorKey.currentState == null) {
+      DebugLogger.error('CALLKIT', 'Navigator всё ещё null после postFrame!');
+      _isProcessingCallKitAnswer = false;
+      return;
+    }
+    
+    DebugLogger.info('CALLKIT', '📞 Открываю CallScreen (postFrame)');
+    navigatorKey.currentState!.push(MaterialPageRoute(
+      builder: (context) => CallScreen(
+        contactPublicKey: callerKey,
+        offer: offerData,
+        autoAnswer: autoAnswer,
+      ),
+    ));
+    
+    // Скрываем CallKit UI после успешной навигации
+    FlutterCallkitIncoming.endAllCalls();
+    
+    // Сбрасываем флаг после успешной навигации
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _isProcessingCallKitAnswer = false;
+    });
   });
 }
 
