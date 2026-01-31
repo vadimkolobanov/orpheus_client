@@ -585,12 +585,8 @@ class _MessageRetentionSelector extends StatelessWidget {
   const _MessageRetentionSelector({
     required this.currentPolicy,
     required this.onPolicyChanged,
-  });
-
-  final MessageRetentionPolicy currentPolicy;
-  final ValueChanged<MessageRetentionPolicy> onPolicyChanged;
-
-  @override
+  });  final MessageRetentionPolicy currentPolicy;
+  final ValueChanged<MessageRetentionPolicy> onPolicyChanged;  @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
@@ -608,9 +604,7 @@ class _MessageRetentionSelector extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  Widget _buildOption(MessageRetentionPolicy policy) {
+  }  Widget _buildOption(MessageRetentionPolicy policy) {
     final isSelected = policy == currentPolicy;
     final icon = _getIconForPolicy(policy);
     final color = _getColorForPolicy(policy);
@@ -673,9 +667,7 @@ class _MessageRetentionSelector extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  IconData _getIconForPolicy(MessageRetentionPolicy policy) {
+  }  IconData _getIconForPolicy(MessageRetentionPolicy policy) {
     switch (policy) {
       case MessageRetentionPolicy.all:
         return Icons.all_inclusive;

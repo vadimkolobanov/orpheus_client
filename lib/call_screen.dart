@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/background_call_service.dart';
@@ -22,11 +23,14 @@ enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed, Rec
 class CallScreen extends StatefulWidget {
   final String contactPublicKey;
   final Map<String, dynamic>? offer;
+  /// Если true — звонок принимается автоматически (ответ через CallKit)
+  final bool autoAnswer;
 
   const CallScreen({
     super.key,
     required this.contactPublicKey,
     this.offer,
+    this.autoAnswer = false,
   });
 
   @override
@@ -102,13 +106,22 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _displayName = widget.contactPublicKey.substring(0, 8);
     _resolveContactName();
 
-    _callState = widget.offer != null ? CallState.Incoming : CallState.Dialing;
+    // Устанавливаем начальное состояние звонка
+    // autoAnswer=true означает что звонок уже принят через CallKit - сразу в режим Connecting
+    if (widget.autoAnswer && widget.offer != null) {
+      _callState = CallState.Connecting;
+    } else if (widget.offer != null) {
+      _callState = CallState.Incoming;
+    } else {
+      _callState = CallState.Dialing;
+    }
 
     // 1. Запуск foreground service для звонка
     _startBackgroundMode();
 
-    // 2. Скрываем уведомление о входящем звонке (экран уже открыт)
+    // 2. Скрываем уведомление о входящем звонке и CallKit UI (экран уже открыт)
     NotificationService.hideCallNotification();
+    FlutterCallkitIncoming.endAllCalls(); // Гарантированно скрываем CallKit
 
     // 3. Анимации
     _pulseController = AnimationController(
@@ -418,8 +431,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       SoundService.instance.playDialingSound();
       _startOutgoingCall();
     } else {
-      // Входящий звонок: отдельный рингтон (не "гудок" исходящего).
-      SoundService.instance.playIncomingRingtone();
+      // Входящий звонок
+      if (widget.autoAnswer) {
+        // Автоответ через CallKit — сразу принимаем без рингтона
+        DebugLogger.info('CALL', '📞 AutoAnswer: принимаю звонок автоматически');
+        _acceptCall();
+      } else {
+        // Обычный входящий — показываем рингтон и ждём ответа
+        SoundService.instance.playIncomingRingtone();
+      }
     }
   }
 
@@ -467,6 +487,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void _endCallButton() async {
     if (_messagesSent) return;  // Предотвращаем повторные вызовы
     _messagesSent = true;
+
+    // Скрываем CallKit UI сразу
+    FlutterCallkitIncoming.endAllCalls();
 
     final currentState = _callState;
     String signal = currentState == CallState.Incoming ? 'call-rejected' : 'hang-up';
@@ -698,6 +721,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void dispose() {
     CallStateService.instance.setCallActive(false);
     CallNativeUiService.disableCallMode();
+
+    // 0. Скрываем CallKit UI если он был показан
+    FlutterCallkitIncoming.endAllCalls();
 
     // 1. Останавливаем foreground service
     BackgroundCallService.stopCallService();

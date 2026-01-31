@@ -1,35 +1,136 @@
 // lib/services/notification_service.dart
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:uuid/uuid.dart';
 
 /// Обработчик фоновых FCM сообщений (top-level функция)
 /// Вызывается когда приложение убито или в фоне
+/// 
+/// КРИТИЧЕСКИ ВАЖНО: Этот код выполняется в отдельном isolate!
+/// Нельзя использовать синглтоны или состояние из main isolate.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   print("📱 FCM BACKGROUND: ${message.messageId}");
-  DebugLogger.info('FCM', 'BACKGROUND: ${message.messageId}');
   
-  // Важно:
-  // - Если в push есть notification payload, Android сам показывает уведомление (и именно оно должно играть звук).
-  // - Если мы поверх него покажем локальное уведомление, это может превратиться в "обновление" и звук не сыграет.
-  // Поэтому локальные уведомления показываем ТОЛЬКО для data-only сообщений.
   final data = message.data;
-  if (data.containsKey('type')) {
-    DebugLogger.info('FCM', 'Background message type: ${data['type']}');
-    final shouldShowLocal = NotificationService.shouldShowLocalNotification(
-      hasNotificationPayload: message.notification != null,
-      data: data,
-    );
-    if (shouldShowLocal) {
+  final type = data['type'];
+  
+  print("📱 FCM BACKGROUND type: $type");
+  
+  // === ВХОДЯЩИЙ ЗВОНОК ===
+  // Показываем нативный UI звонка через flutter_callkit_incoming
+  if (type == 'incoming_call' || type == 'call-offer') {
+    await _showNativeIncomingCall(data);
+    return;
+  }
+  
+  // === НОВОЕ СООБЩЕНИЕ ===
+  // Показываем локальное уведомление
+  if (type == 'new_message' || type == 'chat') {
+    // Только если нет notification payload (data-only message)
+    if (message.notification == null) {
       await NotificationService._handleBackgroundMessage(data);
     }
+    return;
+  }
+  
+  // === ЗАВЕРШЕНИЕ ЗВОНКА ===
+  // Скрываем нативный UI если звонок завершён
+  if (type == 'hang-up' || type == 'call-rejected' || type == 'call-ended') {
+    final callerKey = data['caller_key'] ?? data['sender_pubkey'];
+    if (callerKey != null) {
+      // Завершаем все звонки от этого caller
+      await FlutterCallkitIncoming.endAllCalls();
+    }
+    return;
+  }
+}
+
+/// Показать нативный UI входящего звонка
+/// Работает даже когда приложение убито!
+/// 
+/// ВАЖНО: Этот код выполняется в ОТДЕЛЬНОМ isolate!
+/// Нельзя использовать синглтоны из main isolate (включая IncomingCallBuffer).
+/// Все данные передаём через CallKit extra.
+Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
+  try {
+    final callerKey = data['caller_key'] ?? data['sender_pubkey'] ?? '';
+    final callerName = data['caller_name'] ?? data['sender_name'] ?? callerKey.toString().substring(0, 8);
+    final callId = data['call_id'] ?? const Uuid().v4();
+    
+    // Получаем SDP offer если есть
+    // КРИТИЧНО: передаём его в extra, чтобы main isolate получил при accept
+    String? offerDataJson;
+    if (data['offer_data'] != null) {
+      offerDataJson = data['offer_data'].toString();
+    }
+    
+    print("📞 CALLKIT: Показываю входящий звонок от $callerName, hasOffer=${offerDataJson != null}");
+    
+    final params = CallKitParams(
+      id: callId,
+      nameCaller: callerName,
+      appName: 'Orpheus',
+      handle: callerKey.toString().substring(0, 8),
+      type: 0, // Audio call
+      textAccept: 'Ответить',
+      textDecline: 'Отклонить',
+      missedCallNotification: NotificationParams(
+        showNotification: true,
+        isShowCallback: false,
+        subtitle: 'Пропущенный звонок',
+        callbackText: 'Перезвонить',
+      ),
+      duration: 45000, // 45 секунд рингтон
+      extra: <String, dynamic>{
+        'callerKey': callerKey,
+        'offerData': offerDataJson,
+      },
+      headers: <String, dynamic>{},
+      android: AndroidParams(
+        isCustomNotification: true,
+        isShowLogo: false,
+        ringtonePath: 'system_ringtone_default',
+        backgroundColor: '#0D0D0D',
+        actionColor: '#6AD394',
+        textColor: '#FFFFFF',
+        incomingCallNotificationChannelName: 'Входящие звонки',
+        missedCallNotificationChannelName: 'Пропущенные звонки',
+        isShowCallID: false,
+        isShowFullLockedScreen: true,
+      ),
+      ios: IOSParams(
+        iconName: 'AppIcon',
+        handleType: 'generic',
+        supportsVideo: false,
+        maximumCallGroups: 1,
+        maximumCallsPerCallGroup: 1,
+        audioSessionMode: 'voiceChat',
+        audioSessionActive: true,
+        audioSessionPreferredSampleRate: 44100.0,
+        audioSessionPreferredIOBufferDuration: 0.005,
+        supportsDTMF: false,
+        supportsHolding: false,
+        supportsGrouping: false,
+        supportsUngrouping: false,
+        ringtonePath: 'system_ringtone_default',
+      ),
+    );
+
+    await FlutterCallkitIncoming.showCallkitIncoming(params);
+    print("📞 CALLKIT: UI звонка показан");
+  } catch (e) {
+    print("📞 CALLKIT ERROR: $e");
   }
 }
 

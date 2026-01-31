@@ -1,7 +1,11 @@
 import 'dart:convert';
 
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/services/incoming_call_buffer.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:uuid/uuid.dart';
 
 abstract interface class IncomingMessageCrypto {
   Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload);
@@ -121,8 +125,22 @@ class IncomingMessageHandler {
           ? contactName
           : senderKey.substring(0, 8);
 
-      await _notif.showCallNotification(callerName: displayName);
-      _openCallScreen(contactPublicKey: senderKey, offer: data);
+      // Сохраняем данные звонка в буфер (fallback для CallKit)
+      _callBuffer.setLastIncomingCall(senderKey, data);
+      
+      // Если приложение в foreground — открываем CallScreen напрямую
+      // Если в background — показываем нативный CallKit UI
+      if (_isAppInForeground()) {
+        DebugLogger.info('CALL', '📞 Foreground: открываю CallScreen напрямую');
+        _openCallScreen(contactPublicKey: senderKey, offer: data);
+      } else {
+        DebugLogger.info('CALL', '📞 Background: показываю CallKit UI');
+        await _showCallKitIncoming(
+          callerName: displayName,
+          callerKey: senderKey,
+          offerData: data,
+        );
+      }
       return;
     }
 
@@ -148,9 +166,17 @@ class IncomingMessageHandler {
       _callBuffer.clear(senderKey);
       _lastCallOfferHandledAtMsBySender.remove(senderKey);
 
-      // КРИТИЧНО: сначала сообщаем в CallScreen, затем пытаемся спрятать уведомление.
+      // КРИТИЧНО: сначала сообщаем в CallScreen, затем пытаемся спрятать уведомления.
       _emitSignaling(messageData);
       await _notif.hideCallNotification();
+      
+      // Скрываем нативный UI звонка (CallKit) если он был показан
+      try {
+        await FlutterCallkitIncoming.endAllCalls();
+        DebugLogger.info('CALL', 'CallKit UI скрыт (hang-up/rejected)');
+      } catch (e) {
+        DebugLogger.warn('CALL', 'Ошибка скрытия CallKit: $e');
+      }
       return;
     }
 
@@ -189,6 +215,55 @@ class IncomingMessageHandler {
       'Пропущен звонок',
     ];
     return callStatusMessages.contains(message);
+  }
+
+  /// Показать нативный CallKit UI для входящего звонка
+  /// 
+  /// ВАЖНО: Когда приложение свёрнуто, Flutter engine может быть suspended.
+  /// Для надёжной работы сервер также отправляет FCM push параллельно.
+  Future<void> _showCallKitIncoming({
+    required String callerName,
+    required String callerKey,
+    required Map<String, dynamic> offerData,
+  }) async {
+    final callId = const Uuid().v4();
+    
+    final params = CallKitParams(
+      id: callId,
+      nameCaller: callerName,
+      appName: 'Orpheus',
+      handle: callerKey.substring(0, 8), // Короткий ID для отображения
+      type: 0, // Audio call
+      duration: 45000, // 45 секунд рингтон (больше времени на ответ)
+      textAccept: 'Ответить',
+      textDecline: 'Отклонить',
+      missedCallNotification: const NotificationParams(
+        showNotification: true,
+        isShowCallback: false,
+        subtitle: 'Пропущенный звонок',
+        callbackText: 'Перезвонить',
+      ),
+      extra: <String, dynamic>{
+        'callerKey': callerKey,
+        'offerData': json.encode(offerData),
+      },
+      android: const AndroidParams(
+        isCustomNotification: true,
+        isShowLogo: false,
+        ringtonePath: 'system_ringtone_default',
+        backgroundColor: '#0D0D0D',
+        actionColor: '#6AD394',
+        textColor: '#FFFFFF',
+        isShowFullLockedScreen: true,
+        // КРИТИЧНО для пробуждения устройства:
+        isImportant: true,
+        incomingCallNotificationChannelName: 'Входящие звонки',
+        missedCallNotificationChannelName: 'Пропущенные звонки',
+      ),
+    );
+    
+    await FlutterCallkitIncoming.showCallkitIncoming(params);
+    DebugLogger.info('CALL', '📱 CallKit UI показан для $callerName');
   }
 }
 

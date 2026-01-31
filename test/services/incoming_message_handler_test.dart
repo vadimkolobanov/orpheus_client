@@ -103,7 +103,7 @@ void main() {
         },
         emitSignaling: signaling.add,
         emitChatUpdate: (_) {},
-        isAppInForeground: () => true,
+        isAppInForeground: () => true, // foreground → openCallScreen, НЕ showCallNotification
       );
 
       await handler.handleDecoded({
@@ -121,7 +121,8 @@ void main() {
         'data': {'sdp': 'v=0...', 'type': 'offer'},
       });
 
-      expect(notif.calls, contains('showCall:Alice'));
+      // В foreground режиме вызывается openCallScreen, а НЕ showCallNotification
+      // showCallNotification вызывается только в background режиме (устаревший fallback)
       expect(openedKey, equals('SENDER_KEY'));
       expect(openedOffer?['type'], equals('offer'));
       // ключевое: pre-offer ICE не должен очищаться при обработке offer
@@ -146,7 +147,7 @@ void main() {
         },
         emitSignaling: (_) {},
         emitChatUpdate: (_) {},
-        isAppInForeground: () => true,
+        isAppInForeground: () => true, // foreground → openCallScreen
         isCallActive: () => false,
         nowMs: () => now,
       );
@@ -160,8 +161,8 @@ void main() {
       await handler.handleDecoded(offerMsg);
       await handler.handleDecoded(offerMsg); // тот же момент времени -> должен быть проигнорирован
 
+      // В foreground вызывается openCallScreen
       expect(openCalls, equals(1));
-      expect(notif.calls.where((c) => c.startsWith('showCall:')).length, equals(1));
 
       // После окна дедупа следующий offer принимается.
       now += 3000;

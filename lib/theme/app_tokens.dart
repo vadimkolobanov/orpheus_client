@@ -169,9 +169,7 @@ class AppShadows {
 class AppAvatarColors {
   /// Генерирует цвет на основе имени контакта.
   static Color fromName(String name) {
-    if (name.isEmpty) return AppColors.surface2;
-
-    final hash = name.hashCode;
+    if (name.isEmpty) return AppColors.surface2;    final hash = name.hashCode;
     final hue = (hash.abs() % 360).toDouble();
     // Приглушённая насыщенность и средняя яркость — не кричит
     return HSLColor.fromAHSL(1.0, hue, 0.40, 0.42).toColor();

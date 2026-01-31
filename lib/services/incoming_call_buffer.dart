@@ -10,11 +10,30 @@ class IncomingCallBuffer {
   static final IncomingCallBuffer instance = IncomingCallBuffer._();
 
   final Map<String, List<Map<String, dynamic>>> _bySender = {};
+  
+  /// Последний callerKey входящего звонка (для fallback если CallKit не передаёт extra)
+  String? _lastCallerKey;
+  Map<String, dynamic>? _lastOfferData;
+  
+  String? get lastCallerKey => _lastCallerKey;
+  Map<String, dynamic>? get lastOfferData => _lastOfferData;
 
   /// Гарантирует, что для отправителя есть список.
   /// Не очищает существующие данные (кандидаты, пришедшие до offer, сохраняются).
   void ensure(String senderPublicKey) {
     _bySender.putIfAbsent(senderPublicKey, () => <Map<String, dynamic>>[]);
+  }
+  
+  /// Сохранить данные последнего входящего звонка
+  void setLastIncomingCall(String callerKey, Map<String, dynamic>? offerData) {
+    _lastCallerKey = callerKey;
+    _lastOfferData = offerData;
+  }
+  
+  /// Очистить данные последнего входящего звонка
+  void clearLastIncomingCall() {
+    _lastCallerKey = null;
+    _lastOfferData = null;
   }
 
   /// Добавить входящий сигнал в буфер.

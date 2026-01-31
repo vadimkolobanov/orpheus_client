@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -12,7 +14,6 @@ import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/screens/lock_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
-import 'package:orpheus_project/services/background_call_service.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
@@ -51,6 +52,26 @@ bool _hasKeys = false;
 
 /// Глобальный флаг: приложение в foreground (активно)?
 bool isAppInForeground = true;
+
+/// Данные отложенного звонка (если пользователь принял звонок, но приложение заблокировано)
+class PendingCallData {
+  final String callerKey;
+  final Map<String, dynamic>? offerData;
+  final DateTime timestamp;
+  /// Если true — звонок уже принят через CallKit, нужен автоответ
+  final bool autoAnswer;
+  
+  PendingCallData({required this.callerKey, this.offerData, this.autoAnswer = true}) 
+      : timestamp = DateTime.now();
+  
+  /// Проверка что звонок ещё актуален (не старше 30 секунд)
+  bool get isValid => DateTime.now().difference(timestamp).inSeconds < 30;
+}
+
+PendingCallData? _pendingCall;
+
+/// Флаг: ожидается открытие CallScreen из CallKit (блокирует дубли из WebSocket)
+bool _isProcessingCallKitAnswer = false;
 
 /// Sentry DSN для мониторинга ошибок
 const String _sentryDsn = 'https://7d6801508e29bc2e4f5b93b986147cdc@o4509485705265152.ingest.de.sentry.io/4510682122879056';
@@ -152,8 +173,329 @@ Future<void> _initializeApp() async {
 
   // 9. Слушаем сообщения
   _listenForMessages();
+  
+  // 10. Инициализация CallKit для нативного UI звонков
+  DebugLogger.info('APP', 'Инициализация CallKit...');
+  _initCallKit();
+  DebugLogger.success('APP', 'CallKit инициализирован');
 
   DebugLogger.success('APP', '✅ Приложение запущено');
+}
+
+/// Инициализация CallKit для обработки нативного UI входящих звонков
+void _initCallKit() {
+  // Слушаем события от CallKit (принять/отклонить звонок)
+  FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
+    if (event == null) return;
+    
+    DebugLogger.info('CALLKIT', 'Event: ${event.event}, body keys: ${event.body?.keys.toList()}');
+    
+    switch (event.event) {
+      case Event.actionCallAccept:
+        // Пользователь принял звонок через нативный UI
+        await _handleCallKitAccept(event.body);
+        break;
+        
+      case Event.actionCallDecline:
+        // Пользователь отклонил звонок через нативный UI
+        await _handleCallKitDecline(event.body);
+        break;
+        
+      case Event.actionCallEnded:
+        // Звонок завершён
+        DebugLogger.info('CALLKIT', 'Звонок завершён');
+        break;
+        
+      case Event.actionCallTimeout:
+        // Таймаут - никто не ответил
+        DebugLogger.info('CALLKIT', 'Таймаут звонка');
+        await _handleCallKitDecline(event.body);
+        break;
+        
+      default:
+        break;
+    }
+  });
+  
+  // Проверяем, есть ли активный звонок при запуске приложения
+  // (если приложение было запущено из нативного UI)
+  _checkActiveCallOnStart();
+}
+
+/// Рекурсивно конвертирует Map<Object?, Object?> → Map<String, dynamic>
+Map<String, dynamic> _convertToStringDynamicMap(dynamic input) {
+  if (input is Map<String, dynamic>) return input;
+  if (input is Map) {
+    return input.map((key, value) {
+      final stringKey = key?.toString() ?? '';
+      if (value is Map) {
+        return MapEntry(stringKey, _convertToStringDynamicMap(value));
+      }
+      return MapEntry(stringKey, value);
+    });
+  }
+  return {};
+}
+
+/// Извлекает extra из CallKit body (обрабатывает разные типы)
+Map<String, dynamic>? _extractExtraFromBody(Map<String, dynamic>? body) {
+  if (body == null) return null;
+  
+  final rawExtra = body['extra'];
+  DebugLogger.info('CALLKIT', 'rawExtra type: ${rawExtra?.runtimeType}');
+  
+  if (rawExtra == null) return null;
+  
+  // Случай 1: уже Map<String, dynamic>
+  if (rawExtra is Map<String, dynamic>) {
+    DebugLogger.info('CALLKIT', 'extra is Map<String, dynamic>');
+    return rawExtra;
+  }
+  
+  // Случай 2: Map<Object?, Object?> или LinkedHashMap
+  if (rawExtra is Map) {
+    DebugLogger.info('CALLKIT', 'extra is Map (converting...)');
+    return _convertToStringDynamicMap(rawExtra);
+  }
+  
+  // Случай 3: JSON строка
+  if (rawExtra is String) {
+    DebugLogger.info('CALLKIT', 'extra is String (parsing JSON...)');
+    try {
+      final decoded = json.decode(rawExtra);
+      if (decoded is Map) {
+        return _convertToStringDynamicMap(decoded);
+      }
+    } catch (e) {
+      DebugLogger.error('CALLKIT', 'Ошибка парсинга extra JSON: $e');
+    }
+  }
+  
+  return null;
+}
+
+/// Проверка активного звонка при запуске приложения
+Future<void> _checkActiveCallOnStart() async {
+  try {
+    final calls = await FlutterCallkitIncoming.activeCalls();
+    DebugLogger.info('CALLKIT', 'Проверка активных звонков: ${calls.length}');
+    
+    if (calls.isNotEmpty) {
+      DebugLogger.info('CALLKIT', 'Найден активный звонок при запуске');
+      
+      // КРИТИЧНО: блокируем дубли из WebSocket
+      _isProcessingCallKitAnswer = true;
+      
+      // Конвертируем первый звонок в Map<String, dynamic>
+      final rawCall = calls.first;
+      Map<String, dynamic> call;
+      if (rawCall is Map<String, dynamic>) {
+        call = rawCall;
+      } else if (rawCall is Map) {
+        call = _convertToStringDynamicMap(rawCall);
+      } else {
+        DebugLogger.error('CALLKIT', 'Неизвестный тип call: ${rawCall.runtimeType}');
+        _isProcessingCallKitAnswer = false;
+        return;
+      }
+      
+      DebugLogger.info('CALLKIT', 'Active call keys: ${call.keys.toList()}');
+      
+      // Парсим extra
+      final extra = _extractExtraFromBody(call);
+      String? callerKey = extra?['callerKey'] as String?;
+      
+      // Fallback на буфер
+      if (callerKey == null) {
+        callerKey = incomingCallBuffer.lastCallerKey;
+        DebugLogger.info('CALLKIT', 'callerKey from buffer: $callerKey');
+      }
+      
+      if (callerKey != null) {
+        DebugLogger.info('CALLKIT', 'Открываю CallScreen для активного звонка: $callerKey');
+        
+        // Формируем extra
+        Map<String, dynamic> callExtra = extra ?? {};
+        if (callExtra['offerData'] == null) {
+          final bufferOffer = incomingCallBuffer.lastOfferData;
+          if (bufferOffer != null) {
+            callExtra['offerData'] = json.encode(bufferOffer);
+          }
+        }
+        callExtra['callerKey'] = callerKey;
+        
+        _openCallScreenFromCallKit(callerKey, callExtra);
+      } else {
+        DebugLogger.warn('CALLKIT', 'callerKey is null, не могу открыть CallScreen');
+        _isProcessingCallKitAnswer = false;
+      }
+    }
+  } catch (e) {
+    DebugLogger.error('CALLKIT', 'Ошибка проверки активного звонка: $e');
+    _isProcessingCallKitAnswer = false;
+  }
+}
+
+/// Обработка принятия звонка через CallKit
+Future<void> _handleCallKitAccept(Map<String, dynamic>? body) async {
+  DebugLogger.info('CALLKIT', '📥 ACCEPT body: $body');
+  
+  // КРИТИЧНО: блокируем открытие CallScreen из WebSocket пока обрабатываем CallKit
+  _isProcessingCallKitAnswer = true;
+  
+  final callId = body?['id'] as String?;
+  
+  // Используем надёжный парсинг extra
+  final extra = _extractExtraFromBody(body);
+  DebugLogger.info('CALLKIT', '📥 extra parsed: ${extra?.keys.toList()}');
+  
+  String? callerKey = extra?['callerKey'] as String?;
+  DebugLogger.info('CALLKIT', '📥 callerKey from extra: $callerKey');
+  
+  // Скрываем нативный UI СРАЗУ
+  await FlutterCallkitIncoming.endAllCalls();
+  
+  // Если callerKey из extra null, пробуем буфер
+  if (callerKey == null) {
+    DebugLogger.warn('CALLKIT', '⚠️ callerKey null, проверяю буфер...');
+    callerKey = incomingCallBuffer.lastCallerKey;
+    DebugLogger.info('CALLKIT', '📥 callerKey from buffer: $callerKey');
+  }
+  
+  DebugLogger.info('CALLKIT', '✅ Звонок принят: callId=$callId, callerKey=$callerKey');
+  
+  // Открываем CallScreen
+  if (callerKey != null) {
+    // Формируем extra для CallScreen
+    Map<String, dynamic> callExtra = extra ?? {};
+    
+    // Если offerData не в extra, берём из буфера
+    if (callExtra['offerData'] == null) {
+      final bufferOffer = incomingCallBuffer.lastOfferData;
+      if (bufferOffer != null) {
+        callExtra['offerData'] = json.encode(bufferOffer);
+        DebugLogger.info('CALLKIT', '📥 offerData взят из буфера');
+      }
+    }
+    
+    callExtra['callerKey'] = callerKey;
+    _openCallScreenFromCallKit(callerKey, callExtra);
+  } else {
+    DebugLogger.error('CALLKIT', '❌ callerKey is null! Нет данных для звонка!');
+    _isProcessingCallKitAnswer = false; // Сбрасываем флаг при ошибке
+  }
+}
+
+/// Обработка отклонения звонка через CallKit
+Future<void> _handleCallKitDecline(Map<String, dynamic>? body) async {
+  DebugLogger.info('CALLKIT', '📥 DECLINE body: $body');
+  
+  // Сбрасываем флаг обработки CallKit
+  _isProcessingCallKitAnswer = false;
+  
+  final callId = body?['id'] as String?;
+  
+  // Используем надёжный парсинг extra
+  final extra = _extractExtraFromBody(body);
+  String? callerKey = extra?['callerKey'] as String?;
+  
+  DebugLogger.info('CALLKIT', '📥 callerKey from extra: $callerKey');
+  
+  // Fallback: используем данные из буфера
+  if (callerKey == null) {
+    callerKey = incomingCallBuffer.lastCallerKey;
+    DebugLogger.info('CALLKIT', '📥 callerKey from buffer: $callerKey');
+  }
+  
+  DebugLogger.info('CALLKIT', '❌ Звонок отклонён: callId=$callId, callerKey=$callerKey');
+  
+  // Скрываем нативный UI СРАЗУ
+  await FlutterCallkitIncoming.endAllCalls();
+  
+  // Очищаем буфер
+  incomingCallBuffer.clearLastIncomingCall();
+  
+  // Отправляем call-rejected через WebSocket
+  if (callerKey != null) {
+    if (websocketService.currentStatus == ConnectionStatus.Connected) {
+      websocketService.sendSignalingMessage(callerKey, 'call-rejected', {});
+      DebugLogger.info('CALLKIT', '✅ Отправлен call-rejected к $callerKey');
+    } else {
+      DebugLogger.warn('CALLKIT', '⚠️ WebSocket не подключен, call-rejected не отправлен');
+    }
+  } else {
+    DebugLogger.error('CALLKIT', '❌ callerKey null, не могу отправить call-rejected');
+  }
+}
+
+/// Открыть CallScreen после принятия звонка через CallKit
+/// autoAnswer=true означает что звонок уже принят через нативный UI
+void _openCallScreenFromCallKit(String callerKey, Map<String, dynamic>? extra, {bool autoAnswer = true}) {
+  // Получаем offer data если есть
+  Map<String, dynamic>? offerData;
+  final offerJson = extra?['offerData'] as String?;
+  if (offerJson != null) {
+    try {
+      offerData = json.decode(offerJson) as Map<String, dynamic>;
+    } catch (_) {}
+  }
+  
+  DebugLogger.info('CALLKIT', 'Открываю CallScreen, offer: ${offerData != null}, autoAnswer: $autoAnswer');
+  
+  // Если приложение заблокировано (PIN) — сохраняем звонок как pending
+  // CallScreen откроется после разблокировки
+  if (authService.requiresUnlock) {
+    DebugLogger.info('CALLKIT', '🔒 Приложение заблокировано, сохраняю pending call');
+    _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
+    return;
+  }
+  
+  // Открываем CallScreen сразу с autoAnswer
+  _navigateToCallScreen(callerKey, offerData, autoAnswer: autoAnswer);
+}
+
+/// Навигация на CallScreen (используется напрямую и после разблокировки)
+void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {bool autoAnswer = false}) {
+  // Проверяем что нет уже активного звонка
+  if (CallStateService.instance.isCallActive.value) {
+    DebugLogger.warn('CALLKIT', 'Уже есть активный звонок, игнорирую');
+    _isProcessingCallKitAnswer = false; // Сбрасываем флаг
+    return;
+  }
+  
+  // Очищаем буфер после использования
+  incomingCallBuffer.clearLastIncomingCall();
+  
+  DebugLogger.info('CALLKIT', '📞 Навигация на CallScreen для $callerKey, hasOffer=${offerData != null}, autoAnswer=$autoAnswer');
+  navigatorKey.currentState?.push(MaterialPageRoute(
+    builder: (context) => CallScreen(
+      contactPublicKey: callerKey,
+      offer: offerData,
+      autoAnswer: autoAnswer,
+    ),
+  ));
+  
+  // Сбрасываем флаг после успешной навигации
+  // Небольшая задержка чтобы CallScreen успел вызвать setCallActive(true)
+  Future.delayed(const Duration(milliseconds: 100), () {
+    _isProcessingCallKitAnswer = false;
+  });
+}
+
+/// Обработать отложенный звонок после разблокировки
+void processPendingCallAfterUnlock() {
+  final pending = _pendingCall;
+  _pendingCall = null;
+  
+  if (pending == null) return;
+  
+  if (!pending.isValid) {
+    DebugLogger.warn('CALLKIT', '⏰ Pending call устарел (>${30}s), игнорирую');
+    return;
+  }
+  
+  DebugLogger.info('CALLKIT', '🔓 Обработка pending call после разблокировки, autoAnswer=${pending.autoAnswer}');
+  _navigateToCallScreen(pending.callerKey, pending.offerData, autoAnswer: pending.autoAnswer);
 }
 
 void _listenForMessages() {
@@ -163,6 +505,17 @@ void _listenForMessages() {
     notifications: _IncomingNotificationsAdapter(),
     callBuffer: incomingCallBuffer,
     openCallScreen: ({required contactPublicKey, required offer}) {
+      // ВАЖНО: используем централизованную навигацию с проверками
+      // Если приложение в foreground, WebSocket может доставить call-offer
+      // но если CallKit уже обрабатывает ответ - игнорируем дубль
+      if (_isProcessingCallKitAnswer) {
+        DebugLogger.info('CALL', '📞 Игнорирую call-offer из WS: CallKit уже обрабатывает');
+        return;
+      }
+      if (CallStateService.instance.isCallActive.value) {
+        DebugLogger.info('CALL', '📞 Игнорирую call-offer из WS: уже есть активный звонок');
+        return;
+      }
       navigatorKey.currentState?.push(MaterialPageRoute(
         builder: (context) => CallScreen(contactPublicKey: contactPublicKey, offer: offer),
       ));
@@ -170,6 +523,8 @@ void _listenForMessages() {
     emitSignaling: (msg) => signalingStreamController.add(msg),
     emitChatUpdate: (senderKey) => messageUpdateController.add(senderKey),
     isAppInForeground: () => isAppInForeground,
+    // КРИТИЧНО: передаём проверку активного звонка И обработки CallKit
+    isCallActive: () => CallStateService.instance.isCallActive.value || _isProcessingCallKitAnswer,
   );
 
   websocketService.stream.listen((messageJson) async {
@@ -313,6 +668,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void _onUnlocked() {
     DebugLogger.info('APP', '🔓 App unlocked');
     setState(() => _isLocked = false);
+    
+    // Обработать отложенный звонок если есть
+    // Используем небольшую задержку чтобы UI успел перестроиться
+    Future.delayed(const Duration(milliseconds: 300), () {
+      processPendingCallAfterUnlock();
+    });
   }
 
   void _onDuressMode() {
@@ -361,11 +722,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.paused) {
       DebugLogger.info('LIFECYCLE', 'Приложение в background');
       // Блокируем приложение при сворачивании (если PIN включен),
-      // но НЕ во время активного звонка (иначе может помешать ответу/разговору).
-      if (authService.config.isPinEnabled && !_isLocked && !CallStateService.instance.isCallActive.value) {
+      // но НЕ во время активного звонка и НЕ если есть pending call (иначе может помешать ответу/разговору).
+      final hasActiveCall = CallStateService.instance.isCallActive.value;
+      final hasPendingCall = _pendingCall != null && _pendingCall!.isValid;
+      
+      if (authService.config.isPinEnabled && !_isLocked && !hasActiveCall && !hasPendingCall) {
         authService.lock();
         setState(() => _isLocked = true);
         DebugLogger.info('LIFECYCLE', '🔒 App locked on pause');
+      } else if (hasPendingCall) {
+        DebugLogger.info('LIFECYCLE', '📞 Не блокирую - есть pending call');
       }
     }
   }
