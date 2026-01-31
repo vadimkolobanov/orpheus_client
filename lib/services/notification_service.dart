@@ -77,13 +77,18 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
     // Это предотвращает дублирование уведомлений от WebSocket и FCM
     final callId = _generateStableCallId(callerKey.toString());
     
+    // ВАЖНО: FCM приходит с небольшой задержкой относительно WebSocket
+    // Даём WebSocket handler время показать CallKit первым (500ms)
+    // Это предотвращает race condition когда оба пытаются показать одновременно
+    await Future.delayed(const Duration(milliseconds: 500));
+    
     // Проверяем, нет ли уже активного звонка с таким ID
     try {
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
       if (activeCalls is List && activeCalls.isNotEmpty) {
         for (final call in activeCalls) {
           if (call is Map && call['id'] == callId) {
-            print("📞 CALLKIT: Звонок уже показан (id=$callId), пропускаю FCM дубликат");
+            print("📞 CALLKIT FCM: Звонок уже показан WebSocket (id=$callId), пропускаю");
             return;
           }
         }

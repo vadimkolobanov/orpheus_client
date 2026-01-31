@@ -276,6 +276,18 @@ Map<String, dynamic>? _extractExtraFromBody(Map<String, dynamic>? body) {
 
 /// Проверка активного звонка при запуске приложения
 Future<void> _checkActiveCallOnStart() async {
+  // Ждём пока Navigator будет готов (первый кадр отрисован)
+  await Future.delayed(const Duration(milliseconds: 300));
+  
+  // Сначала проверяем pending call (сохранён из _handleCallKitAccept когда Navigator был null)
+  if (_pendingCall != null && _pendingCall!.isValid) {
+    DebugLogger.info('CALLKIT', '📞 Найден pending call, открываю CallScreen');
+    final pending = _pendingCall!;
+    _pendingCall = null;
+    _navigateToCallScreen(pending.callerKey, pending.offerData, autoAnswer: pending.autoAnswer);
+    return;
+  }
+  
   try {
     final calls = await FlutterCallkitIncoming.activeCalls();
     DebugLogger.info('CALLKIT', 'Проверка активных звонков: ${calls.length}');
@@ -352,8 +364,9 @@ Future<void> _handleCallKitAccept(Map<String, dynamic>? body) async {
   String? callerKey = extra?['callerKey'] as String?;
   DebugLogger.info('CALLKIT', '📥 callerKey from extra: $callerKey');
   
-  // Скрываем нативный UI СРАЗУ
-  await FlutterCallkitIncoming.endAllCalls();
+  // ВАЖНО: НЕ вызываем endAllCalls() здесь!
+  // При перезапуске приложения из killed state, _checkActiveCallOnStart() 
+  // должен найти активный звонок. CallScreen сам вызовет endAllCalls() при инициализации.
   
   // Если callerKey из extra null, пробуем буфер
   if (callerKey == null) {
@@ -383,6 +396,8 @@ Future<void> _handleCallKitAccept(Map<String, dynamic>? body) async {
   } else {
     DebugLogger.error('CALLKIT', '❌ callerKey is null! Нет данных для звонка!');
     _isProcessingCallKitAnswer = false; // Сбрасываем флаг при ошибке
+    // Скрываем UI только при ошибке
+    await FlutterCallkitIncoming.endAllCalls();
   }
 }
 
@@ -463,6 +478,15 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
     return;
   }
   
+  // КРИТИЧНО: Если Navigator ещё не инициализирован (приложение запускается из killed state),
+  // сохраняем pending call — он будет обработан в _checkActiveCallOnStart() или при первом frame
+  if (navigatorKey.currentState == null) {
+    DebugLogger.warn('CALLKIT', '⚠️ Navigator ещё null, сохраняю pending call');
+    _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
+    _isProcessingCallKitAnswer = false;
+    return;
+  }
+  
   // Очищаем буфер после использования
   incomingCallBuffer.clearLastIncomingCall();
   
@@ -474,6 +498,9 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
       autoAnswer: autoAnswer,
     ),
   ));
+  
+  // Скрываем CallKit UI после успешной навигации
+  FlutterCallkitIncoming.endAllCalls();
   
   // Сбрасываем флаг после успешной навигации
   // Небольшая задержка чтобы CallScreen успел вызвать setCallActive(true)
