@@ -1,7 +1,6 @@
 // lib/services/notification_service.dart
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
@@ -11,7 +10,6 @@ import 'package:flutter/material.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:uuid/uuid.dart';
 
 /// Обработчик фоновых FCM сообщений (top-level функция)
 /// Вызывается когда приложение убито или в фоне
@@ -56,6 +54,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
+/// Генерирует стабильный callId на основе callerKey.
+/// Один и тот же caller в одну и ту же минуту получает один и тот же ID,
+/// что предотвращает дублирование CallKit уведомлений от WebSocket и FCM.
+String _generateStableCallId(String callerKey) {
+  final hash = callerKey.hashCode.abs();
+  return 'call-${hash.toRadixString(16).padLeft(8, '0')}-${DateTime.now().millisecondsSinceEpoch ~/ 60000}';
+}
+
 /// Показать нативный UI входящего звонка
 /// Работает даже когда приложение убито!
 /// 
@@ -66,7 +72,25 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
   try {
     final callerKey = data['caller_key'] ?? data['sender_pubkey'] ?? '';
     final callerName = data['caller_name'] ?? data['sender_name'] ?? callerKey.toString().substring(0, 8);
-    final callId = data['call_id'] ?? const Uuid().v4();
+    
+    // Генерируем стабильный callId на основе callerKey
+    // Это предотвращает дублирование уведомлений от WebSocket и FCM
+    final callId = _generateStableCallId(callerKey.toString());
+    
+    // Проверяем, нет ли уже активного звонка с таким ID
+    try {
+      final activeCalls = await FlutterCallkitIncoming.activeCalls();
+      if (activeCalls is List && activeCalls.isNotEmpty) {
+        for (final call in activeCalls) {
+          if (call is Map && call['id'] == callId) {
+            print("📞 CALLKIT: Звонок уже показан (id=$callId), пропускаю FCM дубликат");
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      print("📞 CALLKIT: Ошибка проверки активных звонков: $e");
+    }
     
     // Получаем SDP offer если есть
     // КРИТИЧНО: передаём его в extra, чтобы main isolate получил при accept
@@ -75,7 +99,7 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
       offerDataJson = data['offer_data'].toString();
     }
     
-    print("📞 CALLKIT: Показываю входящий звонок от $callerName, hasOffer=${offerDataJson != null}");
+    print("📞 CALLKIT: Показываю входящий звонок от $callerName (id=$callId), hasOffer=${offerDataJson != null}");
     
     final params = CallKitParams(
       id: callId,

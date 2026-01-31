@@ -5,7 +5,6 @@ import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/services/incoming_call_buffer.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
-import 'package:uuid/uuid.dart';
 
 abstract interface class IncomingMessageCrypto {
   Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload);
@@ -226,7 +225,24 @@ class IncomingMessageHandler {
     required String callerKey,
     required Map<String, dynamic> offerData,
   }) async {
-    final callId = const Uuid().v4();
+    // Используем хеш callerKey как стабильный callId
+    // Это предотвращает дублирование уведомлений от WebSocket и FCM
+    final callId = _generateStableCallId(callerKey);
+    
+    // Проверяем, нет ли уже активного звонка от этого caller
+    try {
+      final activeCalls = await FlutterCallkitIncoming.activeCalls();
+      if (activeCalls is List && activeCalls.isNotEmpty) {
+        for (final call in activeCalls) {
+          if (call is Map && call['id'] == callId) {
+            DebugLogger.info('CALL', '📞 CallKit уже показан для $callerKey, пропускаю');
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      DebugLogger.warn('CALL', 'Ошибка проверки активных звонков: $e');
+    }
     
     final params = CallKitParams(
       id: callId,
@@ -263,7 +279,17 @@ class IncomingMessageHandler {
     );
     
     await FlutterCallkitIncoming.showCallkitIncoming(params);
-    DebugLogger.info('CALL', '📱 CallKit UI показан для $callerName');
+    DebugLogger.info('CALL', '📱 CallKit UI показан для $callerName (id=$callId)');
+  }
+  
+  /// Генерирует стабильный callId на основе callerKey.
+  /// Один и тот же caller всегда получает один и тот же ID,
+  /// что предотвращает дублирование CallKit уведомлений.
+  static String _generateStableCallId(String callerKey) {
+    // Используем первые 32 символа SHA-подобного хеша
+    // Простой вариант: берём hashCode и форматируем как UUID-like строку
+    final hash = callerKey.hashCode.abs();
+    return 'call-${hash.toRadixString(16).padLeft(8, '0')}-${DateTime.now().millisecondsSinceEpoch ~/ 60000}';
   }
 }
 
