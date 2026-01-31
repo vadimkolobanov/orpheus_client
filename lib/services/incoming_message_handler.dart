@@ -283,13 +283,12 @@ class IncomingMessageHandler {
   }
   
   /// Генерирует стабильный callId на основе callerKey.
-  /// Один и тот же caller всегда получает один и тот же ID,
-  /// что предотвращает дублирование CallKit уведомлений.
+  /// Окно дедупликации: 3 секунды — достаточно чтобы отсечь дубли WebSocket/FCM,
+  /// но позволяет перезвонить сразу после завершения предыдущего звонка.
   static String _generateStableCallId(String callerKey) {
-    // Используем первые 32 символа SHA-подобного хеша
-    // Простой вариант: берём hashCode и форматируем как UUID-like строку
     final hash = callerKey.hashCode.abs();
-    return 'call-${hash.toRadixString(16).padLeft(8, '0')}-${DateTime.now().millisecondsSinceEpoch ~/ 60000}';
+    // 3000ms = 3 секунды — короткое окно для дедупликации
+    return 'call-${hash.toRadixString(16).padLeft(8, '0')}-${DateTime.now().millisecondsSinceEpoch ~/ 3000}';
   }
 }
 

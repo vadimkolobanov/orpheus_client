@@ -55,11 +55,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 /// Генерирует стабильный callId на основе callerKey.
-/// Один и тот же caller в одну и ту же минуту получает один и тот же ID,
-/// что предотвращает дублирование CallKit уведомлений от WebSocket и FCM.
+/// Окно дедупликации: 3 секунды — достаточно чтобы отсечь дубли WebSocket/FCM,
+/// но позволяет перезвонить сразу после завершения предыдущего звонка.
 String _generateStableCallId(String callerKey) {
   final hash = callerKey.hashCode.abs();
-  return 'call-${hash.toRadixString(16).padLeft(8, '0')}-${DateTime.now().millisecondsSinceEpoch ~/ 60000}';
+  // 3000ms = 3 секунды — короткое окно для дедупликации
+  return 'call-${hash.toRadixString(16).padLeft(8, '0')}-${DateTime.now().millisecondsSinceEpoch ~/ 3000}';
 }
 
 /// Показать нативный UI входящего звонка
