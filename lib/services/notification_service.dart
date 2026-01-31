@@ -69,9 +69,16 @@ String _generateStableCallId(String callerKey) {
 /// ВАЖНО: Этот код выполняется в ОТДЕЛЬНОМ isolate!
 /// Нельзя использовать синглтоны из main isolate (включая IncomingCallBuffer).
 /// Все данные передаём через CallKit extra.
+/// 
+/// АРХИТЕКТУРНОЕ ОГРАНИЧЕНИЕ (E2E encryption):
+/// Сервер не хранит имена контактов — они только на устройстве клиента.
+/// При killed app CallKit показывает первые 8 символов публичного ключа (caller_name из FCM).
+/// После открытия CallScreen имя загружается из локальной БД (_resolveContactName).
 Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
   try {
     final callerKey = data['caller_key'] ?? data['sender_pubkey'] ?? '';
+    // NOTE: caller_name из FCM — это только первые 8 символов ключа (сервер не знает имена).
+    // Правильное имя появится после открытия CallScreen из локальной БД.
     final callerName = data['caller_name'] ?? data['sender_name'] ?? callerKey.toString().substring(0, 8);
     
     // Генерируем стабильный callId на основе callerKey

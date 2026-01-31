@@ -494,7 +494,13 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
   
   // ВАЖНО: При возврате из background, Navigator может быть не готов к навигации.
   // Ждём следующий кадр чтобы гарантировать что UI восстановлен.
+  // Также добавляем fallback таймер на случай если приложение в background и кадры не рендерятся.
+  bool callbackExecuted = false;
+  
   WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (callbackExecuted) return; // Защита от дублей
+    callbackExecuted = true;
+    
     // Ещё раз проверяем состояние
     if (CallStateService.instance.isCallActive.value) {
       DebugLogger.warn('CALLKIT', 'Звонок уже активен после postFrame, пропускаю');
@@ -503,7 +509,9 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
     }
     
     if (navigatorKey.currentState == null) {
-      DebugLogger.error('CALLKIT', 'Navigator всё ещё null после postFrame!');
+      // Если Navigator всё ещё null — сохраняем pending call для обработки при resumed
+      DebugLogger.warn('CALLKIT', '⚠️ Navigator null после postFrame, сохраняю pending call');
+      _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
       _isProcessingCallKitAnswer = false;
       return;
     }
@@ -525,6 +533,17 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
       _isProcessingCallKitAnswer = false;
     });
   });
+  
+  // Fallback: если callback не выполнился за 2 секунды (приложение в background),
+  // сохраняем pending call для обработки при resumed
+  Future.delayed(const Duration(seconds: 2), () {
+    if (!callbackExecuted) {
+      DebugLogger.warn('CALLKIT', '⏰ PostFrame callback не выполнился за 2с, сохраняю pending call');
+      callbackExecuted = true;
+      _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
+      _isProcessingCallKitAnswer = false;
+    }
+  });
 }
 
 /// Обработать отложенный звонок после разблокировки
@@ -541,6 +560,68 @@ void processPendingCallAfterUnlock() {
   
   DebugLogger.info('CALLKIT', '🔓 Обработка pending call после разблокировки, autoAnswer=${pending.autoAnswer}');
   _navigateToCallScreen(pending.callerKey, pending.offerData, autoAnswer: pending.autoAnswer);
+}
+
+/// Проверка активных CallKit звонков при возврате из background
+/// Fallback на случай если pending call был потерян, но CallKit показывает активный звонок
+Future<void> _checkActiveCallOnResumed() async {
+  // Если уже есть активный звонок или обрабатывается ответ — выходим
+  if (CallStateService.instance.isCallActive.value || _isProcessingCallKitAnswer) {
+    return;
+  }
+  
+  try {
+    final calls = await FlutterCallkitIncoming.activeCalls();
+    if (calls.isEmpty) return;
+    
+    DebugLogger.info('LIFECYCLE', '📞 Найден активный CallKit звонок при resumed');
+    
+    // Блокируем дубли
+    _isProcessingCallKitAnswer = true;
+    
+    // Конвертируем первый звонок
+    final rawCall = calls.first;
+    Map<String, dynamic> call;
+    if (rawCall is Map<String, dynamic>) {
+      call = rawCall;
+    } else if (rawCall is Map) {
+      call = _convertToStringDynamicMap(rawCall);
+    } else {
+      DebugLogger.error('LIFECYCLE', 'Неизвестный тип call: ${rawCall.runtimeType}');
+      _isProcessingCallKitAnswer = false;
+      return;
+    }
+    
+    // Парсим extra
+    final extra = _extractExtraFromBody(call);
+    String? callerKey = extra?['callerKey'] as String?;
+    
+    // Fallback на буфер
+    if (callerKey == null) {
+      callerKey = incomingCallBuffer.lastCallerKey;
+    }
+    
+    if (callerKey != null) {
+      DebugLogger.info('LIFECYCLE', '📞 Открываю CallScreen для активного звонка (resumed)');
+      
+      Map<String, dynamic> callExtra = extra ?? {};
+      if (callExtra['offerData'] == null) {
+        final bufferOffer = incomingCallBuffer.lastOfferData;
+        if (bufferOffer != null) {
+          callExtra['offerData'] = json.encode(bufferOffer);
+        }
+      }
+      callExtra['callerKey'] = callerKey;
+      
+      _openCallScreenFromCallKit(callerKey, callExtra);
+    } else {
+      DebugLogger.warn('LIFECYCLE', '⚠️ callerKey is null при resumed, пропускаю');
+      _isProcessingCallKitAnswer = false;
+    }
+  } catch (e) {
+    DebugLogger.error('LIFECYCLE', 'Ошибка проверки CallKit при resumed: $e');
+    _isProcessingCallKitAnswer = false;
+  }
 }
 
 void _listenForMessages() {
@@ -764,6 +845,24 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       }
       // Проверка автоочистки сообщений при возвращении в foreground
       messageCleanupService.onAppResumed();
+      
+      // КРИТИЧНО: Обработка отложенного звонка при возврате из background
+      // Если пользователь принял звонок через CallKit, но Navigator был ещё не готов,
+      // звонок сохранился в _pendingCall. Обрабатываем его сейчас.
+      // Задержка даёт время Flutter engine полностью восстановить UI.
+      if (_pendingCall != null && _pendingCall!.isValid && !_isLocked) {
+        DebugLogger.info('LIFECYCLE', '📞 Найден pending call при resumed, обрабатываю');
+        Future.delayed(const Duration(milliseconds: 300), () {
+          processPendingCallAfterUnlock();
+        });
+      } else if (!_isLocked && !CallStateService.instance.isCallActive.value) {
+        // Fallback: проверяем активные CallKit звонки
+        // На случай если pending call был null, но пользователь принял звонок через CallKit
+        // и приложение развернулось, но _handleCallKitAccept ещё не успел сработать
+        Future.delayed(const Duration(milliseconds: 500), () {
+          _checkActiveCallOnResumed();
+        });
+      }
     } else if (state == AppLifecycleState.paused) {
       DebugLogger.info('LIFECYCLE', 'Приложение в background');
       // Блокируем приложение при сворачивании (если PIN включен),
