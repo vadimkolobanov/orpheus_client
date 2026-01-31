@@ -19,6 +19,7 @@ import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/incoming_call_buffer.dart';
 import 'package:orpheus_project/services/incoming_message_handler.dart';
+import 'package:orpheus_project/services/pending_call_storage.dart';
 import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/panic_wipe_service.dart';
@@ -53,21 +54,8 @@ bool _hasKeys = false;
 /// Глобальный флаг: приложение в foreground (активно)?
 bool isAppInForeground = true;
 
-/// Данные отложенного звонка (если пользователь принял звонок, но приложение заблокировано)
-class PendingCallData {
-  final String callerKey;
-  final Map<String, dynamic>? offerData;
-  final DateTime timestamp;
-  /// Если true — звонок уже принят через CallKit, нужен автоответ
-  final bool autoAnswer;
-  
-  PendingCallData({required this.callerKey, this.offerData, this.autoAnswer = true}) 
-      : timestamp = DateTime.now();
-  
-  /// Проверка что звонок ещё актуален (не старше 30 секунд)
-  bool get isValid => DateTime.now().difference(timestamp).inSeconds < 30;
-}
-
+/// Pending call в RAM (для быстрого доступа в рамках одного isolate)
+/// Для персистентного хранения используем PendingCallStorage
 PendingCallData? _pendingCall;
 
 /// Флаг: ожидается открытие CallScreen из CallKit (блокирует дубли из WebSocket)
@@ -279,9 +267,20 @@ Future<void> _checkActiveCallOnStart() async {
   // Ждём пока Navigator будет готов (первый кадр отрисован)
   await Future.delayed(const Duration(milliseconds: 300));
   
-  // Сначала проверяем pending call (сохранён из _handleCallKitAccept когда Navigator был null)
+  // КРИТИЧНО: Сначала проверяем PERSISTENT storage!
+  // Когда приложение перезапускается при accept звонка из background,
+  // RAM данные (_pendingCall) теряются, но storage сохраняется.
+  final storedPending = await PendingCallStorage.instance.loadAndClear();
+  if (storedPending != null && storedPending.isValid) {
+    DebugLogger.info('CALLKIT', '📞 Найден pending call в STORAGE, открываю CallScreen');
+    _isProcessingCallKitAnswer = true;
+    _navigateToCallScreen(storedPending.callerKey, storedPending.offerData, autoAnswer: storedPending.autoAnswer);
+    return;
+  }
+  
+  // Fallback: проверяем pending call в RAM (для случаев без перезапуска)
   if (_pendingCall != null && _pendingCall!.isValid) {
-    DebugLogger.info('CALLKIT', '📞 Найден pending call, открываю CallScreen');
+    DebugLogger.info('CALLKIT', '📞 Найден pending call в RAM, открываю CallScreen');
     final pending = _pendingCall!;
     _pendingCall = null;
     _navigateToCallScreen(pending.callerKey, pending.offerData, autoAnswer: pending.autoAnswer);
@@ -392,6 +391,25 @@ Future<void> _handleCallKitAccept(Map<String, dynamic>? body) async {
     }
     
     callExtra['callerKey'] = callerKey;
+    
+    // КРИТИЧНО: Сохраняем в persistent storage СРАЗУ!
+    // Если Android перезапустит Flutter Engine, RAM данные потеряются,
+    // но storage сохранится и _checkActiveCallOnStart найдёт pending call.
+    final offerDataStr = callExtra['offerData'] as String?;
+    Map<String, dynamic>? offerData;
+    if (offerDataStr != null) {
+      try {
+        offerData = json.decode(offerDataStr) as Map<String, dynamic>;
+      } catch (e) {
+        DebugLogger.warn('CALLKIT', 'Error parsing offerData for storage: $e');
+      }
+    }
+    await PendingCallStorage.instance.save(
+      callerKey: callerKey,
+      offerData: offerData,
+      autoAnswer: true,
+    );
+    
     _openCallScreenFromCallKit(callerKey, callExtra);
   } else {
     DebugLogger.error('CALLKIT', '❌ callerKey is null! Нет данных для звонка!');
@@ -528,6 +546,9 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
     // Скрываем CallKit UI после успешной навигации
     FlutterCallkitIncoming.endAllCalls();
     
+    // Очищаем persistent storage после успешной навигации
+    PendingCallStorage.instance.clear();
+    
     // Сбрасываем флаг после успешной навигации
     Future.delayed(const Duration(milliseconds: 100), () {
       _isProcessingCallKitAnswer = false;
@@ -535,11 +556,12 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
   });
   
   // Fallback: если callback не выполнился за 2 секунды (приложение в background),
-  // сохраняем pending call для обработки при resumed
+  // pending call уже сохранён в storage через _handleCallKitAccept
   Future.delayed(const Duration(seconds: 2), () {
     if (!callbackExecuted) {
-      DebugLogger.warn('CALLKIT', '⏰ PostFrame callback не выполнился за 2с, сохраняю pending call');
+      DebugLogger.warn('CALLKIT', '⏰ PostFrame callback не выполнился за 2с, pending call уже в storage');
       callbackExecuted = true;
+      // RAM fallback на случай если storage не работает
       _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
       _isProcessingCallKitAnswer = false;
     }
