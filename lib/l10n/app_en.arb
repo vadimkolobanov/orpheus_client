@@ -1,0 +1,1231 @@
+{
+  "@@locale": "en",
+  
+  "appName": "Orpheus",
+  "@appName": {"description": "Application name"},
+  
+  "welcomeSubtitle": "Secure communication without the noise",
+  "@welcomeSubtitle": {"description": "Welcome screen subtitle"},
+  
+  "createAccount": "Create Account",
+  "@createAccount": {"description": "Create account button"},
+  
+  "restoreFromKey": "Restore from Key",
+  "@restoreFromKey": {"description": "Restore account button"},
+  
+  "e2eEncryption": "End-to-end encryption",
+  "@e2eEncryption": {"description": "E2E encryption label"},
+  
+  "recovery": "Recovery",
+  "@recovery": {"description": "Recovery dialog title"},
+  
+  "recoveryWarning": "Private key grants full access to your account. Never share it with anyone.",
+  "@recoveryWarning": {"description": "Recovery warning text"},
+  
+  "pastePrivateKey": "Paste private key...",
+  "@pastePrivateKey": {"description": "Private key input hint"},
+  
+  "cancel": "Cancel",
+  "@cancel": {"description": "Cancel button"},
+  
+  "import": "Import",
+  "@import": {"description": "Import button"},
+  
+  "error": "Error",
+  "@error": {"description": "Error prefix"},
+  
+  "profile": "Profile",
+  "@profile": {"description": "Profile screen title"},
+  
+  "qrCode": "QR Code",
+  "@qrCode": {"description": "QR code section title"},
+  
+  "yourId": "Your ID",
+  "@yourId": {"description": "Your ID section title"},
+  
+  "idCopied": "ID copied",
+  "@idCopied": {"description": "ID copied snackbar"},
+  
+  "share": "Share",
+  "@share": {"description": "Share button"},
+  
+  "shareMessage": "Hi! Add me on Orpheus.\nMy key:\n{key}",
+  "@shareMessage": {
+    "description": "Share message template",
+    "placeholders": {
+      "key": {"type": "String"}
+    }
+  },
+  
+  "contactsCount": "{count, plural, =0{contacts} =1{contact} other{contacts}}",
+  "@contactsCount": {
+    "description": "Contacts count label",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "messagesCount": "{count, plural, =0{messages} =1{message} other{messages}}",
+  "@messagesCount": {
+    "description": "Messages count label",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "sentCount": "sent",
+  "@sentCount": {"description": "Sent count label"},
+  
+  "security": "Security",
+  "@security": {"description": "Security menu item"},
+  
+  "securityDesc": "PIN, duress, wipe",
+  "@securityDesc": {"description": "Security menu description"},
+  
+  "support": "Support",
+  "@support": {"description": "Support menu item"},
+  
+  "supportDesc": "Contact developer",
+  "@supportDesc": {"description": "Support menu description"},
+  
+  "howToUse": "How to Use",
+  "@howToUse": {"description": "Help menu item"},
+  
+  "howToUseDesc": "Quick guide",
+  "@howToUseDesc": {"description": "Help menu description"},
+  
+  "updateHistory": "Update History",
+  "@updateHistory": {"description": "Updates menu item"},
+  
+  "exportAccount": "Export Account",
+  "@exportAccount": {"description": "Export menu item"},
+  
+  "exportAccountDesc": "Show private key",
+  "@exportAccountDesc": {"description": "Export menu description"},
+  
+  "notificationSettings": "Notification Settings",
+  "@notificationSettings": {"description": "Notifications menu item"},
+  
+  "notificationSettingsDesc": "For Android (Vivo, Xiaomi, etc.)",
+  "@notificationSettingsDesc": {"description": "Notifications menu description"},
+  
+  "language": "Language",
+  "@language": {"description": "Language menu item"},
+  
+  "languageDesc": "English, Русский",
+  "@languageDesc": {"description": "Language menu description"},
+  
+  "accountCreated": "Account created {date}",
+  "@accountCreated": {
+    "description": "Account creation date",
+    "placeholders": {
+      "date": {"type": "String"}
+    }
+  },
+  
+  "checkUpdates": "Check",
+  "@checkUpdates": {"description": "Check updates button"},
+  
+  "deleteAccount": "Delete Account",
+  "@deleteAccount": {"description": "Delete account button"},
+  
+  "deleteAccountTitle": "Delete Account?",
+  "@deleteAccountTitle": {"description": "Delete account dialog title"},
+  
+  "deleteAccountWarning": "This will delete keys, contacts and message history without possibility of recovery.",
+  "@deleteAccountWarning": {"description": "Delete account warning"},
+  
+  "deleteAccountConfirm": "I understand this is irreversible",
+  "@deleteAccountConfirm": {"description": "Delete account confirmation checkbox"},
+  
+  "delete": "Delete",
+  "@delete": {"description": "Delete button"},
+  
+  "privateKey": "Private Key",
+  "@privateKey": {"description": "Private key dialog title"},
+  
+  "privateKeyWarning": "Never share this key with anyone. Possession of it grants full access to your account.",
+  "@privateKeyWarning": {"description": "Private key warning"},
+  
+  "close": "Close",
+  "@close": {"description": "Close button"},
+  
+  "copy": "Copy",
+  "@copy": {"description": "Copy button"},
+  
+  "keyCopied": "Key copied",
+  "@keyCopied": {"description": "Key copied snackbar"},
+  
+  "biometryUnavailable": "Biometry unavailable. Set up device security.",
+  "@biometryUnavailable": {"description": "Biometry unavailable message"},
+  
+  "confirmIdentity": "Confirm identity to export keys",
+  "@confirmIdentity": {"description": "Biometry prompt"},
+  
+  "authError": "Authentication error",
+  "@authError": {"description": "Auth error message"},
+  
+  "accountDeleted": "Account deleted. Restart the app.",
+  "@accountDeleted": {"description": "Account deleted message"},
+  
+  "online": "Online",
+  "@online": {"description": "Online status"},
+  
+  "offline": "Offline",
+  "@offline": {"description": "Offline status"},
+  
+  "call": "Call",
+  "@call": {"description": "Call button tooltip"},
+  
+  "menu": "Menu",
+  "@menu": {"description": "Menu button tooltip"},
+  
+  "clearHistory": "Clear History?",
+  "@clearHistory": {"description": "Clear history dialog title"},
+  
+  "clearHistoryWarning": "All messages with this contact will be permanently deleted.",
+  "@clearHistoryWarning": {"description": "Clear history warning"},
+  
+  "startConversation": "Start a conversation",
+  "@startConversation": {"description": "Empty chat title"},
+  
+  "messagesEncrypted": "Messages are encrypted and stored locally.",
+  "@messagesEncrypted": {"description": "Empty chat subtitle"},
+  
+  "messagePlaceholder": "Message...",
+  "@messagePlaceholder": {"description": "Message input placeholder"},
+  
+  "today": "Today",
+  "@today": {"description": "Today date label"},
+  
+  "yesterday": "Yesterday",
+  "@yesterday": {"description": "Yesterday date label"},
+  
+  "incomingCall": "Incoming call",
+  "@incomingCall": {"description": "Incoming call status"},
+  
+  "outgoingCall": "Outgoing call",
+  "@outgoingCall": {"description": "Outgoing call status"},
+  
+  "missedCall": "Missed call",
+  "@missedCall": {"description": "Missed call status"},
+  
+  "callLabel": "Call",
+  "@callLabel": {"description": "Call label"},
+  
+  "incoming": "Incoming",
+  "@incoming": {"description": "Incoming direction"},
+  
+  "outgoing": "Outgoing",
+  "@outgoing": {"description": "Outgoing direction"},
+  
+  "chats": "Chats",
+  "@chats": {"description": "Chats tab"},
+  
+  "contacts": "Contacts",
+  "@contacts": {"description": "Contacts tab"},
+  
+  "settings": "Settings",
+  "@settings": {"description": "Settings tab"},
+  
+  "noChats": "No chats yet",
+  "@noChats": {"description": "Empty chats title"},
+  
+  "noChatsDesc": "Add a contact to start messaging",
+  "@noChatsDesc": {"description": "Empty chats description"},
+  
+  "addContact": "Add Contact",
+  "@addContact": {"description": "Add contact button"},
+  
+  "noContacts": "No contacts",
+  "@noContacts": {"description": "Empty contacts title"},
+  
+  "noContactsDesc": "Scan QR code or paste contact's ID",
+  "@noContactsDesc": {"description": "Empty contacts description"},
+  
+  "scanQr": "Scan QR",
+  "@scanQr": {"description": "Scan QR button"},
+  
+  "addById": "Add by ID",
+  "@addById": {"description": "Add by ID button"},
+  
+  "newContact": "New Contact",
+  "@newContact": {"description": "New contact dialog title"},
+  
+  "contactName": "Name",
+  "@contactName": {"description": "Contact name field"},
+  
+  "contactId": "Contact ID",
+  "@contactId": {"description": "Contact ID field"},
+  
+  "add": "Add",
+  "@add": {"description": "Add button"},
+  
+  "contactAdded": "Contact added",
+  "@contactAdded": {"description": "Contact added message"},
+  
+  "contactExists": "Contact already exists",
+  "@contactExists": {"description": "Contact exists error"},
+  
+  "invalidId": "Invalid ID format",
+  "@invalidId": {"description": "Invalid ID error"},
+  
+  "cannotAddSelf": "Cannot add yourself",
+  "@cannotAddSelf": {"description": "Cannot add self error"},
+  
+  "deleteContact": "Delete Contact?",
+  "@deleteContact": {"description": "Delete contact dialog title"},
+  
+  "deleteContactWarning": "Contact and chat history will be deleted.",
+  "@deleteContactWarning": {"description": "Delete contact warning"},
+  
+  "contactDeleted": "Contact deleted",
+  "@contactDeleted": {"description": "Contact deleted message"},
+  
+  "renameContact": "Rename Contact",
+  "@renameContact": {"description": "Rename contact dialog title"},
+  
+  "save": "Save",
+  "@save": {"description": "Save button"},
+  
+  "pinCode": "PIN Code",
+  "@pinCode": {"description": "PIN code title"},
+  
+  "enterPin": "Enter PIN",
+  "@enterPin": {"description": "Enter PIN prompt"},
+  
+  "confirmPin": "Confirm PIN",
+  "@confirmPin": {"description": "Confirm PIN prompt"},
+  
+  "pinMismatch": "PINs do not match",
+  "@pinMismatch": {"description": "PIN mismatch error"},
+  
+  "pinSet": "PIN set",
+  "@pinSet": {"description": "PIN set message"},
+  
+  "pinDisabled": "PIN disabled",
+  "@pinDisabled": {"description": "PIN disabled message"},
+  
+  "wrongPin": "Wrong PIN",
+  "@wrongPin": {"description": "Wrong PIN error"},
+  
+  "attemptsLeft": "{count, plural, =1{1 attempt left} other{{count} attempts left}}",
+  "@attemptsLeft": {
+    "description": "Attempts left message",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "unlock": "Unlock",
+  "@unlock": {"description": "Unlock button"},
+  
+  "useBiometry": "Use biometry",
+  "@useBiometry": {"description": "Use biometry option"},
+  
+  "duressCode": "Duress Code",
+  "@duressCode": {"description": "Duress code title"},
+  
+  "duressCodeDesc": "Shows empty profile when entered",
+  "@duressCodeDesc": {"description": "Duress code description"},
+  
+  "wipeCode": "Wipe Code",
+  "@wipeCode": {"description": "Wipe code title"},
+  
+  "wipeCodeDesc": "Deletes all data when entered",
+  "@wipeCodeDesc": {"description": "Wipe code description"},
+  
+  "autoWipe": "Auto-wipe",
+  "@autoWipe": {"description": "Auto-wipe title"},
+  
+  "autoWipeDesc": "Wipe after {count} failed attempts",
+  "@autoWipeDesc": {
+    "description": "Auto-wipe description",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "panicGesture": "Panic Gesture",
+  "@panicGesture": {"description": "Panic gesture title"},
+  
+  "panicGestureDesc": "3 quick app minimizes = wipe",
+  "@panicGestureDesc": {"description": "Panic gesture description"},
+  
+  "enabled": "Enabled",
+  "@enabled": {"description": "Enabled state"},
+  
+  "disabled": "Disabled",
+  "@disabled": {"description": "Disabled state"},
+  
+  "setupPin": "Set up PIN",
+  "@setupPin": {"description": "Setup PIN button"},
+  
+  "changePin": "Change PIN",
+  "@changePin": {"description": "Change PIN button"},
+  
+  "removePin": "Remove PIN",
+  "@removePin": {"description": "Remove PIN button"},
+  
+  "setupDuress": "Set up duress code",
+  "@setupDuress": {"description": "Setup duress button"},
+  
+  "setupWipe": "Set up wipe code",
+  "@setupWipe": {"description": "Setup wipe button"},
+  
+  "messageRetention": "Message Retention",
+  "@messageRetention": {"description": "Message retention title"},
+  
+  "retentionForever": "Forever",
+  "@retentionForever": {"description": "Keep forever option"},
+  
+  "retentionWeek": "1 week",
+  "@retentionWeek": {"description": "1 week option"},
+  
+  "retentionMonth": "1 month",
+  "@retentionMonth": {"description": "1 month option"},
+  
+  "retentionYear": "1 year",
+  "@retentionYear": {"description": "1 year option"},
+  
+  "license": "License",
+  "@license": {"description": "License screen title"},
+  
+  "licenseRequired": "License required to use the app",
+  "@licenseRequired": {"description": "License required message"},
+  
+  "activate": "Activate",
+  "@activate": {"description": "Activate button"},
+  
+  "system": "System",
+  "@system": {"description": "System screen title"},
+  
+  "connectionStatus": "Connection Status",
+  "@connectionStatus": {"description": "Connection status title"},
+  
+  "connected": "Connected",
+  "@connected": {"description": "Connected status"},
+  
+  "disconnected": "Disconnected",
+  "@disconnected": {"description": "Disconnected status"},
+  
+  "reconnecting": "Reconnecting...",
+  "@reconnecting": {"description": "Reconnecting status"},
+  
+  "securityMode": "Security Mode",
+  "@securityMode": {"description": "Security mode title"},
+  
+  "standardMode": "Standard",
+  "@standardMode": {"description": "Standard mode"},
+  
+  "enhancedMode": "Enhanced Protection",
+  "@enhancedMode": {"description": "Enhanced mode"},
+  
+  "debugLogs": "Debug Logs",
+  "@debugLogs": {"description": "Debug logs title"},
+  
+  "clearLogs": "Clear Logs",
+  "@clearLogs": {"description": "Clear logs button"},
+  
+  "exportLogs": "Export Logs",
+  "@exportLogs": {"description": "Export logs button"},
+  
+  "logsCleared": "Logs cleared",
+  "@logsCleared": {"description": "Logs cleared message"},
+  
+  "calling": "Calling...",
+  "@calling": {"description": "Calling status"},
+  
+  "ringing": "Ringing...",
+  "@ringing": {"description": "Ringing status"},
+  
+  "connecting": "Connecting...",
+  "@connecting": {"description": "Connecting status"},
+  
+  "callEnded": "Call ended",
+  "@callEnded": {"description": "Call ended status"},
+  
+  "callDeclined": "Call declined",
+  "@callDeclined": {"description": "Call declined status"},
+  
+  "noAnswer": "No answer",
+  "@noAnswer": {"description": "No answer status"},
+  
+  "endCall": "End Call",
+  "@endCall": {"description": "End call button"},
+  
+  "mute": "Mute",
+  "@mute": {"description": "Mute button"},
+  
+  "unmute": "Unmute",
+  "@unmute": {"description": "Unmute button"},
+  
+  "speaker": "Speaker",
+  "@speaker": {"description": "Speaker button"},
+  
+  "accept": "Accept",
+  "@accept": {"description": "Accept call button"},
+  
+  "decline": "Decline",
+  "@decline": {"description": "Decline call button"},
+  
+  "supportChat": "Support Chat",
+  "@supportChat": {"description": "Support chat title"},
+  
+  "supportWelcome": "How can we help?",
+  "@supportWelcome": {"description": "Support welcome message"},
+  
+  "scanQrTitle": "Scan QR Code",
+  "@scanQrTitle": {"description": "Scan QR screen title"},
+  
+  "cameraPermissionRequired": "Camera permission required",
+  "@cameraPermissionRequired": {"description": "Camera permission message"},
+  
+  "openSettings": "Open Settings",
+  "@openSettings": {"description": "Open settings button"},
+  
+  "helpQuickStart": "Quick Start",
+  "@helpQuickStart": {"description": "Help section: Quick start"},
+  
+  "helpQuickStartBullet1": "Your ID is your public key. Share it so others can add you.",
+  "@helpQuickStartBullet1": {"description": "Quick start bullet 1"},
+  
+  "helpQuickStartBullet2": "Contact works both ways: you add someone by their ID/QR, and they add you by yours.",
+  "@helpQuickStartBullet2": {"description": "Quick start bullet 2"},
+  
+  "helpQuickStartBullet3": "Chat and calls go through a secure channel, messages are encrypted.",
+  "@helpQuickStartBullet3": {"description": "Quick start bullet 3"},
+  
+  "helpExportTitle": "Export Account (Important)",
+  "@helpExportTitle": {"description": "Help section: Export"},
+  
+  "helpExportBullet1": "Profile → Export Account shows your private key.",
+  "@helpExportBullet1": {"description": "Export bullet 1"},
+  
+  "helpExportBullet2": "Private key grants full access to your account. Never share it.",
+  "@helpExportBullet2": {"description": "Export bullet 2"},
+  
+  "helpExportBullet3": "Lost private key + deleted app = recovery impossible.",
+  "@helpExportBullet3": {"description": "Export bullet 3"},
+  
+  "helpPinTitle": "PIN Code",
+  "@helpPinTitle": {"description": "Help section: PIN"},
+  
+  "helpPinBullet1": "Profile → Security → PIN. If PIN is not set — access is open.",
+  "@helpPinBullet1": {"description": "PIN bullet 1"},
+  
+  "helpPinBullet2": "When PIN is enabled — app locks on minimize and on launch.",
+  "@helpPinBullet2": {"description": "PIN bullet 2"},
+  
+  "helpDuressTitle": "Duress Code",
+  "@helpDuressTitle": {"description": "Help section: Duress"},
+  
+  "helpDuressBullet1": "This is a second PIN. When entered, shows an \"empty profile\" (0 contacts/messages).",
+  "@helpDuressBullet1": {"description": "Duress bullet 1"},
+  
+  "helpDuressBullet2": "Real data is not deleted — it's hidden while in duress mode.",
+  "@helpDuressBullet2": {"description": "Duress bullet 2"},
+  
+  "helpWipeCodeTitle": "Wipe Code (Panic wipe)",
+  "@helpWipeCodeTitle": {"description": "Help section: Wipe code"},
+  
+  "helpWipeCodeBullet1": "A separate code for complete data deletion.",
+  "@helpWipeCodeBullet1": {"description": "Wipe code bullet 1"},
+  
+  "helpWipeCodeBullet2": "After entering the code, a confirmation appears: hold the button for 2 seconds.",
+  "@helpWipeCodeBullet2": {"description": "Wipe code bullet 2"},
+  
+  "helpWipeCodeBullet3": "Designed to prevent accidental wipe.",
+  "@helpWipeCodeBullet3": {"description": "Wipe code bullet 3"},
+  
+  "helpAutoWipeTitle": "Auto-wipe",
+  "@helpAutoWipeTitle": {"description": "Help section: Auto-wipe"},
+  
+  "helpAutoWipeBullet1": "Option: delete data after N failed PIN attempts.",
+  "@helpAutoWipeBullet1": {"description": "Auto-wipe bullet 1"},
+  
+  "helpAutoWipeBullet2": "Enable only if you understand the risk of irreversible data loss.",
+  "@helpAutoWipeBullet2": {"description": "Auto-wipe bullet 2"},
+  
+  "helpPanicGestureTitle": "Panic Gesture",
+  "@helpPanicGestureTitle": {"description": "Help section: Panic gesture"},
+  
+  "helpPanicGestureBullet1": "Option (off by default): 3 quick app minimizes → wipe.",
+  "@helpPanicGestureBullet1": {"description": "Panic gesture bullet 1"},
+  
+  "helpPanicGestureBullet2": "Based on app lifecycle events, may trigger less predictably than wipe code.",
+  "@helpPanicGestureBullet2": {"description": "Panic gesture bullet 2"},
+  
+  "helpRegionsTitle": "Regions and Traffic Control",
+  "@helpRegionsTitle": {"description": "Help section: Regions"},
+  
+  "helpRegionsBullet1": "System screen shows mode: \"Standard\" or \"Enhanced Protection\".",
+  "@helpRegionsBullet1": {"description": "Regions bullet 1"},
+  
+  "helpRegionsBullet2": "If traffic-controlled region detected, app enables \"enhanced\" mode.",
+  "@helpRegionsBullet2": {"description": "Regions bullet 2"},
+  
+  "helpRegionsBullet3": "Connection issues? Check System screen for network/mode status.",
+  "@helpRegionsBullet3": {"description": "Regions bullet 3"},
+  
+  "selectLanguage": "Select Language",
+  "@selectLanguage": {"description": "Select language dialog title"},
+  
+  "systemDefault": "System default",
+  "@systemDefault": {"description": "System default language option"},
+  
+  "english": "English",
+  "@english": {"description": "English language name"},
+  
+  "russian": "Русский",
+  "@russian": {"description": "Russian language name"},
+  
+  "languageChanged": "Language changed",
+  "@languageChanged": {"description": "Language changed message"},
+  
+  "contactsTitle": "Contacts",
+  "@contactsTitle": {"description": "Contacts screen title"},
+  
+  "scanQrTooltip": "Scan QR",
+  "@scanQrTooltip": {"description": "Scan QR button tooltip"},
+  
+  "refreshTooltip": "Refresh",
+  "@refreshTooltip": {"description": "Refresh button tooltip"},
+  
+  "loadingError": "Loading error",
+  "@loadingError": {"description": "Loading error title"},
+  
+  "addFirstContact": "Add your first contact to start secure communication",
+  "@addFirstContact": {"description": "Empty contacts subtitle"},
+  
+  "enterName": "Enter contact name",
+  "@enterName": {"description": "Contact name hint"},
+  
+  "publicKey": "Public key",
+  "@publicKey": {"description": "Public key label"},
+  
+  "pasteOrScanKey": "Paste or scan key",
+  "@pasteOrScanKey": {"description": "Public key hint"},
+  
+  "rename": "Rename",
+  "@rename": {"description": "Rename action"},
+  
+  "enterNewName": "Enter new name",
+  "@enterNewName": {"description": "Rename hint"},
+  
+  "deleteContactFull": "Delete {name}?",
+  "@deleteContactFull": {
+    "description": "Delete contact confirmation",
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  
+  "deleteContactFullWarning": "Contact and all chat history will be permanently deleted.",
+  "@deleteContactFullWarning": {"description": "Delete contact warning full"},
+  
+  "connection": "Connection",
+  "@connection": {"description": "Connection status title"},
+  
+  "session": "Session",
+  "@session": {"description": "Session label"},
+  
+  "queue": "Queue",
+  "@queue": {"description": "Queue label"},
+  
+  "region": "Region",
+  "@region": {"description": "Region label"},
+  
+  "mode": "Mode",
+  "@mode": {"description": "Mode label"},
+  
+  "enhanced": "Enhanced",
+  "@enhanced": {"description": "Enhanced mode label"},
+  
+  "standard": "Standard",
+  "@standard": {"description": "Standard mode label"},
+  
+  "enhancedProtection": "Enhanced protection",
+  "@enhancedProtection": {"description": "Enhanced protection subtitle"},
+  
+  "stableConnection": "Stable connection",
+  "@stableConnection": {"description": "Stable connection subtitle"},
+  
+  "encryption": "Encryption",
+  "@encryption": {"description": "Encryption label"},
+  
+  "copyFingerprint": "Copy fingerprint",
+  "@copyFingerprint": {"description": "Copy fingerprint tooltip"},
+  
+  "fingerprint": "Fingerprint",
+  "@fingerprint": {"description": "Fingerprint label"},
+  
+  "keyCreated": "Key created",
+  "@keyCreated": {"description": "Key created label"},
+  
+  "e2eActive": "End-to-end encryption active",
+  "@e2eActive": {"description": "E2E active message"},
+  
+  "fingerprintCopied": "Fingerprint copied",
+  "@fingerprintCopied": {"description": "Fingerprint copied message"},
+  
+  "storage": "Storage",
+  "@storage": {"description": "Storage label"},
+  
+  "messagesLabel": "messages",
+  "@messagesLabel": {"description": "Messages label"},
+  
+  "contactsLabel": "contacts",
+  "@contactsLabel": {"description": "Contacts label"},
+  
+  "application": "Application",
+  "@application": {"description": "Application label"},
+  
+  "device": "Device",
+  "@device": {"description": "Device label"},
+  
+  "model": "Model",
+  "@model": {"description": "Model label"},
+  
+  "osLabel": "System",
+  "@osLabel": {"description": "OS label"},
+  
+  "notDetermined": "Not determined",
+  "@notDetermined": {"description": "Not determined label"},
+  
+  "unknown": "Unknown",
+  "@unknown": {"description": "Unknown label"},
+  
+  "securityTitle": "SECURITY",
+  "@securityTitle": {"description": "Security screen title"},
+  
+  "pinCodeSection": "PIN CODE",
+  "@pinCodeSection": {"description": "PIN code section title"},
+  
+  "pinNotSet": "PIN code is not set. App opens without protection.",
+  "@pinNotSet": {"description": "PIN not set warning"},
+  
+  "setPinCode": "Set PIN code",
+  "@setPinCode": {"description": "Set PIN button"},
+  
+  "setPinCodeDesc": "4 or 6 digit code to protect entry",
+  "@setPinCodeDesc": {"description": "Set PIN description"},
+  
+  "pinCodeSet": "PIN code set",
+  "@pinCodeSet": {"description": "PIN code set message"},
+  
+  "changePinCode": "Change PIN code",
+  "@changePinCode": {"description": "Change PIN button"},
+  
+  "digitCode": "{count}-digit code",
+  "@digitCode": {
+    "description": "N-digit code",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "disablePinCode": "Disable PIN code",
+  "@disablePinCode": {"description": "Disable PIN button"},
+  
+  "biometrySection": "BIOMETRY",
+  "@biometrySection": {"description": "Biometry section title"},
+  
+  "unlockWithBiometry": "Unlock with fingerprint/face",
+  "@unlockWithBiometry": {"description": "Biometry unlock option"},
+  
+  "quickEntryWithoutPin": "Quick entry without PIN",
+  "@quickEntryWithoutPin": {"description": "Biometry option description"},
+  
+  "duressCodeSection": "DURESS CODE",
+  "@duressCodeSection": {"description": "Duress code section title"},
+  
+  "duressCodeInfo": "Duress code is a second PIN that shows an empty profile. Use it if you are forced to unlock the app under pressure.",
+  "@duressCodeInfo": {"description": "Duress code info"},
+  
+  "setDuressCode": "Set duress code",
+  "@setDuressCode": {"description": "Set duress code button"},
+  
+  "setDuressCodeDesc": "{count}-digit code for emergencies",
+  "@setDuressCodeDesc": {
+    "description": "Set duress code description",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "duressCodeSet": "Duress code set ({count} digits).",
+  "@duressCodeSet": {
+    "description": "Duress code set message",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "disableDuressCode": "Disable duress code",
+  "@disableDuressCode": {"description": "Disable duress code button"},
+  
+  "wipeCodeSection": "WIPE CODE",
+  "@wipeCodeSection": {"description": "Wipe code section title"},
+  
+  "wipeCodeInfo": "Wipe code is a separate PIN that triggers complete data deletion. After entering, confirmation will appear: hold the button for 2 seconds (protection from accidental trigger).",
+  "@wipeCodeInfo": {"description": "Wipe code info"},
+  
+  "setWipeCode": "Set wipe code",
+  "@setWipeCode": {"description": "Set wipe code button"},
+  
+  "setWipeCodeDesc": "{count}-digit panic wipe code",
+  "@setWipeCodeDesc": {
+    "description": "Set wipe code description",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "wipeCodeSet": "Wipe code set ({count} digits).",
+  "@wipeCodeSet": {
+    "description": "Wipe code set message",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "disableWipeCode": "Disable wipe code",
+  "@disableWipeCode": {"description": "Disable wipe code button"},
+  
+  "bruteForceProtection": "BRUTE FORCE PROTECTION",
+  "@bruteForceProtection": {"description": "Brute force protection section title"},
+  
+  "deleteAfterAttempts": "Delete data after 10 attempts",
+  "@deleteAfterAttempts": {"description": "Auto-wipe option"},
+  
+  "autoWipeOnWrongPin": "Auto wipe on wrong PIN",
+  "@autoWipeOnWrongPin": {"description": "Auto-wipe description"},
+  
+  "autoWipeWarning": "After 10 wrong attempts all data will be permanently deleted!",
+  "@autoWipeWarning": {"description": "Auto-wipe warning"},
+  
+  "emergencyWipe": "EMERGENCY WIPE",
+  "@emergencyWipe": {"description": "Emergency wipe section title"},
+  
+  "enablePanicGesture": "Enable panic wipe gesture",
+  "@enablePanicGesture": {"description": "Panic gesture option"},
+  
+  "panicGestureFullDesc": "3 quick app minimizes → wipe (off by default)",
+  "@panicGestureFullDesc": {"description": "Panic gesture description"},
+  
+  "panicGestureWarning": "Important: this gesture is based on quick app minimizes (e.g. screen lock/unlock or quick app switching) and may be less predictable than wipe code.",
+  "@panicGestureWarning": {"description": "Panic gesture warning"},
+  
+  "autoDeleteMessages": "MESSAGE AUTO-DELETE",
+  "@autoDeleteMessages": {"description": "Auto-delete messages section title"},
+  
+  "autoDeleteInfo": "Automatic deletion of old messages increases privacy. Messages older than the selected period will be permanently deleted.",
+  "@autoDeleteInfo": {"description": "Auto-delete info"},
+  
+  "confirmation": "Confirmation",
+  "@confirmation": {"description": "Confirmation dialog title"},
+  
+  "willDeleteMessages": "Enabling this policy will delete {count} messages.\n\nThis action is irreversible. Continue?",
+  "@willDeleteMessages": {
+    "description": "Delete messages confirmation",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "deleted": "Deleted {count} messages",
+  "@deleted": {
+    "description": "Deleted messages message",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  
+  "policyApplied": "Policy applied: {name}",
+  "@policyApplied": {
+    "description": "Policy applied message",
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  
+  "biometryEnabled": "Biometry enabled",
+  "@biometryEnabled": {"description": "Biometry enabled message"},
+  
+  "biometryFailed": "Failed to enable biometry",
+  "@biometryFailed": {"description": "Biometry failed message"},
+  
+  "confirmForBiometry": "Confirm to enable biometry",
+  "@confirmForBiometry": {"description": "Biometry confirmation prompt"},
+  
+  "fastEntry": "Fast entry",
+  "@fastEntry": {"description": "Fast entry label"},
+  
+  "combinations": "combinations",
+  "@combinations": {"description": "Combinations label"},
+  
+  "enhancedSecurity": "Enhanced security",
+  "@enhancedSecurity": {"description": "Enhanced security label"},
+  
+  "newPin": "NEW PIN",
+  "@newPin": {"description": "New PIN title"},
+  
+  "confirmPinTitle": "CONFIRM PIN",
+  "@confirmPinTitle": {"description": "Confirm PIN title"},
+  
+  "currentPin": "CURRENT PIN",
+  "@currentPin": {"description": "Current PIN title"},
+  
+  "mainPin": "MAIN PIN",
+  "@mainPin": {"description": "Main PIN title"},
+  
+  "duressCodeTitle": "DURESS CODE",
+  "@duressCodeTitle": {"description": "Duress code title"},
+  
+  "confirmCodeTitle": "CONFIRM CODE",
+  "@confirmCodeTitle": {"description": "Confirm code title"},
+  
+  "wipeCodeTitle": "WIPE CODE",
+  "@wipeCodeTitle": {"description": "Wipe code title"},
+  
+  "enterDigitPin": "Enter {count}-digit PIN code",
+  "@enterDigitPin": {
+    "description": "Enter PIN prompt",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  
+  "repeatPinToConfirm": "Repeat PIN code to confirm",
+  "@repeatPinToConfirm": {"description": "Repeat PIN prompt"},
+  
+  "enterCurrentPin": "Enter current PIN code",
+  "@enterCurrentPin": {"description": "Enter current PIN prompt"},
+  
+  "enterNewDigitPin": "Enter new {count}-digit PIN code",
+  "@enterNewDigitPin": {
+    "description": "Enter new PIN prompt",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  
+  "repeatNewPin": "Repeat new PIN code",
+  "@repeatNewPin": {"description": "Repeat new PIN prompt"},
+  
+  "enterPinToDisable": "Enter PIN to disable",
+  "@enterPinToDisable": {"description": "Enter PIN to disable prompt"},
+  
+  "confirmMainPin": "Confirm main PIN",
+  "@confirmMainPin": {"description": "Confirm main PIN prompt"},
+  
+  "enterDuressCode": "Enter duress code (different from main)",
+  "@enterDuressCode": {"description": "Enter duress code prompt"},
+  
+  "repeatDuressCode": "Repeat duress code",
+  "@repeatDuressCode": {"description": "Repeat duress code prompt"},
+  
+  "enterMainPinToDisable": "Enter main PIN to disable",
+  "@enterMainPinToDisable": {"description": "Enter main PIN to disable prompt"},
+  
+  "enterWipeCode": "Enter wipe code (different from main PIN)",
+  "@enterWipeCode": {"description": "Enter wipe code prompt"},
+  
+  "repeatWipeCode": "Repeat wipe code",
+  "@repeatWipeCode": {"description": "Repeat wipe code prompt"},
+  
+  "enterMainPinToDisableWipe": "Enter main PIN to disable wipe code",
+  "@enterMainPinToDisableWipe": {"description": "Enter main PIN to disable wipe code prompt"},
+  
+  "pinSetupTitle": "PIN Setup",
+  "@pinSetupTitle": {"description": "PIN setup screen title"},
+  
+  "changePinTitle": "Change PIN",
+  "@changePinTitle": {"description": "Change PIN screen title"},
+  
+  "disablePinTitle": "Disable PIN",
+  "@disablePinTitle": {"description": "Disable PIN screen title"},
+  
+  "duressCodeSetupTitle": "Duress Code",
+  "@duressCodeSetupTitle": {"description": "Duress code setup title"},
+  
+  "disableCodeTitle": "Disable Code",
+  "@disableCodeTitle": {"description": "Disable code title"},
+  
+  "wipeCodeSetupTitle": "Wipe Code",
+  "@wipeCodeSetupTitle": {"description": "Wipe code setup title"},
+  
+  "disableWipeCodeTitle": "Disable Wipe Code",
+  "@disableWipeCodeTitle": {"description": "Disable wipe code title"},
+  
+  "pinCodeSetSuccess": "PIN code set",
+  "@pinCodeSetSuccess": {"description": "PIN code set success"},
+  
+  "pinCodeChangedSuccess": "PIN code changed",
+  "@pinCodeChangedSuccess": {"description": "PIN code changed success"},
+  
+  "pinCodeDisabledSuccess": "PIN code disabled",
+  "@pinCodeDisabledSuccess": {"description": "PIN code disabled success"},
+  
+  "duressCodeSetSuccess": "Duress code set",
+  "@duressCodeSetSuccess": {"description": "Duress code set success"},
+  
+  "duressCodeDisabledSuccess": "Duress code disabled",
+  "@duressCodeDisabledSuccess": {"description": "Duress code disabled success"},
+  
+  "wipeCodeSetSuccess": "Wipe code set",
+  "@wipeCodeSetSuccess": {"description": "Wipe code set success"},
+  
+  "wipeCodeDisabledSuccess": "Wipe code disabled",
+  "@wipeCodeDisabledSuccess": {"description": "Wipe code disabled success"},
+  
+  "pinsDoNotMatch": "PINs do not match",
+  "@pinsDoNotMatch": {"description": "PINs do not match error"},
+  
+  "invalidPinCode": "Invalid PIN code",
+  "@invalidPinCode": {"description": "Invalid PIN code error"},
+  
+  "pinChangeError": "Error changing PIN",
+  "@pinChangeError": {"description": "PIN change error"},
+  
+  "codeMustBeDifferent": "Code must be different from main PIN",
+  "@codeMustBeDifferent": {"description": "Code must be different error"},
+  
+  "codeSetupError": "Error setting up code",
+  "@codeSetupError": {"description": "Code setup error"},
+  
+  "codesDoNotMatch": "Codes do not match",
+  "@codesDoNotMatch": {"description": "Codes do not match error"},
+  
+  "selectPinLength": "SELECT PIN LENGTH",
+  "@selectPinLength": {"description": "Select PIN length title"},
+  
+  "shorterPinFaster": "Shorter PIN is faster to enter,\nlonger is more secure",
+  "@shorterPinFaster": {"description": "PIN length description"},
+  
+  "sixDigits": "6 digits",
+  "@sixDigits": {"description": "6 digits option"},
+  
+  "fourDigits": "4 digits",
+  "@fourDigits": {"description": "4 digits option"},
+  
+  "recommended": "recommended",
+  "@recommended": {"description": "Recommended label"},
+  
+  "securityLevel": "Security Level",
+  "@securityLevel": {"description": "Security level title"},
+  
+  "fourDigitCombinations": "4-digit PIN: ~10,000 combinations",
+  "@fourDigitCombinations": {"description": "4 digit combinations"},
+  
+  "sixDigitCombinations": "6-digit PIN: ~1,000,000 combinations",
+  "@sixDigitCombinations": {"description": "6 digit combinations"},
+  
+  "developerChat": "DEVELOPER CHAT",
+  "@developerChat": {"description": "Developer chat title"},
+  
+  "willReply": "We will reply soon",
+  "@willReply": {"description": "Will reply subtitle"},
+  
+  "sendLogsQuestion": "Send logs?",
+  "@sendLogsQuestion": {"description": "Send logs dialog title"},
+  
+  "logsWillBeSent": "{count} entries will be sent.\n\nLogs help the developer understand the issue.",
+  "@logsWillBeSent": {
+    "description": "Logs will be sent message",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  
+  "send": "Send",
+  "@send": {"description": "Send button"},
+  
+  "logsSent": "Logs sent",
+  "@logsSent": {"description": "Logs sent success"},
+  
+  "logsError": "Error sending logs",
+  "@logsError": {"description": "Logs error message"},
+  
+  "messageNotSent": "Failed to send message",
+  "@messageNotSent": {"description": "Message not sent error"},
+  
+  "writeToUs": "Write to us!",
+  "@writeToUs": {"description": "Write to us title"},
+  
+  "questionsProblemsIdeas": "Questions, problems, suggestions — we read everything and respond.",
+  "@questionsProblemsIdeas": {"description": "Support description"},
+  
+  "developer": "Developer",
+  "@developer": {"description": "Developer label"},
+  
+  "now": "now",
+  "@now": {"description": "Now time label"},
+  
+  "minAgo": "{count} min",
+  "@minAgo": {
+    "description": "Minutes ago",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  
+  "daysAgo": "{count} d",
+  "@daysAgo": {
+    "description": "Days ago",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  
+  "retry": "Retry",
+  "@retry": {"description": "Retry button"},
+  
+  "sendLogs": "Send logs",
+  "@sendLogs": {"description": "Send logs tooltip"},
+  
+  "pointCameraAtQr": "Point camera at QR code",
+  "@pointCameraAtQr": {"description": "QR scan hint title"},
+  
+  "publicKeyAutoRecognized": "Contact's public key will be recognized automatically",
+  "@publicKeyAutoRecognized": {"description": "QR scan hint subtitle"},
+  
+  "retentionAll": "Keep forever",
+  "@retentionAll": {"description": "Message retention - keep all"},
+  
+  "retentionDay": "Keep 24 hours",
+  "@retentionDay": {"description": "Message retention - 24 hours"},
+  
+  "retentionWeekOption": "Keep 7 days",
+  "@retentionWeekOption": {"description": "Message retention - 7 days"},
+  
+  "retentionMonthOption": "Keep 30 days",
+  "@retentionMonthOption": {"description": "Message retention - 30 days"},
+  
+  "retentionAllSubtitle": "Messages are not deleted automatically",
+  "@retentionAllSubtitle": {"description": "Retention all subtitle"},
+  
+  "retentionDaySubtitle": "Messages older than a day are deleted",
+  "@retentionDaySubtitle": {"description": "Retention day subtitle"},
+  
+  "retentionWeekSubtitle": "Messages older than a week are deleted",
+  "@retentionWeekSubtitle": {"description": "Retention week subtitle"},
+  
+  "retentionMonthSubtitle": "Messages older than a month are deleted",
+  "@retentionMonthSubtitle": {"description": "Retention month subtitle"},
+  
+  "autoScroll": "Auto-scroll",
+  "@autoScroll": {"description": "Auto-scroll tooltip"},
+  
+  "clearLogsQuestion": "Clear logs?",
+  "@clearLogsQuestion": {"description": "Clear logs dialog title"},
+  
+  "logsCopied": "Logs copied",
+  "@logsCopied": {"description": "Logs copied snackbar"},
+  
+  "entryCopied": "Entry copied",
+  "@entryCopied": {"description": "Log entry copied snackbar"},
+  
+  "noLogs": "No logs",
+  "@noLogs": {"description": "No logs message"},
+  
+  "entries": "Entries",
+  "@entries": {"description": "Entries count label"},
+  
+  "all": "ALL",
+  "@all": {"description": "All filter"},
+  
+  "done": "Done",
+  "@done": {"description": "Done button"},
+  
+  "activation": "Activation",
+  "@activation": {"description": "Activation screen title"},
+  
+  "enterCode": "Enter code",
+  "@enterCode": {"description": "Enter code title"},
+  
+  "activationCodeHint": "Activation code is provided upon license purchase.",
+  "@activationCodeHint": {"description": "Activation code hint"},
+  
+  "activationCode": "Activation code",
+  "@activationCode": {"description": "Activation code label"},
+  
+  "activateButton": "Activate",
+  "@activateButton": {"description": "Activate button"},
+  
+  "checking": "Checking…",
+  "@checking": {"description": "Checking progress"},
+  
+  "licenseActivated": "License successfully activated.",
+  "@licenseActivated": {"description": "License activated message"},
+  
+  "enterCodeError": "Enter code",
+  "@enterCodeError": {"description": "Enter code error"},
+  
+  "invalidCode": "Invalid code",
+  "@invalidCode": {"description": "Invalid code error"},
+  
+  "connectionError": "Connection error. Check internet.",
+  "@connectionError": {"description": "Connection error"},
+  
+  "format": "Format",
+  "@format": {"description": "Format label"},
+  
+  "codeFormat": "Letters, numbers, and symbols _ and -",
+  "@codeFormat": {"description": "Code format hint"},
+  
+  "codeNotAccepted": "If code is not accepted — check internet and input correctness.",
+  "@codeNotAccepted": {"description": "Code not accepted hint"},
+  
+  "keysNotInitialized": "Keys not initialized",
+  "@keysNotInitialized": {"description": "Keys not initialized error"},
+
+  "rooms": "Rooms",
+  "@rooms": {"description": "Rooms tab label"},
+  "noRooms": "No rooms yet",
+  "@noRooms": {"description": "Empty rooms title"},
+  "noRoomsDesc": "Create or join a room to start.",
+  "@noRoomsDesc": {"description": "Empty rooms description"},
+  "createRoom": "Create room",
+  "@createRoom": {"description": "Create room action"},
+  "joinRoom": "Join room",
+  "@joinRoom": {"description": "Join room action"},
+  "roomNameHint": "Room name",
+  "@roomNameHint": {"description": "Room name input hint"},
+  "inviteCodeHint": "Invite code",
+  "@inviteCodeHint": {"description": "Invite code input hint"},
+  "inviteCodeTitle": "Invite code",
+  "@inviteCodeTitle": {"description": "Invite code dialog title"},
+  "inviteCodeCopied": "Invite code copied",
+  "@inviteCodeCopied": {"description": "Invite code copied message"},
+  "roomCreated": "Room created",
+  "@roomCreated": {"description": "Room created message"},
+  "roomJoined": "Joined room",
+  "@roomJoined": {"description": "Room joined message"},
+  "roomWarningUnprotected": "Warning: messages in this chat are not protected and stored on the server. Do not share sensitive information.",
+  "@roomWarningUnprotected": {"description": "Room warning banner"},
+  "rotateInvite": "Rotate invite code",
+  "@rotateInvite": {"description": "Rotate invite action"},
+  "rotateInviteTitle": "Rotate invite code?",
+  "@rotateInviteTitle": {"description": "Rotate invite confirm title"},
+  "rotateInviteDesc": "Previous invite code will stop working.",
+  "@rotateInviteDesc": {"description": "Rotate invite confirm description"},
+  "panicClear": "Clear history for everyone",
+  "@panicClear": {"description": "Panic clear action"},
+  "panicClearTitle": "Clear room history?",
+  "@panicClearTitle": {"description": "Panic clear confirm title"},
+  "panicClearDesc": "All messages in this room will be deleted for everyone.",
+  "@panicClearDesc": {"description": "Panic clear confirm description"},
+  "leaveRoom": "Leave room",
+  "@leaveRoom": {"description": "Leave room action"},
+  "leaveRoomTitle": "Leave room?",
+  "@leaveRoomTitle": {"description": "Leave room confirm title"},
+  "leaveRoomDesc": "You will stop receiving messages from this room.",
+  "@leaveRoomDesc": {"description": "Leave room confirm description"},
+  "create": "Create",
+  "@create": {"description": "Create button"},
+  "join": "Join",
+  "@join": {"description": "Join button"},
+  "noMessagesDesc": "No messages yet",
+  "@noMessagesDesc": {"description": "Empty messages description"},
+  "moderationSensitiveWarning": "Warning: message may contain sensitive data. Be careful.",
+  "@moderationSensitiveWarning": {"description": "Soft moderation warning"},
+  "roomSystemInviteRotated": "Invite code rotated. Previous code is no longer valid.",
+  "@roomSystemInviteRotated": {"description": "System message when invite rotated"},
+  "roomSystemHistoryCleared": "Room history was cleared.",
+  "@roomSystemHistoryCleared": {"description": "System message when history cleared"},
+  
+  "ok": "OK",
+  "@ok": {"description": "OK button"}
+}

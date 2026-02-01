@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:orpheus_project/contacts_screen.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
+import 'package:orpheus_project/screens/rooms_screen.dart';
 import 'package:orpheus_project/screens/settings_screen.dart';
 import 'package:orpheus_project/screens/status_screen.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
+import 'package:orpheus_project/services/locale_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_button.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,6 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    LocaleService.instance.addListener(_onLocaleChanged);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _maybeShowBetaDisclaimer();
@@ -32,7 +36,12 @@ class _HomeScreenState extends State<HomeScreen> {
   
   @override
   void dispose() {
+    LocaleService.instance.removeListener(_onLocaleChanged);
     super.dispose();
+  }
+
+  void _onLocaleChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<bool> _isBetaDisclaimerDismissed() async {
@@ -52,6 +61,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final dismissed = await _isBetaDisclaimerDismissed();
     if (dismissed || !mounted) return;
+
+    final locale = LocaleService.instance.effectiveLocale.languageCode;
+    final isRu = locale == 'ru';
 
     bool dontShowAgain = false;
     await showDialog<void>(
@@ -79,15 +91,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Бета-версия',
+                  isRu ? 'Бета-версия' : 'Beta Version',
                   style: Theme.of(context).textTheme.titleMedium,
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Сейчас приложение проходит закрытое тестирование. '
-                  'Возможны непредвиденные сбои и ошибки. '
-                  'Мы постоянно работаем над улучшением сервиса.',
+                  isRu 
+                      ? 'Сейчас приложение проходит закрытое тестирование. '
+                        'Возможны непредвиденные сбои и ошибки. '
+                        'Мы постоянно работаем над улучшением сервиса.'
+                      : 'The app is currently in closed beta testing. '
+                        'Unexpected crashes and errors may occur. '
+                        'We are constantly working to improve the service.',
                   style: Theme.of(context).textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
@@ -105,13 +121,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   activeColor: AppColors.primary,
                   checkColor: Colors.white,
                   title: Text(
-                    'Больше не показывать',
+                    isRu ? 'Больше не показывать' : "Don't show again",
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ),
                 const SizedBox(height: 12),
                 AppButton(
-                  label: 'Понятно',
+                  label: isRu ? 'Понятно' : 'Got it',
                   onPressed: () async {
                     if (dontShowAgain) {
                       await _setBetaDisclaimerDismissed();
@@ -144,6 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<Widget> _screens = [
     const StatusScreen(),
     const ContactsScreen(),
+    const RoomsScreen(),
     const SettingsScreen(),
   ];
 
@@ -154,6 +171,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    
     return Scaffold(
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 220),
@@ -167,21 +186,26 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: _onTabSelected,
-        destinations: const [
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.monitor_heart_outlined),
-            selectedIcon: Icon(Icons.monitor_heart),
-            label: 'Система',
+            icon: const Icon(Icons.monitor_heart_outlined),
+            selectedIcon: const Icon(Icons.monitor_heart),
+            label: l10n.system,
           ),
           NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
-            label: 'Контакты',
+            icon: const Icon(Icons.chat_bubble_outline),
+            selectedIcon: const Icon(Icons.chat_bubble),
+            label: l10n.contacts,
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Профиль',
+            icon: const Icon(Icons.forum_outlined),
+            selectedIcon: const Icon(Icons.forum),
+            label: l10n.rooms,
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.person_outline),
+            selectedIcon: const Icon(Icons.person),
+            label: l10n.profile,
           ),
         ],
       ),

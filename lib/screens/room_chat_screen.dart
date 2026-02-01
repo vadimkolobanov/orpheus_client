@@ -1,0 +1,544 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
+import 'package:orpheus_project/main.dart' show cryptoService, websocketService;
+import 'package:orpheus_project/models/room_message_model.dart';
+import 'package:orpheus_project/models/room_model.dart';
+import 'package:orpheus_project/services/rooms_service.dart';
+import 'package:orpheus_project/theme/app_tokens.dart';
+import 'package:orpheus_project/widgets/app_dialog.dart';
+import 'package:orpheus_project/widgets/app_scaffold.dart';
+
+class RoomChatScreen extends StatefulWidget {
+  const RoomChatScreen({super.key, required this.room});
+
+  final Room room;
+
+  @override
+  State<RoomChatScreen> createState() => _RoomChatScreenState();
+}
+
+class _RoomChatScreenState extends State<RoomChatScreen> {
+  final RoomsService _service = RoomsService();
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  StreamSubscription<String>? _wsSub;
+  final Set<String> _messageIds = <String>{};
+  List<RoomMessage> _messages = <RoomMessage>[];
+  bool _isLoading = true;
+  bool _isSending = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMessages();
+    _wsSub = websocketService.stream.listen(_handleWsMessage);
+  }
+
+  @override
+  void dispose() {
+    _wsSub?.cancel();
+    _messageController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadMessages() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final list = await _service.loadMessages(widget.room.id);
+      if (!mounted) return;
+      _messages = list;
+      _messageIds
+        ..clear()
+        ..addAll(list.map((m) => m.id));
+      _isLoading = false;
+      _scrollToBottom();
+      setState(() {});
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'error';
+      });
+    }
+  }
+
+  void _handleWsMessage(String messageJson) {
+    Map<String, dynamic> data;
+    try {
+      final decoded = json.decode(messageJson);
+      if (decoded is! Map<String, dynamic>) return;
+      data = decoded;
+    } catch (_) {
+      return;
+    }
+
+    final type = data['type'] as String?;
+    if (type != 'room-message' && type != 'room-system') return;
+
+    final roomId = data['room_id']?.toString();
+    if (roomId != widget.room.id) return;
+
+    final msg = RoomMessage.fromJson(data);
+    _appendMessage(msg);
+  }
+
+  void _appendMessage(RoomMessage message) {
+    if (_messageIds.contains(message.id)) return;
+    setState(() {
+      _messageIds.add(message.id);
+      _messages = [..._messages, message];
+    });
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  Future<void> _sendMessage() async {
+    final l10n = L10n.of(context);
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _isSending) return;
+
+    setState(() => _isSending = true);
+    _messageController.clear();
+
+    try {
+      final response = await _service.sendMessage(widget.room.id, text);
+      if (!mounted) return;
+
+      final warningCode = response['moderation_warning_code'] as String?;
+      final warningText = response['moderation_warning'] as String?;
+      final warning = _mapModerationWarning(warningCode, warningText, l10n);
+      if (warning != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(warning)),
+        );
+      }
+
+      final msgJson = response['message'];
+      if (msgJson is Map<String, dynamic>) {
+        _appendMessage(RoomMessage.fromJson(msgJson));
+      } else {
+        _appendMessage(
+          RoomMessage(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            text: text,
+            senderKey: cryptoService.publicKeyBase64,
+            senderName: null,
+            createdAt: DateTime.now(),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.connectionError)),
+      );
+      _messageController.text = text;
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
+  }
+
+  Future<void> _confirmRotateInvite() async {
+    final l10n = L10n.of(context);
+    final ok = await AppDialog.show(
+      context: context,
+      icon: Icons.vpn_key_outlined,
+      title: l10n.rotateInviteTitle,
+      content: l10n.rotateInviteDesc,
+      primaryLabel: l10n.rotateInvite,
+      secondaryLabel: l10n.cancel,
+    );
+    if (!ok) return;
+
+    try {
+      final code = await _service.rotateInvite(widget.room.id);
+      if (!mounted) return;
+      _showInviteCodeDialog(code);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.connectionError)),
+      );
+    }
+  }
+
+  Future<void> _confirmPanicClear() async {
+    final l10n = L10n.of(context);
+    final ok = await AppDialog.show(
+      context: context,
+      icon: Icons.delete_forever,
+      title: l10n.panicClearTitle,
+      content: l10n.panicClearDesc,
+      primaryLabel: l10n.panicClear,
+      secondaryLabel: l10n.cancel,
+      isDanger: true,
+    );
+    if (!ok) return;
+
+    try {
+      await _service.panicClear(widget.room.id);
+      if (!mounted) return;
+      setState(() {
+        _messages = [];
+        _messageIds.clear();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.connectionError)),
+      );
+    }
+  }
+
+  Future<void> _confirmLeaveRoom() async {
+    final l10n = L10n.of(context);
+    final ok = await AppDialog.show(
+      context: context,
+      icon: Icons.logout,
+      title: l10n.leaveRoomTitle,
+      content: l10n.leaveRoomDesc,
+      primaryLabel: l10n.leaveRoom,
+      secondaryLabel: l10n.cancel,
+      isDanger: true,
+    );
+    if (!ok) return;
+
+    try {
+      await _service.leaveRoom(widget.room.id);
+      if (!mounted) return;
+      Navigator.pop(context);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.connectionError)),
+      );
+    }
+  }
+
+  Future<void> _showInviteCodeDialog(String inviteCode) async {
+    final l10n = L10n.of(context);
+    final ok = await AppDialog.show(
+      context: context,
+      icon: Icons.vpn_key_outlined,
+      title: l10n.inviteCodeTitle,
+      content: inviteCode,
+      primaryLabel: l10n.copy,
+      secondaryLabel: l10n.close,
+    );
+    if (!ok) return;
+    await Clipboard.setData(ClipboardData(text: inviteCode));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(l10n.inviteCodeCopied)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    return AppScaffold(
+      safeArea: false,
+      appBar: AppBar(
+        title: Text(widget.room.name),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'rotate':
+                  _confirmRotateInvite();
+                  break;
+                case 'panic':
+                  _confirmPanicClear();
+                  break;
+                case 'leave':
+                  _confirmLeaveRoom();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              if (widget.room.isOwner)
+                PopupMenuItem(
+                  value: 'rotate',
+                  child: Text(l10n.rotateInvite),
+                ),
+              PopupMenuItem(
+                value: 'panic',
+                child: Text(l10n.panicClear),
+              ),
+              PopupMenuItem(
+                value: 'leave',
+                child: Text(l10n.leaveRoom),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          _WarningBanner(text: l10n.roomWarningUnprotected),
+          Expanded(child: _buildMessagesList(l10n)),
+          _buildInputBar(l10n),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessagesList(L10n l10n) {
+    if (_isLoading && _messages.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null && _messages.isEmpty) {
+      return Center(
+        child: Text(
+          l10n.connectionError,
+          style: Theme.of(context)
+              .textTheme
+              .bodyMedium
+              ?.copyWith(color: AppColors.textSecondary),
+        ),
+      );
+    }
+
+    if (_messages.isEmpty) {
+      return Center(
+        child: Text(
+          l10n.noMessagesDesc,
+          textAlign: TextAlign.center,
+          style: Theme.of(context)
+              .textTheme
+              .bodyMedium
+              ?.copyWith(color: AppColors.textSecondary),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xl),
+      itemCount: _messages.length,
+      itemBuilder: (context, index) {
+        final message = _messages[index];
+        return _RoomMessageBubble(message: message);
+      },
+    );
+  }
+
+  Widget _buildInputBar(L10n l10n) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.outline)),
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _messageController,
+                style: const TextStyle(color: AppColors.textPrimary),
+                decoration: InputDecoration(
+                  hintText: l10n.messagePlaceholder,
+                  filled: true,
+                  fillColor: AppColors.bg,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                ),
+                maxLines: 3,
+                minLines: 1,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => _sendMessage(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: _isSending
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.send, color: AppColors.primary),
+              onPressed: _isSending ? null : _sendMessage,
+              tooltip: l10n.send,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WarningBanner extends StatelessWidget {
+  const _WarningBanner({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.md, AppSpacing.lg, 0),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withOpacity(0.10),
+        borderRadius: AppRadii.lg,
+        border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              size: 18, color: AppColors.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RoomMessageBubble extends StatelessWidget {
+  const _RoomMessageBubble({required this.message});
+
+  final RoomMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final myKey = cryptoService.publicKeyBase64;
+    final isMine =
+        !message.isSystem && message.senderKey != null && message.senderKey == myKey;
+
+    final senderLabel = message.senderName ??
+        (message.senderKey?.substring(0, 8) ?? '—');
+
+    if (message.isSystem) {
+      final l10n = L10n.of(context);
+      final systemText = _mapSystemMessage(message, l10n);
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.outline.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            systemText,
+            style: Theme.of(context)
+                .textTheme
+                .labelSmall
+                ?.copyWith(color: AppColors.textSecondary),
+          ),
+        ),
+      );
+    }
+
+    return Align(
+      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isMine ? AppColors.actionDark : AppColors.surface,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(isMine ? 16 : 4),
+            bottomRight: Radius.circular(isMine ? 4 : 16),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment:
+              isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            if (!isMine) ...[
+              Text(
+                senderLabel,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 4),
+            ],
+            Text(
+              message.text,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: isMine ? Colors.white : AppColors.textPrimary),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              DateFormat.Hm().format(message.createdAt),
+              style: Theme.of(context)
+                  .textTheme
+                  .labelSmall
+                  ?.copyWith(
+                    color: isMine
+                        ? Colors.white.withOpacity(0.7)
+                        : AppColors.textTertiary,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String? _mapModerationWarning(String? code, String? fallback, L10n l10n) {
+  if (code == "sensitive_data") {
+    return l10n.moderationSensitiveWarning;
+  }
+  if (fallback != null && fallback.isNotEmpty) {
+    return fallback;
+  }
+  return null;
+}
+
+String _mapSystemMessage(RoomMessage message, L10n l10n) {
+  switch (message.systemCode) {
+    case "invite_rotated":
+      return l10n.roomSystemInviteRotated;
+    case "history_cleared":
+      return l10n.roomSystemHistoryCleared;
+  }
+  return message.text;
+}
