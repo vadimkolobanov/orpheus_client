@@ -225,20 +225,25 @@ class IncomingMessageHandler {
     required String callerKey,
     required Map<String, dynamic> offerData,
   }) async {
-    // Используем хеш callerKey как стабильный callId
-    // Это предотвращает дублирование уведомлений от WebSocket и FCM
-    final callId = _generateStableCallId(callerKey);
+    // Используем call_id от сервера если есть, иначе генерируем
+    // КРИТИЧНО: сервер передаёт уникальный call_id для каждого звонка!
+    final callId = _extractOrGenerateCallId(offerData, callerKey);
     
-    // Проверяем, нет ли уже активного звонка от этого caller
+    // Проверяем, нет ли уже активного звонка с ТАКИМ ЖЕ ID
+    // ВАЖНО: Не блокируем НОВЫЕ звонки (с другим ID)!
     try {
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
       if (activeCalls is List && activeCalls.isNotEmpty) {
         for (final call in activeCalls) {
           if (call is Map && call['id'] == callId) {
-            DebugLogger.info('CALL', '📞 CallKit уже показан для $callerKey, пропускаю');
+            DebugLogger.info('CALL', '📞 CallKit с id=$callId уже показан, пропускаю дубликат');
             return;
           }
         }
+        // Если есть активный звонок с ДРУГИМ ID — это новый звонок!
+        // Закрываем старый и показываем новый
+        DebugLogger.info('CALL', '📞 Закрываю старые CallKit звонки, показываю новый (id=$callId)');
+        await FlutterCallkitIncoming.endAllCalls();
       }
     } catch (e) {
       DebugLogger.warn('CALL', 'Ошибка проверки активных звонков: $e');
@@ -282,13 +287,24 @@ class IncomingMessageHandler {
     DebugLogger.info('CALL', '📱 CallKit UI показан для $callerName (id=$callId)');
   }
   
-  /// Генерирует стабильный callId на основе callerKey.
-  /// Окно дедупликации: 3 секунды — достаточно чтобы отсечь дубли WebSocket/FCM,
-  /// но позволяет перезвонить сразу после завершения предыдущего звонка.
-  static String _generateStableCallId(String callerKey) {
+  /// Извлекает call_id из данных или генерирует стабильный callId.
+  /// 
+  /// ПРИОРИТЕТ:
+  /// 1. call_id от сервера (уникальный для каждого звонка) — ЛУЧШИЙ вариант
+  /// 2. Fallback: генерируем на основе callerKey + timestamp (15 сек окно)
+  static String _extractOrGenerateCallId(Map<String, dynamic> data, String callerKey) {
+    // 1. Пробуем получить call_id от сервера
+    final serverCallId = data['call_id'] ?? data['callId'] ?? data['id'];
+    if (serverCallId != null && 
+        serverCallId.toString().isNotEmpty && 
+        serverCallId.toString().toLowerCase() != 'null') {
+      return serverCallId.toString();
+    }
+    
+    // 2. Fallback: генерируем на основе callerKey
     final hash = callerKey.hashCode.abs();
-    // 3000ms = 3 секунды — короткое окно для дедупликации
-    return 'call-${hash.toRadixString(16).padLeft(8, '0')}-${DateTime.now().millisecondsSinceEpoch ~/ 3000}';
+    final timeWindow = DateTime.now().millisecondsSinceEpoch ~/ 15000; // 15 секунд
+    return 'call-${hash.toRadixString(16).padLeft(8, '0')}-$timeWindow';
   }
 }
 

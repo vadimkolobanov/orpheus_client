@@ -54,13 +54,29 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
-/// Генерирует стабильный callId на основе callerKey.
-/// Окно дедупликации: 3 секунды — достаточно чтобы отсечь дубли WebSocket/FCM,
-/// но позволяет перезвонить сразу после завершения предыдущего звонка.
-String _generateStableCallId(String callerKey) {
+/// Извлекает call_id из данных FCM.
+/// 
+/// ПРИОРИТЕТ:
+/// 1. call_id от сервера (уникальный для каждого звонка) — ЛУЧШИЙ вариант
+/// 2. Fallback: генерируем на основе callerKey + timestamp (15 сек окно)
+/// 
+/// ВАЖНО: Сервер должен передавать call_id в FCM data!
+/// Это единственный способ гарантировать что повторный звонок не будет проигнорирован.
+String _extractOrGenerateCallId(Map<String, dynamic> data, String callerKey) {
+  // 1. Пробуем получить call_id от сервера
+  final serverCallId = data['call_id'] ?? data['callId'] ?? data['id'];
+  if (serverCallId != null && 
+      serverCallId.toString().isNotEmpty && 
+      serverCallId.toString().toLowerCase() != 'null') {
+    return serverCallId.toString();
+  }
+  
+  // 2. Fallback: генерируем на основе callerKey
+  // Используем 15-секундное окно — достаточно для дедупликации WS/FCM,
+  // но не блокирует быстрый перезвон
   final hash = callerKey.hashCode.abs();
-  // 3000ms = 3 секунды — короткое окно для дедупликации
-  return 'call-${hash.toRadixString(16).padLeft(8, '0')}-${DateTime.now().millisecondsSinceEpoch ~/ 3000}';
+  final timeWindow = DateTime.now().millisecondsSinceEpoch ~/ 15000; // 15 секунд
+  return 'call-${hash.toRadixString(16).padLeft(8, '0')}-$timeWindow';
 }
 
 /// Показать нативный UI входящего звонка
@@ -81,25 +97,25 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
     // Правильное имя появится после открытия CallScreen из локальной БД.
     final callerName = data['caller_name'] ?? data['sender_name'] ?? callerKey.toString().substring(0, 8);
     
-    // Генерируем стабильный callId на основе callerKey
-    // Это предотвращает дублирование уведомлений от WebSocket и FCM
-    final callId = _generateStableCallId(callerKey.toString());
+    // Используем call_id от сервера если есть, иначе генерируем
+    // КРИТИЧНО: сервер должен передавать уникальный call_id для каждого звонка!
+    final callId = _extractOrGenerateCallId(data, callerKey.toString());
     
-    // ВАЖНО: FCM приходит с небольшой задержкой относительно WebSocket
-    // Даём WebSocket handler время показать CallKit первым (500ms)
-    // Это предотвращает race condition когда оба пытаются показать одновременно
-    await Future.delayed(const Duration(milliseconds: 500));
-    
-    // Проверяем, нет ли уже активного звонка с таким ID
+    // Проверяем, нет ли уже активного звонка с ТАКИМ ЖЕ ID
+    // ВАЖНО: Не блокируем НОВЫЕ звонки (с другим ID)!
     try {
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
       if (activeCalls is List && activeCalls.isNotEmpty) {
         for (final call in activeCalls) {
           if (call is Map && call['id'] == callId) {
-            print("📞 CALLKIT FCM: Звонок уже показан WebSocket (id=$callId), пропускаю");
+            print("📞 CALLKIT FCM: Звонок с id=$callId уже показан, пропускаю дубликат");
             return;
           }
         }
+        // Если есть активный звонок с ДРУГИМ ID — это новый звонок!
+        // Закрываем старый и показываем новый
+        print("📞 CALLKIT FCM: Закрываю старые звонки, показываю новый (id=$callId)");
+        await FlutterCallkitIncoming.endAllCalls();
       }
     } catch (e) {
       print("📞 CALLKIT: Ошибка проверки активных звонков: $e");
