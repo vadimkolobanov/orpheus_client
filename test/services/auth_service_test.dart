@@ -186,6 +186,64 @@ void main() {
       expect(decoded['pinHash'], isNotNull);
       expect(decoded['pinSalt'], isNotNull);
     });
+
+    test('setPin с 4-значным PIN: сохраняет pinLength=4 и успешно верифицирует', () async {
+      final storage = _InMemoryAuthStorage();
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      
+      await auth.setPin('1234', pinLength: 4);
+      
+      expect(auth.config.isPinEnabled, isTrue);
+      expect(auth.config.pinLength, equals(4));
+      
+      auth.lock();
+      final result = auth.verifyPin('1234');
+      expect(result, equals(PinVerifyResult.success));
+      expect(auth.isUnlocked, isTrue);
+    });
+
+    test('pinLength: default=6 для обратной совместимости при отсутствии поля в storage', () async {
+      final storage = _InMemoryAuthStorage();
+      // Симулируем старый конфиг без pinLength
+      storage._kv['orpheus_security_config'] = json.encode({
+        'isPinEnabled': true,
+        'pinHash': 'some_hash',
+        'pinSalt': 'some_salt',
+        // pinLength отсутствует — должен быть 6 по умолчанию
+      });
+      
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      
+      expect(auth.config.pinLength, equals(6));
+    });
+
+    test('changePin: сохраняет текущую длину PIN', () async {
+      final storage = _InMemoryAuthStorage();
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      
+      await auth.setPin('1234', pinLength: 4);
+      expect(auth.config.pinLength, equals(4));
+      
+      final success = await auth.changePin('1234', '5678');
+      expect(success, isTrue);
+      expect(auth.config.pinLength, equals(4)); // длина сохранена
+      
+      auth.lock();
+      expect(auth.verifyPin('5678'), equals(PinVerifyResult.success));
+    });
+
+    test('setPin с 6-значным PIN (по умолчанию): сохраняет pinLength=6', () async {
+      final storage = _InMemoryAuthStorage();
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      
+      await auth.setPin('123456'); // без указания pinLength — default 6
+      
+      expect(auth.config.pinLength, equals(6));
+    });
   });
 }
 

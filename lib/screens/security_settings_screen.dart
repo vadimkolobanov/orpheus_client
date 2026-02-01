@@ -192,19 +192,16 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
               _buildActionButton(
                 icon: Icons.add,
                 title: 'Установить PIN-код',
-                subtitle: '6-значный код для защиты входа',
+                subtitle: '4 или 6-значный код для защиты входа',
                 onTap: () => _openPinSetup(PinSetupMode.setPin),
               ),
             ] else ...[
-              _buildInfoCard(
-                icon: Icons.check_circle_outline,
-                text: 'PIN-код установлен. Приложение защищено.',
-                color: const Color(0xFF6AD394),
-              ),
+              _buildPinStatusCard(config.pinLength),
               const SizedBox(height: 12),
               _buildActionButton(
                 icon: Icons.edit,
                 title: 'Изменить PIN-код',
+                subtitle: '${config.pinLength}-значный код',
                 onTap: () => _openPinSetup(PinSetupMode.changePin),
               ),
               const SizedBox(height: 8),
@@ -250,14 +247,14 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
                 _buildActionButton(
                   icon: Icons.add,
                   title: 'Установить код принуждения',
-                  subtitle: 'Отдельный PIN для экстренных ситуаций',
+                  subtitle: '${config.pinLength}-значный код для экстренных ситуаций',
                   onTap: () => _openPinSetup(PinSetupMode.setDuress),
                   accentColor: Colors.amber,
                 ),
               ] else ...[
                 _buildInfoCard(
                   icon: Icons.check_circle_outline,
-                  text: 'Код принуждения установлен.',
+                  text: 'Код принуждения установлен (${config.pinLength} цифр).',
                   color: const Color(0xFF6AD394),
                 ),
                 const SizedBox(height: 12),
@@ -290,14 +287,14 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
                 _buildActionButton(
                   icon: Icons.add,
                   title: 'Установить код удаления',
-                  subtitle: 'Быстрый panic wipe через код',
+                  subtitle: '${config.pinLength}-значный panic wipe код',
                   onTap: () => _openPinSetup(PinSetupMode.setWipeCode),
                   accentColor: Colors.red,
                 ),
               ] else ...[
                 _buildInfoCard(
                   icon: Icons.check_circle_outline,
-                  text: 'Код удаления установлен.',
+                  text: 'Код удаления установлен (${config.pinLength} цифр).',
                   color: const Color(0xFF6AD394),
                 ),
                 const SizedBox(height: 12),
@@ -436,6 +433,96 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
                 fontSize: 13,
                 height: isMultiLine ? 1.4 : null,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Карточка статуса PIN с индикатором длины — вау-эффект ✨
+  Widget _buildPinStatusCard(int pinLength) {
+    const color = Color(0xFF6AD394);
+    final isShortPin = pinLength == 4;
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            color.withOpacity(0.15),
+            color.withOpacity(0.05),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.verified_user,
+              color: color,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'PIN-код установлен',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isShortPin 
+                            ? Colors.amber.withOpacity(0.2)
+                            : color.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '$pinLength цифр',
+                        style: TextStyle(
+                          color: isShortPin ? Colors.amber : color,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isShortPin 
+                      ? 'Быстрый ввод • ~10 000 комбинаций'
+                      : 'Повышенная защита • ~1 000 000 комбинаций',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -678,9 +765,7 @@ class _MessageRetentionSelector extends StatelessWidget {
       case MessageRetentionPolicy.month:
         return Icons.calendar_month;
     }
-  }
-
-  Color _getColorForPolicy(MessageRetentionPolicy policy) {
+  }  Color _getColorForPolicy(MessageRetentionPolicy policy) {
     switch (policy) {
       case MessageRetentionPolicy.all:
         return const Color(0xFFB0BEC5);

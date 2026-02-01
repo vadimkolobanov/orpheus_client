@@ -31,6 +31,13 @@ Future<void> _enterPin(WidgetTester tester, String pin) async {
   await tester.pump(const Duration(milliseconds: 250));
 }
 
+/// Выбирает длину PIN на экране выбора (для setPin)
+Future<void> _selectPinLength(WidgetTester tester, int length) async {
+  final title = length == 4 ? '4 цифры' : '6 цифр';
+  await tester.tap(find.text(title));
+  await tester.pump();
+}
+
 void main() {
   group('PinSetupScreen widget tests', () {
     late AuthService auth;
@@ -61,6 +68,11 @@ void main() {
       );
       await tester.pump();
 
+      // Сначала выбираем длину PIN (новый шаг)
+      expect(find.text('ВЫБЕРИТЕ ДЛИНУ PIN'), findsOneWidget);
+      await _selectPinLength(tester, 6);
+      await tester.pump();
+
       // Первый ввод
       await _enterPin(tester, '123456');
       expect(find.text('ПОДТВЕРДИТЕ PIN'), findsOneWidget);
@@ -87,6 +99,11 @@ void main() {
       );
       await tester.pump();
 
+      // Сначала выбираем длину PIN (новый шаг)
+      expect(find.text('ВЫБЕРИТЕ ДЛИНУ PIN'), findsOneWidget);
+      await _selectPinLength(tester, 6);
+      await tester.pump();
+
       await _enterPin(tester, '123456');
       expect(find.text('ПОДТВЕРДИТЕ PIN'), findsOneWidget);
       await _enterPin(tester, '123456');
@@ -96,6 +113,7 @@ void main() {
 
       expect(success, 1);
       expect(auth.config.isPinEnabled, isTrue);
+      expect(auth.config.pinLength, equals(6));
     });
 
     testWidgets('changePin: неверный текущий PIN показывает ошибку', (tester) async {
@@ -114,6 +132,37 @@ void main() {
       await _enterPin(tester, '000000');
       expect(find.text('Неверный PIN-код'), findsOneWidget);
       expect(find.text('ТЕКУЩИЙ PIN'), findsOneWidget);
+    });
+
+    testWidgets('setPin: 4-значный PIN успешно устанавливается', (tester) async {
+      var success = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PinSetupScreen(
+            mode: PinSetupMode.setPin,
+            auth: auth,
+            onSuccess: () => success++,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Выбираем 4-значный PIN
+      expect(find.text('ВЫБЕРИТЕ ДЛИНУ PIN'), findsOneWidget);
+      await _selectPinLength(tester, 4);
+      await tester.pump();
+
+      // Вводим 4-значный PIN
+      await _enterPin(tester, '1234');
+      expect(find.text('ПОДТВЕРДИТЕ PIN'), findsOneWidget);
+      await _enterPin(tester, '1234');
+
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(success, 1);
+      expect(auth.config.isPinEnabled, isTrue);
+      expect(auth.config.pinLength, equals(4));
     });
   });
 }

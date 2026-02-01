@@ -40,6 +40,13 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   String _confirmedPin = '';
   String _currentPin = ''; // Для изменения/отключения
   
+  /// Длина PIN-кода (4 или 6). Для setPin выбирается пользователем,
+  /// для остальных режимов берётся из config.
+  int _pinLength = 6;
+  
+  /// Показывает ли экран выбора длины PIN (только для setPin)
+  bool _showLengthSelection = false;
+  
   int _step = 0; // 0 = текущий PIN (если нужен), 1 = новый PIN, 2 = подтверждение
   bool _isError = false;
   String? _errorMessage;
@@ -77,11 +84,11 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
     switch (widget.mode) {
       case PinSetupMode.setPin:
         return _step == 0 
-            ? 'Введите 6-значный PIN-код'
+            ? 'Введите $_pinLength-значный PIN-код'
             : 'Повторите PIN-код для подтверждения';
       case PinSetupMode.changePin:
         if (_step == 0) return 'Введите текущий PIN-код';
-        if (_step == 1) return 'Введите новый PIN-код';
+        if (_step == 1) return 'Введите новый $_pinLength-значный PIN-код';
         return 'Повторите новый PIN-код';
       case PinSetupMode.disablePin:
         return 'Для отключения введите текущий PIN';
@@ -113,10 +120,13 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
       CurvedAnimation(parent: _shakeController, curve: Curves.elasticIn),
     );
     
-    // Определяем начальный шаг
+    // Определяем начальный шаг и длину PIN
     switch (widget.mode) {
       case PinSetupMode.setPin:
-        _step = 0; // Сразу новый PIN
+        // Для нового PIN — показываем экран выбора длины
+        _showLengthSelection = true;
+        _pinLength = 6; // default
+        _step = 0;
         break;
       case PinSetupMode.changePin:
       case PinSetupMode.setDuress:
@@ -124,7 +134,10 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
       case PinSetupMode.disableDuress:
       case PinSetupMode.setWipeCode:
       case PinSetupMode.disableWipeCode:
-        _step = 0; // Сначала текущий/основной PIN
+        // Для всех остальных — используем длину из config
+        _pinLength = _auth.config.pinLength;
+        _showLengthSelection = false;
+        _step = 0;
         break;
     }
   }
@@ -141,14 +154,14 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
     HapticFeedback.lightImpact();
     
     setState(() {
-      if (_enteredPin.length < 6) {
+      if (_enteredPin.length < _pinLength) {
         _enteredPin += digit;
         _isError = false;
         _errorMessage = null;
       }
     });
     
-    if (_enteredPin.length == 6) {
+    if (_enteredPin.length == _pinLength) {
       _processPin();
     }
   }
@@ -207,7 +220,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
     } else {
       // Подтверждение
       if (_enteredPin == _confirmedPin) {
-        await _auth.setPin(_enteredPin);
+        await _auth.setPin(_enteredPin, pinLength: _pinLength);
         HapticFeedback.mediumImpact();
         _showSuccessAndPop('PIN-код установлен');
       } else {
@@ -398,6 +411,11 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
+    // Если нужно показать экран выбора длины PIN
+    if (_showLengthSelection) {
+      return _buildLengthSelectionScreen();
+    }
+    
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -550,7 +568,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
           offset: Offset(shake, 0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(6, (index) {
+            children: List.generate(_pinLength, (index) {
               final isFilled = index < _enteredPin.length;
               
               return AnimatedContainer(
@@ -656,6 +674,266 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
               color: Colors.grey.shade500,
               size: 24,
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Экран выбора длины PIN-кода (только для setPin)
+  Widget _buildLengthSelectionScreen() {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.pop(context, false),
+        ),
+        title: const Text(
+          'Установка PIN',
+          style: TextStyle(fontSize: 16, letterSpacing: 1),
+        ),
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            children: [
+              const Spacer(flex: 1),
+              
+              // Иконка
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFB0BEC5).withOpacity(0.1),
+                  border: Border.all(
+                    color: const Color(0xFFB0BEC5).withOpacity(0.3),
+                    width: 2,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.pin_outlined,
+                  color: Color(0xFFB0BEC5),
+                  size: 36,
+                ),
+              ),
+              
+              const SizedBox(height: 32),
+              
+              const Text(
+                'ВЫБЕРИТЕ ДЛИНУ PIN',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 3,
+                ),
+              ),
+              
+              const SizedBox(height: 12),
+              
+              Text(
+                'Короткий PIN быстрее вводить,\nдлинный — безопаснее',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
+              
+              const SizedBox(height: 40),
+              
+              // Кнопка 6 цифр (рекомендуемая — первой)
+              _buildLengthOption(
+                length: 6,
+                title: '6 цифр',
+                subtitle: 'Повышенная безопасность',
+                icon: Icons.shield_outlined,
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Кнопка 4 цифры
+              _buildLengthOption(
+                length: 4,
+                title: '4 цифры',
+                subtitle: 'Быстрый ввод',
+                icon: Icons.flash_on,
+              ),
+              
+              const SizedBox(height: 24),
+              
+              // Предупреждение о безопасности
+              _buildSecurityNote(),
+              
+              const Spacer(flex: 2),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Информационная заметка о безопасности
+  Widget _buildSecurityNote() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.amber.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.amber.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.amber.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.info_outline,
+              color: Colors.amber.shade600,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Уровень защиты',
+                  style: TextStyle(
+                    color: Colors.amber.shade600,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '4-значный PIN: ~10 000 комбинаций\n6-значный PIN: ~1 000 000 комбинаций',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Кнопка выбора длины PIN
+  Widget _buildLengthOption({
+    required int length,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final isRecommended = length == 6;
+    final color = isRecommended ? const Color(0xFF6AD394) : const Color(0xFFB0BEC5);
+    
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          setState(() {
+            _pinLength = length;
+            _showLengthSelection = false;
+          });
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121212),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: color.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (isRecommended) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: color.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'рекомендуется',
+                              style: TextStyle(
+                                color: color,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: Colors.grey.shade600,
+                size: 24,
+              ),
+            ],
           ),
         ),
       ),

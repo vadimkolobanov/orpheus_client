@@ -103,12 +103,14 @@ class AuthService {
   // === УПРАВЛЕНИЕ PIN ===
 
   /// Установить новый PIN-код
-  Future<void> setPin(String pin) async {
+  /// [pinLength] — длина PIN-кода (4 или 6), используется для UI и валидации
+  Future<void> setPin(String pin, {int pinLength = 6}) async {
     final salt = _generateSalt();
     final hash = _hashPin(pin, salt);
     
     _config = _config.copyWith(
       isPinEnabled: true,
+      pinLength: pinLength,
       pinHash: hash,
       pinSalt: salt,
       failedAttempts: 0,
@@ -117,17 +119,19 @@ class AuthService {
     
     await _saveConfig();
     _isUnlocked = true;
-    print("AUTH: PIN установлен");
+    print("AUTH: PIN установлен (длина: $pinLength)");
   }
 
   /// Изменить PIN-код (требует текущий PIN)
+  /// При изменении PIN сохраняется текущая длина
   Future<bool> changePin(String currentPin, String newPin) async {
     final result = verifyPin(currentPin);
     if (result != PinVerifyResult.success) {
       return false;
     }
     
-    await setPin(newPin);
+    // Сохраняем текущую длину PIN при изменении
+    await setPin(newPin, pinLength: _config.pinLength);
     return true;
   }
 
@@ -165,6 +169,7 @@ class AuthService {
 
     // Проверка блокировки
     if (_config.isLockedOut) {
+      print("AUTH: ⛔ Попытка входа во время блокировки (pinLength: ${_config.pinLength})");
       return PinVerifyResult.lockedOut;
     }
 
@@ -174,7 +179,7 @@ class AuthService {
       _resetFailedAttempts();
       _isUnlocked = true;
       _isDuressMode = false;
-      print("AUTH: PIN верный, разблокировано");
+      print("AUTH: ✅ PIN верный (${_config.pinLength}-значный), разблокировано");
       return PinVerifyResult.success;
     }
 
@@ -184,7 +189,7 @@ class AuthService {
       final wipeHash = _hashPin(pin, _config.wipeCodeSalt!);
       if (wipeHash == _config.wipeCodeHash) {
         _resetFailedAttempts();
-        print("AUTH: Введён код удаления (wipe code) — требуется подтверждение");
+        print("AUTH: 🗑️ Введён код удаления (${_config.pinLength}-значный) — требуется подтверждение");
         return PinVerifyResult.wipeCode;
       }
     }
@@ -196,7 +201,7 @@ class AuthService {
         _resetFailedAttempts();
         _isUnlocked = true;
         _isDuressMode = true;
-        print("AUTH: Duress код введён, режим пустоты");
+        print("AUTH: 🎭 Duress код введён (${_config.pinLength}-значный), режим пустоты активирован");
         return PinVerifyResult.duress;
       }
     }
@@ -206,7 +211,7 @@ class AuthService {
     
     // Проверка автоматического wipe
     if (_config.shouldAutoWipe) {
-      print("AUTH: Превышен лимит попыток, требуется wipe");
+      print("AUTH: ⚠️ Превышен лимит попыток (${_config.failedAttempts}/${_config.autoWipeAttempts}), требуется auto-wipe");
       return PinVerifyResult.autoWipe;
     }
 
@@ -257,7 +262,7 @@ class AuthService {
     );
     
     await _saveConfig();
-    print("AUTH: Duress код установлен");
+    print("AUTH: 🎭 Duress код установлен (${_config.pinLength}-значный)");
     return true;
   }
 
@@ -301,7 +306,7 @@ class AuthService {
     );
 
     await _saveConfig();
-    print("AUTH: Код удаления установлен");
+    print("AUTH: 🗑️ Код удаления установлен (${_config.pinLength}-значный)");
     return true;
   }
 
@@ -377,7 +382,7 @@ class AuthService {
     if (_config.requiresUnlock) {
       _isUnlocked = false;
       _isDuressMode = false;
-      print("AUTH: Приложение заблокировано");
+      print("AUTH: 🔒 Приложение заблокировано (требуется ${_config.pinLength}-значный PIN)");
     }
   }
 

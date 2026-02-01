@@ -8,6 +8,9 @@ class SecurityConfig {
   /// Включена ли защита PIN-кодом
   final bool isPinEnabled;
   
+  /// Длина PIN-кода (4 или 6 цифр). Default = 6 для обратной совместимости.
+  final int pinLength;
+  
   /// Хеш основного PIN-кода (Argon2id hash)
   final String? pinHash;
   
@@ -59,6 +62,7 @@ class SecurityConfig {
 
   const SecurityConfig({
     this.isPinEnabled = false,
+    this.pinLength = 6,
     this.pinHash,
     this.pinSalt,
     this.isDuressEnabled = false,
@@ -83,6 +87,7 @@ class SecurityConfig {
   /// Создать копию с изменёнными полями
   SecurityConfig copyWith({
     bool? isPinEnabled,
+    int? pinLength,
     String? pinHash,
     String? pinSalt,
     bool? isDuressEnabled,
@@ -107,6 +112,7 @@ class SecurityConfig {
   }) {
     return SecurityConfig(
       isPinEnabled: isPinEnabled ?? this.isPinEnabled,
+      pinLength: clearPinHash ? 6 : (pinLength ?? this.pinLength),
       pinHash: clearPinHash ? null : (pinHash ?? this.pinHash),
       pinSalt: clearPinHash ? null : (pinSalt ?? this.pinSalt),
       isDuressEnabled: isDuressEnabled ?? this.isDuressEnabled,
@@ -130,6 +136,7 @@ class SecurityConfig {
   Map<String, dynamic> toMap() {
     return {
       'isPinEnabled': isPinEnabled,
+      'pinLength': pinLength,
       'pinHash': pinHash,
       'pinSalt': pinSalt,
       'isDuressEnabled': isDuressEnabled,
@@ -153,6 +160,8 @@ class SecurityConfig {
   factory SecurityConfig.fromMap(Map<String, dynamic> map) {
     return SecurityConfig(
       isPinEnabled: map['isPinEnabled'] ?? false,
+      // Default = 6 для обратной совместимости со старыми конфигурациями
+      pinLength: map['pinLength'] ?? 6,
       pinHash: map['pinHash'],
       pinSalt: map['pinSalt'],
       isDuressEnabled: map['isDuressEnabled'] ?? false,
@@ -224,7 +233,7 @@ class SecurityConfig {
 
   @override
   String toString() {
-    return 'SecurityConfig(pin: $isPinEnabled, duress: $isDuressEnabled, wipeCode: $isWipeCodeEnabled, bio: $isBiometricEnabled, panicGesture: $isPanicGestureEnabled, attempts: $failedAttempts, retention: $messageRetention)';
+    return 'SecurityConfig(pin: $isPinEnabled, pinLength: $pinLength, duress: $isDuressEnabled, wipeCode: $isWipeCodeEnabled, bio: $isBiometricEnabled, panicGesture: $isPanicGestureEnabled, attempts: $failedAttempts, retention: $messageRetention)';
   }
 }
 

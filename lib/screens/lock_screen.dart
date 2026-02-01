@@ -136,21 +136,24 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     }
   }
 
+  /// Длина PIN из конфигурации (4 или 6)
+  int get _pinLength => _auth.config.pinLength;
+
   void _onDigitPressed(String digit) {
     if (_auth.config.isLockedOut || _isLoading) return;
     
     HapticFeedback.lightImpact();
     
     setState(() {
-      if (_enteredPin.length < 6) {
+      if (_enteredPin.length < _pinLength) {
         _enteredPin += digit;
         _isError = false;
         _errorMessage = null;
       }
     });
     
-    // Автоматическая проверка при 6 цифрах
-    if (_enteredPin.length == 6) {
+    // Автоматическая проверка при достижении нужной длины
+    if (_enteredPin.length == _pinLength) {
       _verifyPin();
     }
   }
@@ -407,7 +410,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
           offset: Offset(shake, 0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(6, (index) {
+            children: List.generate(_pinLength, (index) {
               final isFilled = index < _enteredPin.length;
               final isActive = index == _enteredPin.length;
               
