@@ -304,8 +304,12 @@ class WebSocketService {
     };
     
     // Важные сигналы - используем HTTP fallback для гарантии доставки
-    // Включая ice-restart, т.к. при смене сети клиенты могут быть на разных серверах
+    // КРИТИЧНО: Все call-related сигналы должны быть здесь!
+    // Когда app в background, WebSocket может быть отключён,
+    // но call-answer/call-offer ДОЛЖНЫ доставляться через HTTP.
     final isImportant = type == 'hang-up' || type == 'call-rejected' || 
+                        type == 'call-offer' || type == 'call-answer' ||
+                        type == 'ice-candidate' ||
                         type == 'ice-restart' || type == 'ice-restart-answer';
     final statusStr = currentStatus.toString().split('.').last;
     
@@ -403,7 +407,11 @@ class WebSocketService {
 
   void _sendMessage(Map<String, dynamic> map) {
     final type = map['type'] as String?;
-    final isImportant = type == 'hang-up' || type == 'call-rejected';
+    // Все call-related сигналы считаются важными
+    final isImportant = type == 'hang-up' || type == 'call-rejected' ||
+                        type == 'call-offer' || type == 'call-answer' ||
+                        type == 'ice-candidate' ||
+                        type == 'ice-restart' || type == 'ice-restart-answer';
     
     if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
       if (isImportant) {

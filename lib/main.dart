@@ -448,14 +448,11 @@ Future<void> _handleCallKitDecline(Map<String, dynamic>? body) async {
   // Очищаем буфер
   incomingCallBuffer.clearLastIncomingCall();
   
-  // Отправляем call-rejected через WebSocket
+  // Отправляем call-rejected (WebSocket или HTTP fallback)
+  // ВАЖНО: sendSignalingMessage сам использует HTTP fallback если WS не подключён!
   if (callerKey != null) {
-    if (websocketService.currentStatus == ConnectionStatus.Connected) {
-      websocketService.sendSignalingMessage(callerKey, 'call-rejected', {});
-      DebugLogger.info('CALLKIT', '✅ Отправлен call-rejected к $callerKey');
-    } else {
-      DebugLogger.warn('CALLKIT', '⚠️ WebSocket не подключен, call-rejected не отправлен');
-    }
+    websocketService.sendSignalingMessage(callerKey, 'call-rejected', {});
+    DebugLogger.info('CALLKIT', '✅ Отправлен call-rejected к $callerKey');
   } else {
     DebugLogger.error('CALLKIT', '❌ callerKey null, не могу отправить call-rejected');
   }
@@ -887,11 +884,22 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       }
     } else if (state == AppLifecycleState.paused) {
       DebugLogger.info('LIFECYCLE', 'Приложение в background');
-      // Блокируем приложение при сворачивании (если PIN включен),
-      // но НЕ во время активного звонка и НЕ если есть pending call (иначе может помешать ответу/разговору).
+      
       final hasActiveCall = CallStateService.instance.isCallActive.value;
       final hasPendingCall = _pendingCall != null && _pendingCall!.isValid;
       
+      // КРИТИЧНО: Отключаем WebSocket в background чтобы избежать race condition с FCM!
+      // Когда app свёрнут, звонки приходят ТОЛЬКО через FCM → нет дублей → стабильная работа.
+      // НО: не отключаем во время активного звонка или pending call!
+      if (!hasActiveCall && !hasPendingCall) {
+        DebugLogger.info('LIFECYCLE', '📴 Отключаю WebSocket в background (FCM-only mode)');
+        websocketService.disconnect();
+      } else {
+        DebugLogger.info('LIFECYCLE', '📞 WebSocket остаётся подключённым (активный/pending звонок)');
+      }
+      
+      // Блокируем приложение при сворачивании (если PIN включен),
+      // но НЕ во время активного звонка и НЕ если есть pending call.
       if (authService.config.isPinEnabled && !_isLocked && !hasActiveCall && !hasPendingCall) {
         authService.lock();
         setState(() => _isLocked = true);
