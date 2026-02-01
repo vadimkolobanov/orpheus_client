@@ -229,20 +229,29 @@ class IncomingMessageHandler {
     // КРИТИЧНО: сервер передаёт уникальный call_id для каждого звонка!
     final callId = _extractOrGenerateCallId(offerData, callerKey);
     
-    // Проверяем, нет ли уже активного звонка с ТАКИМ ЖЕ ID
-    // ВАЖНО: Не блокируем НОВЫЕ звонки (с другим ID)!
+    // Проверяем, нет ли уже активного звонка
+    // ВАЖНО: FCM и WebSocket могут генерировать РАЗНЫЕ callId для одного звонка!
+    // Поэтому проверяем по callerKey, а не по callId.
     try {
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
       if (activeCalls is List && activeCalls.isNotEmpty) {
         for (final call in activeCalls) {
-          if (call is Map && call['id'] == callId) {
-            DebugLogger.info('CALL', '📞 CallKit с id=$callId уже показан, пропускаю дубликат');
-            return;
+          if (call is Map) {
+            // Проверяем по callId
+            if (call['id'] == callId) {
+              DebugLogger.info('CALL', '📞 CallKit с id=$callId уже показан, пропускаю дубликат');
+              return;
+            }
+            // Проверяем по callerKey в extra — если тот же caller, значит дубль!
+            final extra = call['extra'];
+            if (extra is Map && extra['callerKey'] == callerKey) {
+              DebugLogger.info('CALL', '📞 CallKit для $callerKey уже показан (FCM?), пропускаю WS дубликат');
+              return;
+            }
           }
         }
-        // Если есть активный звонок с ДРУГИМ ID — это новый звонок!
-        // Закрываем старый и показываем новый
-        DebugLogger.info('CALL', '📞 Закрываю старые CallKit звонки, показываю новый (id=$callId)');
+        // Есть активный звонок от ДРУГОГО caller — закрываем и показываем новый
+        DebugLogger.info('CALL', '📞 Закрываю старые CallKit звонки от другого caller, показываю новый (id=$callId)');
         await FlutterCallkitIncoming.endAllCalls();
       }
     } catch (e) {

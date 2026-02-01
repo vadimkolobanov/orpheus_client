@@ -101,20 +101,29 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
     // КРИТИЧНО: сервер должен передавать уникальный call_id для каждого звонка!
     final callId = _extractOrGenerateCallId(data, callerKey.toString());
     
-    // Проверяем, нет ли уже активного звонка с ТАКИМ ЖЕ ID
-    // ВАЖНО: Не блокируем НОВЫЕ звонки (с другим ID)!
+    // Проверяем, нет ли уже активного звонка
+    // ВАЖНО: FCM и WebSocket могут генерировать РАЗНЫЕ callId для одного звонка!
+    // Поэтому проверяем по callerKey, а не только по callId.
     try {
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
       if (activeCalls is List && activeCalls.isNotEmpty) {
         for (final call in activeCalls) {
-          if (call is Map && call['id'] == callId) {
-            print("📞 CALLKIT FCM: Звонок с id=$callId уже показан, пропускаю дубликат");
-            return;
+          if (call is Map) {
+            // Проверяем по callId
+            if (call['id'] == callId) {
+              print("📞 CALLKIT FCM: Звонок с id=$callId уже показан, пропускаю дубликат");
+              return;
+            }
+            // Проверяем по callerKey в extra — если тот же caller, значит дубль!
+            final extra = call['extra'];
+            if (extra is Map && extra['callerKey'] == callerKey.toString()) {
+              print("📞 CALLKIT FCM: Звонок от $callerKey уже показан (WS?), пропускаю FCM дубликат");
+              return;
+            }
           }
         }
-        // Если есть активный звонок с ДРУГИМ ID — это новый звонок!
-        // Закрываем старый и показываем новый
-        print("📞 CALLKIT FCM: Закрываю старые звонки, показываю новый (id=$callId)");
+        // Есть активный звонок от ДРУГОГО caller — закрываем и показываем новый
+        print("📞 CALLKIT FCM: Закрываю старые звонки от другого caller, показываю новый (id=$callId)");
         await FlutterCallkitIncoming.endAllCalls();
       }
     } catch (e) {
