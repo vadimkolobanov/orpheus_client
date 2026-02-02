@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/screens/pin_setup_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
@@ -77,6 +78,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
   }
 
   Future<void> _onRetentionPolicyChanged(MessageRetentionPolicy newPolicy) async {
+    final l10n = L10n.of(context);
     // Получаем preview количества сообщений для удаления
     final toDelete = await MessageCleanupService.instance.getCleanupPreview(newPolicy);
     
@@ -86,21 +88,20 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text('Подтверждение'),
+          title: Text(l10n.confirmation),
           content: Text(
-            'При включении этой политики будет удалено $toDelete сообщений.\n\n'
-            'Это действие необратимо. Продолжить?',
+            l10n.willDeleteMessages(toDelete),
             style: const TextStyle(color: Colors.white70),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Отмена'),
+              child: Text(l10n.cancel),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
               style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Удалить'),
+              child: Text(l10n.delete),
             ),
           ],
         ),
@@ -120,8 +121,8 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
       
       // Показываем результат
       final message = result.isSuccess && result.deletedCount > 0
-          ? 'Удалено ${result.deletedCount} сообщений'
-          : 'Политика применена: ${newPolicy.displayName}';
+          ? l10n.deleted(result.deletedCount)
+          : l10n.policyApplied(newPolicy.displayName);
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
@@ -130,11 +131,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
   }
 
   Future<void> _toggleBiometrics(bool enabled) async {
+    final l10n = L10n.of(context);
     if (enabled) {
       // Проверяем, что биометрия доступна
       try {
         final didAuth = await _localAuth.authenticate(
-          localizedReason: 'Подтвердите для включения биометрии',
+          localizedReason: l10n.confirmForBiometry,
           options: const AuthenticationOptions(
             stickyAuth: true,
             biometricOnly: true,
@@ -144,12 +146,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
         if (didAuth) {
           // TODO: Сохранить настройку биометрии в AuthService
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Биометрия включена')),
+            SnackBar(content: Text(l10n.biometryEnabled)),
           );
         }
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Не удалось включить биометрию')),
+          SnackBar(content: Text(l10n.biometryFailed)),
         );
       }
     }
@@ -158,6 +160,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     final config = _auth.config;
     final isPinEnabled = config.isPinEnabled;
     final isDuressEnabled = config.isDuressEnabled;
@@ -167,9 +170,9 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text(
-          'БЕЗОПАСНОСТЬ',
-          style: TextStyle(fontSize: 16, letterSpacing: 1),
+        title: Text(
+          l10n.securityTitle,
+          style: const TextStyle(fontSize: 16, letterSpacing: 1),
         ),
         centerTitle: true,
       ),
@@ -179,35 +182,35 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Секция PIN-кода
-            _buildSectionHeader('PIN-КОД', Icons.lock_outline),
+            _buildSectionHeader(l10n.pinCodeSection, Icons.lock_outline),
             const SizedBox(height: 12),
             
             if (!isPinEnabled) ...[
               _buildInfoCard(
                 icon: Icons.info_outline,
-                text: 'PIN-код не установлен. Приложение открывается без защиты.',
+                text: l10n.pinNotSet,
                 color: Colors.orange,
               ),
               const SizedBox(height: 12),
               _buildActionButton(
                 icon: Icons.add,
-                title: 'Установить PIN-код',
-                subtitle: '4 или 6-значный код для защиты входа',
+                title: l10n.setPinCode,
+                subtitle: l10n.setPinCodeDesc,
                 onTap: () => _openPinSetup(PinSetupMode.setPin),
               ),
             ] else ...[
-              _buildPinStatusCard(config.pinLength),
+              _buildPinStatusCard(config.pinLength, l10n),
               const SizedBox(height: 12),
               _buildActionButton(
                 icon: Icons.edit,
-                title: 'Изменить PIN-код',
-                subtitle: '${config.pinLength}-значный код',
+                title: l10n.changePinCode,
+                subtitle: l10n.digitCode(config.pinLength),
                 onTap: () => _openPinSetup(PinSetupMode.changePin),
               ),
               const SizedBox(height: 8),
               _buildActionButton(
                 icon: Icons.lock_open,
-                title: 'Отключить PIN-код',
+                title: l10n.disablePinCode,
                 isDestructive: true,
                 onTap: () => _openPinSetup(PinSetupMode.disablePin),
               ),
@@ -217,12 +220,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
             
             // Секция биометрии (только если PIN включен)
             if (isPinEnabled && _canUseBiometrics) ...[
-              _buildSectionHeader('БИОМЕТРИЯ', Icons.fingerprint),
+              _buildSectionHeader(l10n.biometrySection, Icons.fingerprint),
               const SizedBox(height: 12),
               _buildSwitchTile(
                 icon: Icons.fingerprint,
-                title: 'Разблокировка по отпечатку/лицу',
-                subtitle: 'Быстрый вход без ввода PIN',
+                title: l10n.unlockWithBiometry,
+                subtitle: l10n.quickEntryWithoutPin,
                 value: config.isBiometricEnabled,
                 onChanged: _toggleBiometrics,
               ),
@@ -231,13 +234,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
             
             // Секция кода принуждения (только если PIN включен)
             if (isPinEnabled) ...[
-              _buildSectionHeader('КОД ПРИНУЖДЕНИЯ', Icons.shield_outlined),
+              _buildSectionHeader(l10n.duressCodeSection, Icons.shield_outlined),
               const SizedBox(height: 12),
               
               _buildInfoCard(
                 icon: Icons.warning_amber,
-                text: 'Код принуждения — второй PIN, который показывает пустой профиль. '
-                      'Используйте, если вынуждены разблокировать приложение под давлением.',
+                text: l10n.duressCodeInfo,
                 color: Colors.amber,
                 isMultiLine: true,
               ),
@@ -246,21 +248,21 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
               if (!isDuressEnabled) ...[
                 _buildActionButton(
                   icon: Icons.add,
-                  title: 'Установить код принуждения',
-                  subtitle: '${config.pinLength}-значный код для экстренных ситуаций',
+                  title: l10n.setDuressCode,
+                  subtitle: l10n.setDuressCodeDesc(config.pinLength),
                   onTap: () => _openPinSetup(PinSetupMode.setDuress),
                   accentColor: Colors.amber,
                 ),
               ] else ...[
                 _buildInfoCard(
                   icon: Icons.check_circle_outline,
-                  text: 'Код принуждения установлен (${config.pinLength} цифр).',
+                  text: l10n.duressCodeSet(config.pinLength),
                   color: const Color(0xFF6AD394),
                 ),
                 const SizedBox(height: 12),
                 _buildActionButton(
                   icon: Icons.delete_outline,
-                  title: 'Отключить код принуждения',
+                  title: l10n.disableDuressCode,
                   isDestructive: true,
                   onTap: () => _openPinSetup(PinSetupMode.disableDuress),
                 ),
@@ -271,13 +273,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
 
             // Секция кода удаления (только если PIN включен)
             if (isPinEnabled) ...[
-              _buildSectionHeader('КОД УДАЛЕНИЯ', Icons.delete_forever),
+              _buildSectionHeader(l10n.wipeCodeSection, Icons.delete_forever),
               const SizedBox(height: 12),
 
               _buildInfoCard(
                 icon: Icons.warning_amber,
-                text: 'Код удаления — отдельный PIN, который запускает полное удаление данных. '
-                      'После ввода потребуется подтверждение удержанием (защита от случайного запуска).',
+                text: l10n.wipeCodeInfo,
                 color: Colors.red,
                 isMultiLine: true,
               ),
@@ -286,21 +287,21 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
               if (!isWipeCodeEnabled) ...[
                 _buildActionButton(
                   icon: Icons.add,
-                  title: 'Установить код удаления',
-                  subtitle: '${config.pinLength}-значный panic wipe код',
+                  title: l10n.setWipeCode,
+                  subtitle: l10n.setWipeCodeDesc(config.pinLength),
                   onTap: () => _openPinSetup(PinSetupMode.setWipeCode),
                   accentColor: Colors.red,
                 ),
               ] else ...[
                 _buildInfoCard(
                   icon: Icons.check_circle_outline,
-                  text: 'Код удаления установлен (${config.pinLength} цифр).',
+                  text: l10n.wipeCodeSet(config.pinLength),
                   color: const Color(0xFF6AD394),
                 ),
                 const SizedBox(height: 12),
                 _buildActionButton(
                   icon: Icons.delete_outline,
-                  title: 'Отключить код удаления',
+                  title: l10n.disableWipeCode,
                   isDestructive: true,
                   onTap: () => _openPinSetup(PinSetupMode.disableWipeCode),
                 ),
@@ -311,13 +312,13 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
             
             // Секция автоматического удаления
             if (isPinEnabled) ...[
-              _buildSectionHeader('ЗАЩИТА ОТ ПОДБОРА', Icons.delete_forever),
+              _buildSectionHeader(l10n.bruteForceProtection, Icons.delete_forever),
               const SizedBox(height: 12),
               
               _buildSwitchTile(
                 icon: Icons.delete_sweep,
-                title: 'Удалить данные после 10 попыток',
-                subtitle: 'Автоматический wipe при неверном PIN',
+                title: l10n.deleteAfterAttempts,
+                subtitle: l10n.autoWipeOnWrongPin,
                 value: config.isAutoWipeEnabled,
                 onChanged: (enabled) async {
                   await _auth.setAutoWipe(enabled);
@@ -330,7 +331,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
                 const SizedBox(height: 8),
                 _buildInfoCard(
                   icon: Icons.warning,
-                  text: 'После 10 неверных попыток все данные будут удалены безвозвратно!',
+                  text: l10n.autoWipeWarning,
                   color: Colors.red,
                 ),
               ],
@@ -339,12 +340,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
             ],
             
             // Экстренное удаление (жест) — выключено по умолчанию
-            _buildSectionHeader('ЭКСТРЕННОЕ УДАЛЕНИЕ', Icons.bolt),
+            _buildSectionHeader(l10n.emergencyWipe, Icons.bolt),
             const SizedBox(height: 12),
             _buildSwitchTile(
               icon: Icons.touch_app,
-              title: 'Включить жест panic wipe',
-              subtitle: '3 быстрых ухода приложения в фон → wipe (по умолчанию выключено)',
+              title: l10n.enablePanicGesture,
+              subtitle: l10n.panicGestureFullDesc,
               value: config.isPanicGestureEnabled,
               onChanged: (enabled) async {
                 await _auth.setPanicGestureEnabled(enabled);
@@ -355,9 +356,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
             const SizedBox(height: 10),
             _buildInfoCard(
               icon: Icons.info_outline,
-              text: 'Важно: этот жест основан на быстрых уходах приложения в фон '
-                    '(например, блокировка/разблокировка экрана или быстрое переключение приложений) '
-                    'и может быть менее предсказуем, чем код удаления.',
+              text: l10n.panicGestureWarning,
               color: Colors.orange,
               isMultiLine: true,
             ),
@@ -365,13 +364,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
             const SizedBox(height: 32),
             
             // Секция автоудаления сообщений
-            _buildSectionHeader('АВТОУДАЛЕНИЕ СООБЩЕНИЙ', Icons.auto_delete),
+            _buildSectionHeader(l10n.autoDeleteMessages, Icons.auto_delete),
             const SizedBox(height: 12),
             
             _buildInfoCard(
               icon: Icons.info_outline,
-              text: 'Автоматическое удаление старых сообщений повышает приватность. '
-                    'Сообщения старше выбранного периода будут удалены безвозвратно.',
+              text: l10n.autoDeleteInfo,
               color: Colors.blue,
               isMultiLine: true,
             ),
@@ -441,7 +439,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
   }
 
   /// Карточка статуса PIN с индикатором длины — вау-эффект ✨
-  Widget _buildPinStatusCard(int pinLength) {
+  Widget _buildPinStatusCard(int pinLength, L10n l10n) {
     const color = Color(0xFF6AD394);
     final isShortPin = pinLength == 4;
     
@@ -481,9 +479,9 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
               children: [
                 Row(
                   children: [
-                    const Text(
-                      'PIN-код установлен',
-                      style: TextStyle(
+                    Text(
+                      l10n.pinCodeSet,
+                      style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
                         fontSize: 15,
@@ -502,7 +500,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        '$pinLength цифр',
+                        l10n.digitCode(pinLength),
                         style: TextStyle(
                           color: isShortPin ? Colors.amber : color,
                           fontSize: 11,
@@ -515,8 +513,8 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
                 const SizedBox(height: 4),
                 Text(
                   isShortPin 
-                      ? 'Быстрый ввод • ~10 000 комбинаций'
-                      : 'Повышенная защита • ~1 000 000 комбинаций',
+                      ? '${l10n.fastEntry} • ~10 000 ${l10n.combinations}'
+                      : '${l10n.enhancedSecurity} • ~1 000 000 ${l10n.combinations}',
                   style: TextStyle(
                     color: Colors.grey.shade500,
                     fontSize: 12,
@@ -672,9 +670,14 @@ class _MessageRetentionSelector extends StatelessWidget {
   const _MessageRetentionSelector({
     required this.currentPolicy,
     required this.onPolicyChanged,
-  });  final MessageRetentionPolicy currentPolicy;
-  final ValueChanged<MessageRetentionPolicy> onPolicyChanged;  @override
+  });
+
+  final MessageRetentionPolicy currentPolicy;
+  final ValueChanged<MessageRetentionPolicy> onPolicyChanged;
+
+  @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF121212),
@@ -686,12 +689,40 @@ class _MessageRetentionSelector extends StatelessWidget {
           for (var i = 0; i < MessageRetentionPolicy.values.length; i++) ...[
             if (i > 0)
               Divider(height: 1, color: Colors.white.withOpacity(0.05)),
-            _buildOption(MessageRetentionPolicy.values[i]),
+            _buildOption(MessageRetentionPolicy.values[i], l10n),
           ],
         ],
       ),
     );
-  }  Widget _buildOption(MessageRetentionPolicy policy) {
+  }
+
+  String _getDisplayName(MessageRetentionPolicy policy, L10n l10n) {
+    switch (policy) {
+      case MessageRetentionPolicy.all:
+        return l10n.retentionAll;
+      case MessageRetentionPolicy.day:
+        return l10n.retentionDay;
+      case MessageRetentionPolicy.week:
+        return l10n.retentionWeekOption;
+      case MessageRetentionPolicy.month:
+        return l10n.retentionMonthOption;
+    }
+  }
+
+  String _getSubtitle(MessageRetentionPolicy policy, L10n l10n) {
+    switch (policy) {
+      case MessageRetentionPolicy.all:
+        return l10n.retentionAllSubtitle;
+      case MessageRetentionPolicy.day:
+        return l10n.retentionDaySubtitle;
+      case MessageRetentionPolicy.week:
+        return l10n.retentionWeekSubtitle;
+      case MessageRetentionPolicy.month:
+        return l10n.retentionMonthSubtitle;
+    }
+  }
+
+  Widget _buildOption(MessageRetentionPolicy policy, L10n l10n) {
     final isSelected = policy == currentPolicy;
     final icon = _getIconForPolicy(policy);
     final color = _getColorForPolicy(policy);
@@ -719,7 +750,7 @@ class _MessageRetentionSelector extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      policy.displayName,
+                      _getDisplayName(policy, l10n),
                       style: TextStyle(
                         color: isSelected ? Colors.white : Colors.white70,
                         fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
@@ -727,7 +758,7 @@ class _MessageRetentionSelector extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      policy.subtitle,
+                      _getSubtitle(policy, l10n),
                       style: TextStyle(
                         color: Colors.grey.shade600,
                         fontSize: 12,
@@ -754,7 +785,9 @@ class _MessageRetentionSelector extends StatelessWidget {
         ),
       ),
     );
-  }  IconData _getIconForPolicy(MessageRetentionPolicy policy) {
+  }
+
+  IconData _getIconForPolicy(MessageRetentionPolicy policy) {
     switch (policy) {
       case MessageRetentionPolicy.all:
         return Icons.all_inclusive;
@@ -765,7 +798,9 @@ class _MessageRetentionSelector extends StatelessWidget {
       case MessageRetentionPolicy.month:
         return Icons.calendar_month;
     }
-  }  Color _getColorForPolicy(MessageRetentionPolicy policy) {
+  }
+
+  Color _getColorForPolicy(MessageRetentionPolicy policy) {
     switch (policy) {
       case MessageRetentionPolicy.all:
         return const Color(0xFFB0BEC5);

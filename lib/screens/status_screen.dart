@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
@@ -174,7 +175,7 @@ class _StatusScreenState extends State<StatusScreen>
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _fingerprint = 'Ошибка');
+      setState(() => _fingerprint = '---');
     }
   }
 
@@ -183,8 +184,8 @@ class _StatusScreenState extends State<StatusScreen>
       final packageInfo = await PackageInfo.fromPlatform();
       final deviceInfo = DeviceInfoPlugin();
 
-      String model = 'Неизвестно';
-      String os = 'Неизвестно';
+      String model = '---';
+      String os = '---';
 
       if (Platform.isAndroid) {
         final android = await deviceInfo.androidInfo;
@@ -228,25 +229,27 @@ class _StatusScreenState extends State<StatusScreen>
   }
 
   String _formatDate(DateTime? date) {
-    if (date == null) return 'Неизвестно';
+    if (date == null) return '---';
     return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
   }
 
   void _copyFingerprint() {
+    final l10n = L10n.of(context);
     Clipboard.setData(ClipboardData(text: _fingerprint));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Fingerprint скопирован'),
-        duration: Duration(seconds: 2),
+      SnackBar(
+        content: Text(l10n.fingerprintCopied),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return AppScaffold(
       safeArea: false,
-      appBar: AppBar(title: const Text('Система')),
+      appBar: AppBar(title: Text(l10n.system)),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -257,6 +260,7 @@ class _StatusScreenState extends State<StatusScreen>
             pulse: _pulseController,
             pendingCount: _pendingCount,
             uptime: _formatUptime(),
+            l10n: l10n,
           ),
           const SizedBox(height: 12),
 
@@ -267,7 +271,7 @@ class _StatusScreenState extends State<StatusScreen>
             children: [
               Expanded(
                 child: _InfoCard(
-                  title: 'Регион',
+                  title: l10n.region,
                   icon: Icons.public_rounded,
                   value: _countryCode,
                   subtitle: _country,
@@ -279,14 +283,14 @@ class _StatusScreenState extends State<StatusScreen>
               const SizedBox(width: 12),
               Expanded(
                 child: _InfoCard(
-                  title: 'Режим',
+                  title: l10n.mode,
                   icon: _isTrafficControlRegion
                       ? Icons.shield_rounded
                       : Icons.verified_user_rounded,
-                  value: _isTrafficControlRegion ? 'Усиленный' : 'Стандарт',
+                  value: _isTrafficControlRegion ? l10n.enhanced : l10n.standard,
                   subtitle: _isTrafficControlRegion
-                      ? 'Повышенная защита'
-                      : 'Стабильное соединение',
+                      ? l10n.enhancedProtection
+                      : l10n.stableConnection,
                   valueColor: _isTrafficControlRegion
                       ? AppColors.warning
                       : AppColors.success,
@@ -303,6 +307,7 @@ class _StatusScreenState extends State<StatusScreen>
             fingerprint: _fingerprint,
             createdAt: _formatDate(_keyCreatedAt),
             onCopy: _copyFingerprint,
+            l10n: l10n,
           ),
           const SizedBox(height: 12),
 
@@ -313,17 +318,17 @@ class _StatusScreenState extends State<StatusScreen>
             children: [
               Expanded(
                 child: _InfoCard(
-                  title: 'Хранилище',
+                  title: l10n.storage,
                   icon: Icons.storage_rounded,
                   value: '$_messagesCount',
-                  subtitle: 'сообщений',
-                  secondaryValue: '$_contactsCount контактов',
+                  subtitle: l10n.messagesLabel,
+                  secondaryValue: '$_contactsCount ${l10n.contactsLabel}',
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _InfoCard(
-                  title: 'Приложение',
+                  title: l10n.application,
                   icon: Icons.info_outline_rounded,
                   value: 'v$_appVersion',
                   subtitle: _osVersion,
@@ -340,6 +345,7 @@ class _StatusScreenState extends State<StatusScreen>
             model: _deviceModel,
             os: _osVersion,
             appVersion: _appVersion,
+            l10n: l10n,
           ),
 
           const SizedBox(height: 24),
@@ -358,11 +364,13 @@ class _ConnectionCard extends StatelessWidget {
     required this.pulse,
     required this.pendingCount,
     required this.uptime,
+    required this.l10n,
   });
 
   final Animation<double> pulse;
   final int pendingCount;
   final String uptime;
+  final L10n l10n;
 
   @override
   Widget build(BuildContext context) {
@@ -375,17 +383,17 @@ class _ConnectionCard extends StatelessWidget {
         final status = snap.data ?? ConnectionStatus.Disconnected;
         final (label, color, icon) = switch (status) {
           ConnectionStatus.Connected => (
-              'Подключено',
+              l10n.connected,
               AppColors.success,
               Icons.cloud_done_rounded
             ),
           ConnectionStatus.Connecting => (
-              'Подключение…',
+              l10n.connecting,
               AppColors.warning,
               Icons.cloud_sync_rounded
             ),
           ConnectionStatus.Disconnected => (
-              'Отключено',
+              l10n.disconnected,
               AppColors.danger,
               Icons.cloud_off_rounded
             ),
@@ -415,7 +423,7 @@ class _ConnectionCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Соединение',
+                        Text(l10n.connection,
                             style: t.labelMedium
                                 ?.copyWith(color: AppColors.textTertiary)),
                         const SizedBox(height: 2),
@@ -428,11 +436,11 @@ class _ConnectionCard extends StatelessWidget {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('Сессия: $uptime',
+                      Text('${l10n.session}: $uptime',
                           style: t.labelSmall
                               ?.copyWith(color: AppColors.textTertiary)),
                       const SizedBox(height: 2),
-                      Text('Очередь: $pendingCount',
+                      Text('${l10n.queue}: $pendingCount',
                           style: t.labelSmall
                               ?.copyWith(color: AppColors.textTertiary)),
                     ],
@@ -535,11 +543,13 @@ class _SecurityCard extends StatelessWidget {
     required this.fingerprint,
     required this.createdAt,
     required this.onCopy,
+    required this.l10n,
   });
 
   final String fingerprint;
   final String createdAt;
   final VoidCallback onCopy;
+  final L10n l10n;
 
   @override
   Widget build(BuildContext context) {
@@ -565,7 +575,7 @@ class _SecurityCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Шифрование',
+                    Text(l10n.encryption,
                         style: t.labelMedium
                             ?.copyWith(color: AppColors.textTertiary)),
                     const SizedBox(height: 2),
@@ -578,7 +588,7 @@ class _SecurityCard extends StatelessWidget {
               IconButton(
                 onPressed: onCopy,
                 icon: const Icon(Icons.copy_rounded, size: 18),
-                tooltip: 'Копировать fingerprint',
+                tooltip: l10n.copyFingerprint,
                 color: AppColors.textTertiary,
               ),
             ],
@@ -588,7 +598,7 @@ class _SecurityCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _SecurityItem(
-                  label: 'Fingerprint',
+                  label: l10n.fingerprint,
                   value: fingerprint,
                   isMono: true,
                 ),
@@ -596,7 +606,7 @@ class _SecurityCard extends StatelessWidget {
               const SizedBox(width: 16),
               Expanded(
                 child: _SecurityItem(
-                  label: 'Ключ создан',
+                  label: l10n.keyCreated,
                   value: createdAt,
                 ),
               ),
@@ -617,7 +627,7 @@ class _SecurityCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Сквозное шифрование активно',
+                    l10n.e2eActive,
                     style: t.labelSmall?.copyWith(color: AppColors.success),
                   ),
                 ),
@@ -669,11 +679,13 @@ class _DeviceCard extends StatelessWidget {
     required this.model,
     required this.os,
     required this.appVersion,
+    required this.l10n,
   });
 
   final String model;
   final String os;
   final String appVersion;
+  final L10n l10n;
 
   @override
   Widget build(BuildContext context) {
@@ -687,15 +699,15 @@ class _DeviceCard extends StatelessWidget {
             children: [
               Icon(Icons.smartphone_rounded, size: 16, color: AppColors.accent),
               const SizedBox(width: 6),
-              Text('Устройство',
+              Text(l10n.device,
                   style:
                       t.labelMedium?.copyWith(color: AppColors.textTertiary)),
             ],
           ),
           const SizedBox(height: 12),
-          _DeviceRow(label: 'Модель', value: model),
+          _DeviceRow(label: l10n.model, value: model),
           const SizedBox(height: 8),
-          _DeviceRow(label: 'Система', value: os),
+          _DeviceRow(label: l10n.osLabel, value: os),
           const SizedBox(height: 8),
           _DeviceRow(label: 'Orpheus', value: 'v$appVersion'),
         ],

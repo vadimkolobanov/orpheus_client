@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:orpheus_project/call_screen.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/locale_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_button.dart';
 import 'package:orpheus_project/widgets/app_dialog.dart';
@@ -120,19 +122,20 @@ class _ChatScreenState extends State<ChatScreen>
     await _loadChatHistory();
 
     if (!mounted) return;
-    // Короткая “шифрую” анимация, затем сброс.
+    // Короткая "шифрую" анимация, затем сброс.
     await Future.delayed(const Duration(milliseconds: 250));
     if (mounted) setState(() => _isEncrypting = false);
   }
 
   Future<void> _confirmClearHistory() async {
+    final l10n = L10n.of(context);
     final ok = await AppDialog.show(
       context: context,
       icon: Icons.delete_forever,
-      title: 'Очистить историю?',
-      content: 'Все сообщения с этим контактом будут удалены безвозвратно.',
-      primaryLabel: 'Удалить',
-      secondaryLabel: 'Отмена',
+      title: l10n.clearHistory,
+      content: l10n.clearHistoryWarning,
+      primaryLabel: l10n.delete,
+      secondaryLabel: l10n.cancel,
       isDanger: true,
     );
 
@@ -143,6 +146,8 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    
     return AppScaffold(
       safeArea: false,
       appBar: AppBar(
@@ -187,7 +192,7 @@ class _ChatScreenState extends State<ChatScreen>
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      isOnline ? 'В сети' : 'Не в сети',
+                      isOnline ? l10n.online : l10n.offline,
                       style: Theme.of(context)
                           .textTheme
                           .labelSmall
@@ -202,7 +207,7 @@ class _ChatScreenState extends State<ChatScreen>
         actions: [
           AppIconButton(
             icon: Icons.call,
-            tooltip: 'Позвонить',
+            tooltip: l10n.call,
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -213,7 +218,7 @@ class _ChatScreenState extends State<ChatScreen>
           ),
           AppIconButton(
             icon: Icons.more_horiz,
-            tooltip: 'Меню',
+            tooltip: l10n.menu,
             onPressed: _confirmClearHistory,
           ),
         ],
@@ -230,7 +235,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildMessagesList() {
-    // UI: reverse=true, поэтому “низ” = offset 0.
+    // UI: reverse=true, поэтому "низ" = offset 0.
     final reversedMessages = _chatHistory.reversed.toList(growable: false);
     return ListView.builder(
       controller: _scrollController,
@@ -263,6 +268,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildMessageItem(ChatMessage message, {required bool hideTime}) {
+    final l10n = L10n.of(context);
     final isMyMessage = message.isSentByMe;
     final timeStr = DateFormat('HH:mm').format(message.timestamp);
     final messageId = message.timestamp.millisecondsSinceEpoch;
@@ -270,7 +276,7 @@ class _ChatScreenState extends State<ChatScreen>
     final shouldAnimate = !_animatedMessageIds.contains(messageId);
     if (shouldAnimate) _animatedMessageIds.add(messageId);
 
-    final callUi = _callStatusUiFor(message);
+    final callUi = _callStatusUiFor(message, l10n);
     if (callUi != null) {
       final callWidget = _CallStatusPill(
         ui: callUi,
@@ -374,6 +380,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildInputBar() {
+    final l10n = L10n.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.md),
@@ -389,7 +396,7 @@ class _ChatScreenState extends State<ChatScreen>
             Expanded(
               child: AppTextField(
                 controller: _messageController,
-                hintText: 'Сообщение…',
+                hintText: l10n.messagePlaceholder,
                 prefixIcon: Icons.lock_outline,
                 maxLines: 4,
                 minLines: 1,
@@ -421,40 +428,43 @@ class _ChatScreenState extends State<ChatScreen>
       a.minute == b.minute;
 
   String _formatDateDivider(DateTime date) {
+    final l10n = L10n.of(context);
+    final locale = LocaleService.instance.effectiveLocale.languageCode;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final yesterday = today.subtract(const Duration(days: 1));
     final messageDate = DateTime(date.year, date.month, date.day);
 
-    if (messageDate == today) return 'Сегодня';
-    if (messageDate == yesterday) return 'Вчера';
-    if (date.year == now.year) return DateFormat('d MMMM', 'ru').format(date);
-    return DateFormat('d MMMM y', 'ru').format(date);
+    if (messageDate == today) return l10n.today;
+    if (messageDate == yesterday) return l10n.yesterday;
+    if (date.year == now.year) return DateFormat('d MMMM', locale).format(date);
+    return DateFormat('d MMMM y', locale).format(date);
   }
 
-  _CallStatusUi? _callStatusUiFor(ChatMessage message) {
+  _CallStatusUi? _callStatusUiFor(ChatMessage message, L10n l10n) {
     final text = message.text.trim();
-    if (text == 'Входящий звонок') {
-      return const _CallStatusUi(
+    // Совместимость: проверяем и русские и английские варианты
+    if (text == 'Входящий звонок' || text == 'Incoming call') {
+      return _CallStatusUi(
           icon: Icons.call_received,
           accent: AppColors.success,
-          title: 'Звонок',
-          subtitle: 'Входящий');
+          title: l10n.callLabel,
+          subtitle: l10n.incoming);
     }
-    if (text == 'Исходящий звонок') {
-      return const _CallStatusUi(
+    if (text == 'Исходящий звонок' || text == 'Outgoing call') {
+      return _CallStatusUi(
           icon: Icons.call_made,
           accent: AppColors.info,
-          title: 'Звонок',
-          subtitle: 'Исходящий');
+          title: l10n.callLabel,
+          subtitle: l10n.outgoing);
     }
-    if (text == 'Пропущен звонок') {
+    if (text == 'Пропущен звонок' || text == 'Missed call') {
       final isOutgoing = message.isSentByMe;
       return _CallStatusUi(
         icon: isOutgoing ? Icons.call_made : Icons.call_missed,
         accent: AppColors.danger,
-        title: 'Пропущенный звонок',
-        subtitle: isOutgoing ? 'Исходящий' : 'Входящий',
+        title: l10n.missedCall,
+        subtitle: isOutgoing ? l10n.outgoing : l10n.incoming,
       );
     }
     return null;
@@ -475,6 +485,7 @@ class ContainerBorder {
 class _EmptyChat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xl),
@@ -484,11 +495,11 @@ class _EmptyChat extends StatelessWidget {
             Icon(Icons.chat_bubble_outline,
                 size: 44, color: AppColors.textTertiary),
             const SizedBox(height: 14),
-            Text('Начните диалог',
+            Text(l10n.startConversation,
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             Text(
-              'Сообщения шифруются и сохраняются локально.',
+              l10n.messagesEncrypted,
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),

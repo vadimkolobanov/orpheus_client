@@ -5,6 +5,7 @@ import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/services/incoming_call_buffer.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:orpheus_project/services/call_id_storage.dart';
 
 abstract interface class IncomingMessageCrypto {
   Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload);
@@ -24,6 +25,7 @@ abstract interface class IncomingMessageNotifications {
 typedef OpenCallScreen = void Function({
   required String contactPublicKey,
   required Map<String, dynamic> offer,
+  String? callId,
 });
 
 /// Единая точка обработки входящих WS сообщений.
@@ -124,16 +126,21 @@ class IncomingMessageHandler {
           ? contactName
           : senderKey.substring(0, 8);
 
+      // Единый call_id для корреляции
+      final callId = CallIdStorage.extractCallId(data, senderKey);
+
       // Сохраняем данные звонка в буфер (fallback для CallKit)
       _callBuffer.setLastIncomingCall(senderKey, data);
       
       // Если приложение в foreground — открываем CallScreen напрямую
       // Если в background — показываем нативный CallKit UI
       if (_isAppInForeground()) {
-        DebugLogger.info('CALL', '📞 Foreground: открываю CallScreen напрямую');
-        _openCallScreen(contactPublicKey: senderKey, offer: data);
+        DebugLogger.info('CALL', '📞 Foreground: открываю CallScreen напрямую',
+            context: {'call_id': callId, 'peer_pubkey': senderKey});
+        _openCallScreen(contactPublicKey: senderKey, offer: data, callId: callId);
       } else {
-        DebugLogger.info('CALL', '📞 Background: показываю CallKit UI');
+        DebugLogger.info('CALL', '📞 Background: показываю CallKit UI',
+            context: {'call_id': callId, 'peer_pubkey': senderKey});
         await _showCallKitIncoming(
           callerName: displayName,
           callerKey: senderKey,
@@ -146,17 +153,45 @@ class IncomingMessageHandler {
     if (type == 'ice-candidate') {
       // Всегда буферизуем (кандидаты могут прийти раньше offer).
       _callBuffer.add(senderKey, messageData);
+      final callId = CallIdStorage.extractCallId(
+          messageData['data'] is Map<String, dynamic>
+              ? (messageData['data'] as Map<String, dynamic>)
+              : messageData,
+          senderKey);
+      DebugLogger.info('CALL', '📥 ICE candidate', context: {
+        'call_id': callId,
+        'peer_pubkey': senderKey,
+      });
       _emitSignaling(messageData);
       return;
     }
 
     if (type == 'call-answer') {
+      final callId = CallIdStorage.extractCallId(
+          messageData['data'] is Map<String, dynamic>
+              ? (messageData['data'] as Map<String, dynamic>)
+              : messageData,
+          senderKey);
+      DebugLogger.info('CALL', '📥 call-answer', context: {
+        'call_id': callId,
+        'peer_pubkey': senderKey,
+      });
       _emitSignaling(messageData);
       return;
     }
 
     // ICE restart signals - пробрасываем в CallScreen для renegotiation
     if (type == 'ice-restart' || type == 'ice-restart-answer') {
+      final callId = CallIdStorage.extractCallId(
+          messageData['data'] is Map<String, dynamic>
+              ? (messageData['data'] as Map<String, dynamic>)
+              : messageData,
+          senderKey);
+      DebugLogger.info('CALL', '📥 ICE restart signal', context: {
+        'call_id': callId,
+        'peer_pubkey': senderKey,
+        'type': type,
+      });
       _emitSignaling(messageData);
       return;
     }
@@ -164,6 +199,15 @@ class IncomingMessageHandler {
     if (type == 'hang-up' || type == 'call-rejected') {
       _callBuffer.clear(senderKey);
       _lastCallOfferHandledAtMsBySender.remove(senderKey);
+      final callId = CallIdStorage.extractCallId(
+          messageData['data'] is Map<String, dynamic>
+              ? (messageData['data'] as Map<String, dynamic>)
+              : messageData,
+          senderKey);
+      DebugLogger.info('CALL', '📥 $type', context: {
+        'call_id': callId,
+        'peer_pubkey': senderKey,
+      });
 
       // КРИТИЧНО: сначала сообщаем в CallScreen, затем пытаемся спрятать уведомления.
       _emitSignaling(messageData);
@@ -172,9 +216,11 @@ class IncomingMessageHandler {
       // Скрываем нативный UI звонка (CallKit) если он был показан
       try {
         await FlutterCallkitIncoming.endAllCalls();
-        DebugLogger.info('CALL', 'CallKit UI скрыт (hang-up/rejected)');
+        DebugLogger.info('CALL', 'CallKit UI скрыт (hang-up/rejected)',
+            context: {'call_id': callId, 'peer_pubkey': senderKey});
       } catch (e) {
-        DebugLogger.warn('CALL', 'Ошибка скрытия CallKit: $e');
+        DebugLogger.warn('CALL', 'Ошибка скрытия CallKit: $e',
+            context: {'call_id': callId, 'peer_pubkey': senderKey});
       }
       return;
     }
@@ -239,23 +285,27 @@ class IncomingMessageHandler {
           if (call is Map) {
             // Проверяем по callId
             if (call['id'] == callId) {
-              DebugLogger.info('CALL', '📞 CallKit с id=$callId уже показан, пропускаю дубликат');
+              DebugLogger.info('CALL', '📞 CallKit с id=$callId уже показан, пропускаю дубликат',
+                  context: {'call_id': callId, 'peer_pubkey': callerKey});
               return;
             }
             // Проверяем по callerKey в extra — если тот же caller, значит дубль!
             final extra = call['extra'];
             if (extra is Map && extra['callerKey'] == callerKey) {
-              DebugLogger.info('CALL', '📞 CallKit для $callerKey уже показан (FCM?), пропускаю WS дубликат');
+              DebugLogger.info('CALL', '📞 CallKit для $callerKey уже показан (FCM?), пропускаю WS дубликат',
+                  context: {'call_id': callId, 'peer_pubkey': callerKey});
               return;
             }
           }
         }
         // Есть активный звонок от ДРУГОГО caller — закрываем и показываем новый
-        DebugLogger.info('CALL', '📞 Закрываю старые CallKit звонки от другого caller, показываю новый (id=$callId)');
+        DebugLogger.info('CALL', '📞 Закрываю старые CallKit звонки от другого caller, показываю новый (id=$callId)',
+            context: {'call_id': callId, 'peer_pubkey': callerKey});
         await FlutterCallkitIncoming.endAllCalls();
       }
     } catch (e) {
-      DebugLogger.warn('CALL', 'Ошибка проверки активных звонков: $e');
+      DebugLogger.warn('CALL', 'Ошибка проверки активных звонков: $e',
+          context: {'call_id': callId, 'peer_pubkey': callerKey});
     }
     
     final params = CallKitParams(
@@ -276,6 +326,7 @@ class IncomingMessageHandler {
       extra: <String, dynamic>{
         'callerKey': callerKey,
         'offerData': json.encode(offerData),
+        'callId': callId,
       },
       android: const AndroidParams(
         isCustomNotification: true,

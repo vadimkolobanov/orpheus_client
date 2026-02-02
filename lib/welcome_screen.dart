@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
+import 'package:orpheus_project/services/locale_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_button.dart';
 import 'package:orpheus_project/widgets/app_card.dart';
-import 'package:orpheus_project/widgets/app_dialog.dart';
 import 'package:orpheus_project/widgets/app_text_field.dart';
+import 'package:orpheus_project/widgets/language_selector.dart';
 
 class WelcomeScreen extends StatefulWidget {
   final VoidCallback onAuthComplete;
@@ -79,12 +81,19 @@ class _WelcomeScreenState extends State<WelcomeScreen>
         curve: const Interval(0.55, 1.0, curve: Curves.easeOutCubic),
       ),
     );
+    
+    // Слушаем изменения локали
+    LocaleService.instance.addListener(_onLocaleChanged);
 
     _revealTimer?.cancel();
     _revealTimer = Timer(const Duration(milliseconds: 180), () {
       if (!mounted) return;
       _introController.forward();
     });
+  }
+
+  void _onLocaleChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -105,6 +114,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     _importController.dispose();
     _introController.dispose();
     _haloController.dispose();
+    LocaleService.instance.removeListener(_onLocaleChanged);
     super.dispose();
   }
 
@@ -121,11 +131,13 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 
   void _showImportDialog() {
+    final l10n = L10n.of(context);
     showDialog<void>(
       context: context,
       builder: (context) {
         return _ImportKeyDialog(
           controller: _importController,
+          l10n: l10n,
           onImport: () async {
             final key = _importController.text.trim();
             if (key.isEmpty) return;
@@ -136,7 +148,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Ошибка: $e'),
+                  content: Text('${l10n.error}: $e'),
                   backgroundColor: AppColors.danger,
                 ),
               );
@@ -150,6 +162,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final l10n = L10n.of(context);
     final disableAnimations = MediaQuery.of(context).disableAnimations;
 
     return Scaffold(
@@ -172,7 +185,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
             ),
           ),
 
-          // Signature moment (B): один “дышащий” нимб у логотипа, без частиц/сканлайнов.
+          // Дышащий нимб у логотипа
           if (!disableAnimations)
             Positioned.fill(
               child: IgnorePointer(
@@ -204,6 +217,21 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                 ),
               ),
             ),
+
+          // Кнопка выбора языка в правом верхнем углу
+          Positioned(
+            top: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: LanguageSelector(
+                  compact: true,
+                  onChanged: () => setState(() {}),
+                ),
+              ),
+            ),
+          ),
 
           SafeArea(
             child: Padding(
@@ -270,7 +298,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           child: Column(
                             children: [
                               Text(
-                                'Orpheus',
+                                l10n.appName,
                                 style: t.displaySmall?.copyWith(
                                   fontWeight: FontWeight.w800,
                                   letterSpacing: 1.6,
@@ -278,7 +306,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Защищённая связь без лишнего шума',
+                                l10n.welcomeSubtitle,
                                 style: t.bodyMedium
                                     ?.copyWith(color: AppColors.textSecondary),
                                 textAlign: TextAlign.center,
@@ -300,13 +328,13 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           child: Column(
                             children: [
                               AppButton(
-                                label: 'Создать аккаунт',
+                                label: l10n.createAccount,
                                 icon: Icons.add_circle_outline,
                                 onPressed: _createNewAccount,
                               ),
                               const SizedBox(height: 10),
                               AppButton(
-                                label: 'Восстановить из ключа',
+                                label: l10n.restoreFromKey,
                                 variant: AppButtonVariant.secondary,
                                 icon: Icons.key,
                                 onPressed: _showImportDialog,
@@ -333,7 +361,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Text(
-                                        'End‑to‑end шифрование',
+                                        l10n.e2eEncryption,
                                         style: t.bodyMedium?.copyWith(
                                             fontWeight: FontWeight.w600),
                                       ),
@@ -360,10 +388,12 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 class _ImportKeyDialog extends StatelessWidget {
   const _ImportKeyDialog({
     required this.controller,
+    required this.l10n,
     required this.onImport,
   });
 
   final TextEditingController controller;
+  final L10n l10n;
   final VoidCallback onImport;
 
   @override
@@ -391,21 +421,23 @@ class _ImportKeyDialog extends StatelessWidget {
                   child: const Icon(Icons.key, color: AppColors.warning, size: 22),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  'Восстановление',
-                  style: Theme.of(context).textTheme.titleMedium,
+                Expanded(
+                  child: Text(
+                    l10n.recovery,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             Text(
-              'Приватный ключ даёт полный доступ к аккаунту. Никому его не показывайте.',
+              l10n.recoveryWarning,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 14),
             AppTextField(
               controller: controller,
-              hintText: 'Вставьте приватный ключ…',
+              hintText: l10n.pastePrivateKey,
               prefixIcon: Icons.vpn_key_outlined,
               maxLines: 4,
             ),
@@ -414,7 +446,7 @@ class _ImportKeyDialog extends StatelessWidget {
               children: [
                 Expanded(
                   child: AppButton(
-                    label: 'Отмена',
+                    label: l10n.cancel,
                     variant: AppButtonVariant.secondary,
                     onPressed: () => Navigator.pop(context),
                   ),
@@ -422,7 +454,7 @@ class _ImportKeyDialog extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: AppButton(
-                    label: 'Импорт',
+                    label: l10n.import,
                     onPressed: onImport,
                   ),
                 ),

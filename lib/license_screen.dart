@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:orpheus_project/config.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_button.dart';
@@ -57,9 +58,10 @@ class _LicenseScreenState extends State<LicenseScreen> {
   }
 
   Future<void> _activatePromo() async {
+    final l10n = L10n.of(context);
     final code = _promoController.text.trim();
     if (code.isEmpty) {
-      setState(() => _promoError = "Введите код");
+      setState(() => _promoError = l10n.enterCodeError);
       return;
     }
 
@@ -70,7 +72,7 @@ class _LicenseScreenState extends State<LicenseScreen> {
 
     try {
       final myPubkey = cryptoService.publicKeyBase64;
-      if (myPubkey == null) throw Exception("Ключи не инициализированы");
+      if (myPubkey == null) throw Exception(l10n.keysNotInitialized);
 
       final url = Uri.parse(AppConfig.httpUrl('/api/activate-promo'));
       final response = await http.post(
@@ -87,15 +89,15 @@ class _LicenseScreenState extends State<LicenseScreen> {
           context: context,
           icon: Icons.check_circle,
           iconColor: AppColors.success,
-          title: 'Готово',
-          content: 'Лицензия успешно активирована.',
-          primaryLabel: 'Ок',
+          title: l10n.done,
+          content: l10n.licenseActivated,
+          primaryLabel: l10n.ok,
         );
       } else {
-        setState(() => _promoError = data['message'] ?? "Неверный код");
+        setState(() => _promoError = data['message'] ?? l10n.invalidCode);
       }
     } catch (_) {
-      setState(() => _promoError = "Ошибка соединения. Проверьте интернет.");
+      setState(() => _promoError = l10n.connectionError);
     } finally {
       if (mounted) setState(() => _isActivatingPromo = false);
     }
@@ -103,12 +105,13 @@ class _LicenseScreenState extends State<LicenseScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: AppScaffold(
         safeArea: false,
         appBar: AppBar(
-          title: const Text('Активация'),
+          title: Text(l10n.activation),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new),
             onPressed: () => Navigator.pop(context),
@@ -120,11 +123,11 @@ class _LicenseScreenState extends State<LicenseScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 8),
-              Text('Введите код',
+              Text(l10n.enterCode,
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 6),
               Text(
-                'Код активации выдаётся при покупке лицензии.',
+                l10n.activationCodeHint,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
@@ -133,7 +136,7 @@ class _LicenseScreenState extends State<LicenseScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Код активации',
+                    Text(l10n.activationCode,
                         style: Theme.of(context).textTheme.labelLarge),
                     const SizedBox(height: 10),
                     AppTextField(
@@ -157,7 +160,7 @@ class _LicenseScreenState extends State<LicenseScreen> {
                     ],
                     const SizedBox(height: 14),
                     AppButton(
-                      label: _isActivatingPromo ? 'Проверка…' : 'Активировать',
+                      label: _isActivatingPromo ? l10n.checking : l10n.activateButton,
                       icon: Icons.check_circle_outline,
                       onPressed: _isActivatingPromo ? null : _activatePromo,
                     ),
@@ -185,14 +188,14 @@ class _LicenseScreenState extends State<LicenseScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Формат',
+                          Text(l10n.format,
                               style: Theme.of(context)
                                   .textTheme
                                   .labelLarge
                                   ?.copyWith(color: AppColors.success)),
                           const SizedBox(height: 4),
                           Text(
-                            'Буквы, цифры, а также символы _ и -',
+                            l10n.codeFormat,
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ],
@@ -203,7 +206,7 @@ class _LicenseScreenState extends State<LicenseScreen> {
               ),
               const SizedBox(height: 20),
               Text(
-                'Если код не принимается — проверьте интернет и правильность ввода.',
+                l10n.codeNotAccepted,
                 style: Theme.of(context)
                     .textTheme
                     .labelMedium

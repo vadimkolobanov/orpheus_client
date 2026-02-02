@@ -1,6 +1,7 @@
 // lib/services/notification_service.dart
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
@@ -10,6 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:http/http.dart' as http;
+import 'package:orpheus_project/config.dart';
 
 /// Обработчик фоновых FCM сообщений (top-level функция)
 /// Вызывается когда приложение убито или в фоне
@@ -28,6 +31,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // === ВХОДЯЩИЙ ЗВОНОК ===
   // Показываем нативный UI звонка через flutter_callkit_incoming
   if (type == 'incoming_call' || type == 'call-offer') {
+    await _sendBackgroundTelemetry(data, 'incoming_call_received');
     await _showNativeIncomingCall(data);
     return;
   }
@@ -45,12 +49,61 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // === ЗАВЕРШЕНИЕ ЗВОНКА ===
   // Скрываем нативный UI если звонок завершён
   if (type == 'hang-up' || type == 'call-rejected' || type == 'call-ended') {
+    await _sendBackgroundTelemetry(data, 'call_end_received');
     final callerKey = data['caller_key'] ?? data['sender_pubkey'];
     if (callerKey != null) {
       // Завершаем все звонки от этого caller
       await FlutterCallkitIncoming.endAllCalls();
     }
     return;
+  }
+}
+
+Future<void> _sendBackgroundTelemetry(Map<String, dynamic> data, String message) async {
+  try {
+    final recipientPubkey = data['recipient_pubkey']?.toString();
+    if (recipientPubkey == null || recipientPubkey.isEmpty) return;
+
+    final callId = data['call_id'] ?? data['callId'] ?? data['id'];
+    final peerKey = data['caller_key'] ?? data['sender_pubkey'];
+
+    final payload = {
+      'source': 'client-bg',
+      'entries': [
+        {
+          'timestamp': DateTime.now().toIso8601String(),
+          'level': 'info',
+          'tag': 'FCM_BG',
+          'category': 'FCM_BG',
+          'message': message,
+          'details': data,
+          'call_id': callId,
+          'peer_pubkey': peerKey,
+          'app_state': 'background',
+        },
+      ],
+    };
+
+    final body = json.encode(payload);
+    for (final url in AppConfig.httpUrls('/api/logs/batch')) {
+      try {
+        final response = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Pubkey': recipientPubkey,
+          },
+          body: body,
+        ).timeout(const Duration(seconds: 3));
+        if (response.statusCode == 200) {
+          break;
+        }
+      } catch (_) {
+        // Игнорируем ошибки отправки из background
+      }
+    }
+  } catch (_) {
+    // Не ломаем background handler
   }
 }
 
@@ -157,6 +210,7 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
       extra: <String, dynamic>{
         'callerKey': callerKey,
         'offerData': offerDataJson,
+        'callId': callId,
       },
       headers: <String, dynamic>{},
       android: AndroidParams(
@@ -253,9 +307,9 @@ class NotificationService {
     if (!kIsWeb && Platform.isAndroid) {
       try {
         final status = await Permission.notification.request();
-        DebugLogger.info('NOTIF', 'Android Permission.notification: $status');
+        DebugLogger.info('NOTIF', 'Разрешение уведомлений Android: $status');
       } catch (e) {
-        DebugLogger.warn('NOTIF', 'Android Permission.notification request failed: $e');
+        DebugLogger.warn('NOTIF', 'Запрос разрешения уведомлений не удался: $e');
       }
     }
 
@@ -268,19 +322,19 @@ class NotificationService {
       provisional: false,
     );
     print('📱 FCM Permission: ${settings.authorizationStatus}');
-    DebugLogger.info('FCM', 'Permission: ${settings.authorizationStatus}');
+    DebugLogger.info('FCM', 'Разрешение: ${settings.authorizationStatus}');
 
     // 3. Получение токена
     try {
       fcmToken = await _firebaseMessaging.getToken();
       print("📱 FCM Token: $fcmToken");
-      DebugLogger.success('FCM', 'Token получен: ${fcmToken?.substring(0, 30)}...');
+      DebugLogger.success('FCM', 'Токен получен: ${fcmToken?.substring(0, 30)}...');
 
       // Подписка на обновление токена
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
         fcmToken = newToken;
         print("📱 FCM Token updated: $newToken");
-        DebugLogger.info('FCM', 'Token обновлён: ${newToken.substring(0, 30)}...');
+        DebugLogger.info('FCM', 'Токен обновлён: ${newToken.substring(0, 30)}...');
         onTokenUpdated?.call();
       });
     } catch (e) {

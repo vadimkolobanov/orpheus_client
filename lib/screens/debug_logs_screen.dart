@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -98,6 +99,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     final logs = _filteredLogs;
     
     return Scaffold(
@@ -120,7 +122,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
               _autoScroll ? Icons.vertical_align_bottom : Icons.vertical_align_center,
               color: _autoScroll ? Colors.green : Colors.grey,
             ),
-            tooltip: 'Автопрокрутка',
+            tooltip: l10n.autoScroll,
             onPressed: () {
               setState(() => _autoScroll = !_autoScroll);
             },
@@ -128,13 +130,13 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
           // Копировать логи
           IconButton(
             icon: const Icon(Icons.copy),
-            tooltip: 'Копировать',
+            tooltip: l10n.copy,
             onPressed: () {
               final text = DebugLogger.exportToText();
               Clipboard.setData(ClipboardData(text: text));
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Логи скопированы'),
+                SnackBar(
+                  content: Text(l10n.logsCopied),
                   backgroundColor: Colors.green,
                 ),
               );
@@ -143,7 +145,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
           // Поделиться логами
           IconButton(
             icon: const Icon(Icons.share),
-            tooltip: 'Поделиться',
+            tooltip: l10n.share,
             onPressed: () {
               final text = DebugLogger.exportToText();
               Share.share(text, subject: 'Orpheus Debug Logs');
@@ -152,24 +154,24 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
           // Очистить логи
           IconButton(
             icon: const Icon(Icons.delete_outline),
-            tooltip: 'Очистить',
+            tooltip: l10n.clearLogs,
             onPressed: () {
               showDialog(
                 context: context,
-                builder: (context) => AlertDialog(
+                builder: (ctx) => AlertDialog(
                   backgroundColor: const Color(0xFF1E1E1E),
-                  title: const Text('Очистить логи?', style: TextStyle(color: Colors.white)),
+                  title: Text(l10n.clearLogsQuestion, style: const TextStyle(color: Colors.white)),
                   actions: [
                     TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Отмена'),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: Text(l10n.cancel),
                     ),
                     TextButton(
                       onPressed: () {
                         DebugLogger.clear();
-                        Navigator.pop(context);
+                        Navigator.pop(ctx);
                       },
-                      child: const Text('Очистить', style: TextStyle(color: Colors.red)),
+                      child: Text(l10n.clearLogs, style: const TextStyle(color: Colors.red)),
                     ),
                   ],
                 ),
@@ -192,7 +194,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 2),
                     child: FilterChip(
-                      label: Text('ВСЕ (${DebugLogger.logs.length})'),
+                      label: Text('${l10n.all} (${DebugLogger.logs.length})'),
                       selected: _selectedTag == null,
                       selectedColor: Colors.white24,
                       checkmarkColor: Colors.white,
@@ -239,7 +241,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
                 const Icon(Icons.circle, size: 8, color: Colors.green),
                 const SizedBox(width: 6),
                 Text(
-                  'Записей: ${logs.length}',
+                  '${l10n.entries}: ${logs.length}',
                   style: const TextStyle(
                     color: Colors.grey,
                     fontSize: 11,
@@ -262,10 +264,10 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
           // Список логов
           Expanded(
             child: logs.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
-                      'Нет логов',
-                      style: TextStyle(color: Colors.grey),
+                      l10n.noLogs,
+                      style: const TextStyle(color: Colors.grey),
                     ),
                   )
                 : ListView.builder(
@@ -273,7 +275,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
                     itemCount: logs.length,
                     itemBuilder: (context, index) {
                       final entry = logs[index];
-                      return _buildLogEntry(entry, index);
+                      return _buildLogEntry(entry, index, l10n);
                     },
                   ),
           ),
@@ -282,7 +284,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
     );
   }
 
-  Widget _buildLogEntry(LogEntry entry, int index) {
+  Widget _buildLogEntry(LogEntry entry, int index, L10n l10n) {
     final levelColor = _getLevelColor(entry.level);
     final tagColor = _getTagColor(entry.tag);
     
@@ -290,9 +292,9 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
       onLongPress: () {
         Clipboard.setData(ClipboardData(text: entry.toFormattedString()));
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Запись скопирована'),
-            duration: Duration(seconds: 1),
+          SnackBar(
+            content: Text(l10n.entryCopied),
+            duration: const Duration(seconds: 1),
           ),
         );
       },

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:orpheus_project/chat_screen.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/qr_scan_screen.dart';
@@ -91,14 +92,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return AppScaffold(
       safeArea: false,
       appBar: AppBar(
-        title: const Text('Контакты'),
+        title: Text(l10n.contactsTitle),
         actions: [
           AppIconButton(
             icon: Icons.qr_code_scanner,
-            tooltip: 'Сканировать QR',
+            tooltip: l10n.scanQrTooltip,
             onPressed: () async {
               final scannedKey = await Navigator.push(
                 context,
@@ -111,7 +113,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ),
           AppIconButton(
             icon: Icons.refresh,
-            tooltip: 'Обновить',
+            tooltip: l10n.refreshTooltip,
             onPressed: _refreshContacts,
           ),
         ],
@@ -130,7 +132,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
           if (snapshot.hasError) {
             return ErrorState(
-              title: 'Ошибка загрузки',
+              title: l10n.loadingError,
               message: snapshot.error.toString(),
               onRetry: _refreshContacts,
             );
@@ -143,11 +145,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
           if (contacts.isEmpty) {
             return EmptyState(
-              title: 'Нет контактов',
-              subtitle:
-                  'Добавьте первого собеседника, чтобы начать защищённое общение',
+              title: l10n.noContacts,
+              subtitle: l10n.addFirstContact,
               icon: Icons.people_outline,
-              actionLabel: 'Добавить контакт',
+              actionLabel: l10n.addContact,
               onAction: _showAddContactDialog,
             );
           }
@@ -263,15 +264,16 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _showRenameContactDialog(Contact contact) async {
+    final l10n = L10n.of(context);
     final newName = await AppInputDialog.show(
       context: context,
       icon: Icons.edit,
-      title: 'Переименовать контакт',
-      hintText: 'Введите новое имя',
+      title: l10n.renameContact,
+      hintText: l10n.enterNewName,
       initialValue: contact.name,
       prefixIcon: Icons.person_outline,
-      primaryLabel: 'Сохранить',
-      secondaryLabel: 'Отмена',
+      primaryLabel: l10n.save,
+      secondaryLabel: l10n.cancel,
     );
 
     if (!mounted) return;
@@ -495,6 +497,7 @@ class _AddContactDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return Dialog(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(
@@ -518,26 +521,26 @@ class _AddContactDialog extends StatelessWidget {
                       color: AppColors.accent, size: 22),
                 ),
                 const SizedBox(width: 12),
-                Text('Новый контакт',
+                Text(l10n.newContact,
                     style: Theme.of(context).textTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 18),
-            Text('Имя', style: Theme.of(context).textTheme.labelMedium),
+            Text(l10n.contactName, style: Theme.of(context).textTheme.labelMedium),
             const SizedBox(height: 8),
             AppTextField(
               controller: nameController,
-              hintText: 'Введите имя контакта',
+              hintText: l10n.enterName,
               prefixIcon: Icons.person_outline,
               textCapitalization: TextCapitalization.words,
             ),
             const SizedBox(height: 14),
-            Text('Публичный ключ',
+            Text(l10n.publicKey,
                 style: Theme.of(context).textTheme.labelMedium),
             const SizedBox(height: 8),
             AppTextField(
               controller: keyController,
-              hintText: 'Вставьте или отсканируйте ключ',
+              hintText: l10n.pasteOrScanKey,
               prefixIcon: Icons.key,
               maxLines: 2,
               suffixIcon: IconButton(
@@ -551,7 +554,7 @@ class _AddContactDialog extends StatelessWidget {
               children: [
                 Expanded(
                   child: AppButton(
-                    label: 'Отмена',
+                    label: l10n.cancel,
                     variant: AppButtonVariant.secondary,
                     onPressed: () => Navigator.pop(context),
                   ),
@@ -559,7 +562,7 @@ class _AddContactDialog extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: AppButton(
-                    label: 'Добавить',
+                    label: l10n.add,
                     onPressed: onAdd,
                   ),
                 ),
@@ -655,16 +658,25 @@ class _ContactActionsSheet extends StatelessWidget {
             const SizedBox(height: AppSpacing.lg),
             const Divider(height: 1),
             // Действия
-            _ActionTile(
-              icon: Icons.edit_outlined,
-              label: 'Переименовать',
-              onTap: onRename,
-            ),
-            _ActionTile(
-              icon: Icons.delete_outline,
-              label: 'Удалить',
-              color: AppColors.danger,
-              onTap: onDelete,
+            Builder(
+              builder: (context) {
+                final l10n = L10n.of(context);
+                return Column(
+                  children: [
+                    _ActionTile(
+                      icon: Icons.edit_outlined,
+                      label: l10n.rename,
+                      onTap: onRename,
+                    ),
+                    _ActionTile(
+                      icon: Icons.delete_outline,
+                      label: l10n.delete,
+                      color: AppColors.danger,
+                      onTap: onDelete,
+                    ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -722,6 +734,7 @@ class _DeleteContactDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return Dialog(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(
@@ -743,12 +756,12 @@ class _DeleteContactDialog extends StatelessWidget {
                   color: AppColors.danger, size: 28),
             ),
             const SizedBox(height: 16),
-            Text('Удалить $contactName?',
+            Text(l10n.deleteContactFull(contactName),
                 style: Theme.of(context).textTheme.titleMedium,
                 textAlign: TextAlign.center),
             const SizedBox(height: 8),
             Text(
-              'Контакт и вся история переписки будут удалены безвозвратно.',
+              l10n.deleteContactFullWarning,
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
@@ -757,7 +770,7 @@ class _DeleteContactDialog extends StatelessWidget {
               children: [
                 Expanded(
                   child: AppButton(
-                    label: 'Отмена',
+                    label: l10n.cancel,
                     variant: AppButtonVariant.secondary,
                     onPressed: () => Navigator.pop(context),
                   ),
@@ -765,7 +778,7 @@ class _DeleteContactDialog extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: AppButton(
-                    label: 'Удалить',
+                    label: l10n.delete,
                     variant: AppButtonVariant.danger,
                     onPressed: onDelete,
                   ),

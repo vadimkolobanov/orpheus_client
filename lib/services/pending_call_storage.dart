@@ -17,6 +17,7 @@ class PendingCallStorage {
   static const _keyOfferData = 'pending_call_offer_data';
   static const _keyTimestamp = 'pending_call_timestamp';
   static const _keyAutoAnswer = 'pending_call_auto_answer';
+  static const _keyCallId = 'pending_call_call_id';
   
   /// Максимальное время жизни pending call (30 секунд)
   static const int maxAgeSeconds = 30;
@@ -36,6 +37,7 @@ class PendingCallStorage {
     required String callerKey,
     Map<String, dynamic>? offerData,
     bool autoAnswer = true,
+    String? callId,
   }) async {
     try {
       final prefs = await _getPrefs;
@@ -43,6 +45,11 @@ class PendingCallStorage {
       await prefs.setString(_keyCallerKey, callerKey);
       await prefs.setInt(_keyTimestamp, DateTime.now().millisecondsSinceEpoch);
       await prefs.setBool(_keyAutoAnswer, autoAnswer);
+      if (callId != null && callId.isNotEmpty) {
+        await prefs.setString(_keyCallId, callId);
+      } else {
+        await prefs.remove(_keyCallId);
+      }
       
       if (offerData != null) {
         await prefs.setString(_keyOfferData, json.encode(offerData));
@@ -50,9 +57,9 @@ class PendingCallStorage {
         await prefs.remove(_keyOfferData);
       }
       
-      DebugLogger.info('PENDING_CALL', '💾 Saved to storage: $callerKey, autoAnswer=$autoAnswer');
+      DebugLogger.info('PENDING_CALL', '💾 Сохранено: $callerKey, autoAnswer=$autoAnswer');
     } catch (e) {
-      DebugLogger.error('PENDING_CALL', 'Error saving: $e');
+      DebugLogger.error('PENDING_CALL', 'Ошибка сохранения: $e');
     }
   }
   
@@ -63,7 +70,7 @@ class PendingCallStorage {
       
       final callerKey = prefs.getString(_keyCallerKey);
       if (callerKey == null) {
-        DebugLogger.info('PENDING_CALL', '📭 No pending call in storage');
+        DebugLogger.info('PENDING_CALL', '📭 Нет ожидающего звонка в хранилище');
         return null;
       }
       
@@ -73,36 +80,38 @@ class PendingCallStorage {
       
       // Проверяем что звонок не устарел
       if (ageSeconds > maxAgeSeconds) {
-        DebugLogger.warn('PENDING_CALL', '⏰ Pending call expired (${ageSeconds}s > ${maxAgeSeconds}s)');
+        DebugLogger.warn('PENDING_CALL', '⏰ Звонок устарел (${ageSeconds}s > ${maxAgeSeconds}s)');
         await clear();
         return null;
       }
       
       final autoAnswer = prefs.getBool(_keyAutoAnswer) ?? true;
       final offerDataStr = prefs.getString(_keyOfferData);
+      final callId = prefs.getString(_keyCallId);
       
       Map<String, dynamic>? offerData;
       if (offerDataStr != null) {
         try {
           offerData = json.decode(offerDataStr) as Map<String, dynamic>;
         } catch (e) {
-          DebugLogger.warn('PENDING_CALL', 'Error parsing offerData: $e');
+          DebugLogger.warn('PENDING_CALL', 'Ошибка парсинга offerData: $e');
         }
       }
       
       // Очищаем сразу после загрузки
       await clear();
       
-      DebugLogger.info('PENDING_CALL', '📬 Loaded from storage: $callerKey, age=${ageSeconds}s');
+      DebugLogger.info('PENDING_CALL', '📬 Загружено из хранилища: $callerKey, возраст=${ageSeconds}s');
       
       return PendingCallData(
         callerKey: callerKey,
         offerData: offerData,
         autoAnswer: autoAnswer,
+        callId: callId,
         timestamp: DateTime.fromMillisecondsSinceEpoch(timestamp),
       );
     } catch (e) {
-      DebugLogger.error('PENDING_CALL', 'Error loading: $e');
+      DebugLogger.error('PENDING_CALL', 'Ошибка загрузки: $e');
       return null;
     }
   }
@@ -115,9 +124,10 @@ class PendingCallStorage {
       await prefs.remove(_keyOfferData);
       await prefs.remove(_keyTimestamp);
       await prefs.remove(_keyAutoAnswer);
-      DebugLogger.info('PENDING_CALL', '🗑️ Storage cleared');
+      await prefs.remove(_keyCallId);
+      DebugLogger.info('PENDING_CALL', '🗑️ Хранилище очищено');
     } catch (e) {
-      DebugLogger.error('PENDING_CALL', 'Error clearing: $e');
+      DebugLogger.error('PENDING_CALL', 'Ошибка очистки: $e');
     }
   }
   
@@ -144,11 +154,13 @@ class PendingCallData {
   final Map<String, dynamic>? offerData;
   final DateTime timestamp;
   final bool autoAnswer;
+  final String? callId;
   
   PendingCallData({
     required this.callerKey,
     this.offerData,
     this.autoAnswer = true,
+    this.callId,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
   

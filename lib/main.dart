@@ -5,9 +5,11 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/call_screen.dart';
 import 'package:orpheus_project/license_screen.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
@@ -19,6 +21,7 @@ import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/incoming_call_buffer.dart';
 import 'package:orpheus_project/services/incoming_message_handler.dart';
+import 'package:orpheus_project/services/locale_service.dart';
 import 'package:orpheus_project/services/pending_call_storage.dart';
 import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
@@ -27,6 +30,8 @@ import 'package:orpheus_project/services/message_cleanup_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
 import 'package:orpheus_project/services/presence_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
+import 'package:orpheus_project/services/telemetry_service.dart';
+import 'package:orpheus_project/services/call_id_storage.dart';
 import 'package:orpheus_project/theme/app_theme.dart';
 import 'package:orpheus_project/welcome_screen.dart';
 import 'package:orpheus_project/screens/home_screen.dart';
@@ -96,13 +101,33 @@ Future<void> main() async {
 /// Основная инициализация приложения
 Future<void> _initializeApp() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Перехват debugPrint (полная телеметрия жизненного цикла)
+  debugPrint = (String? message, {int? wrapWidth}) {
+    if (message == null) return;
+    DebugLogger.info('PRINT', message);
+  };
+
+  FlutterError.onError = (FlutterErrorDetails details) {
+    DebugLogger.error('FLUTTER', details.exceptionAsString(),
+        context: {'stack': details.stack.toString()});
+    FlutterError.presentError(details);
+  };
   
   DebugLogger.info('APP', '🚀 Orpheus запускается...');
 
+  // Инициализация сервиса локализации
+  DebugLogger.info('APP', 'Инициализация LocaleService...');
+  await LocaleService.instance.init();
+  DebugLogger.info('APP', 'Локаль: ${LocaleService.instance.effectiveLocale.languageCode}');
+
   // Intl (DateFormat) требует инициализации таблиц локали.
-  // Без этого DateFormat(..., 'ru') падает с LocaleDataException на некоторых устройствах/локалях (например en-US).
-  Intl.defaultLocale = 'ru';
+  // Инициализируем обе поддерживаемые локали
   await initializeDateFormatting('ru');
+  await initializeDateFormatting('en');
+  
+  // Устанавливаем локаль по умолчанию для Intl
+  Intl.defaultLocale = LocaleService.instance.effectiveLocale.languageCode;
 
   try {
     // 1. Firebase
@@ -152,6 +177,9 @@ Future<void> _initializeApp() async {
   DebugLogger.info('APP', 'Инициализация NetworkMonitorService.');
   await NetworkMonitorService.instance.init();
   DebugLogger.success('APP', 'NetworkMonitorService инициализирован');
+
+  // 7.5 Телеметрия (полные логи в БД для анализа)
+  await TelemetryService.instance.init();
 
   // 8. WebSocket подключение
   if (_hasKeys && cryptoService.publicKeyBase64 != null) {
@@ -274,7 +302,12 @@ Future<void> _checkActiveCallOnStart() async {
   if (storedPending != null && storedPending.isValid) {
     DebugLogger.info('CALLKIT', '📞 Найден pending call в STORAGE, открываю CallScreen');
     _isProcessingCallKitAnswer = true;
-    _navigateToCallScreen(storedPending.callerKey, storedPending.offerData, autoAnswer: storedPending.autoAnswer);
+    _navigateToCallScreen(
+      storedPending.callerKey,
+      storedPending.offerData,
+      autoAnswer: storedPending.autoAnswer,
+      callId: storedPending.callId,
+    );
     return;
   }
   
@@ -283,7 +316,12 @@ Future<void> _checkActiveCallOnStart() async {
     DebugLogger.info('CALLKIT', '📞 Найден pending call в RAM, открываю CallScreen');
     final pending = _pendingCall!;
     _pendingCall = null;
-    _navigateToCallScreen(pending.callerKey, pending.offerData, autoAnswer: pending.autoAnswer);
+    _navigateToCallScreen(
+      pending.callerKey,
+      pending.offerData,
+      autoAnswer: pending.autoAnswer,
+      callId: pending.callId,
+    );
     return;
   }
   
@@ -324,6 +362,7 @@ Future<void> _checkActiveCallOnStart() async {
       
       if (callerKey != null) {
         DebugLogger.info('CALLKIT', 'Открываю CallScreen для активного звонка: $callerKey');
+        final callId = call['id'] as String?;
         
         // Формируем extra
         Map<String, dynamic> callExtra = extra ?? {};
@@ -335,7 +374,7 @@ Future<void> _checkActiveCallOnStart() async {
         }
         callExtra['callerKey'] = callerKey;
         
-        _openCallScreenFromCallKit(callerKey, callExtra);
+        _openCallScreenFromCallKit(callerKey, callExtra, callId: callId);
       } else {
         DebugLogger.warn('CALLKIT', 'callerKey is null, не могу открыть CallScreen');
         _isProcessingCallKitAnswer = false;
@@ -374,7 +413,11 @@ Future<void> _handleCallKitAccept(Map<String, dynamic>? body) async {
     DebugLogger.info('CALLKIT', '📥 callerKey from buffer: $callerKey');
   }
   
-  DebugLogger.info('CALLKIT', '✅ Звонок принят: callId=$callId, callerKey=$callerKey');
+  DebugLogger.info(
+    'CALLKIT',
+    '✅ Звонок принят: callId=$callId, callerKey=$callerKey',
+    context: {'call_id': callId, 'peer_pubkey': callerKey},
+  );
   
   // Открываем CallScreen
   if (callerKey != null) {
@@ -408,9 +451,10 @@ Future<void> _handleCallKitAccept(Map<String, dynamic>? body) async {
       callerKey: callerKey,
       offerData: offerData,
       autoAnswer: true,
+      callId: callId,
     );
     
-    _openCallScreenFromCallKit(callerKey, callExtra);
+    _openCallScreenFromCallKit(callerKey, callExtra, callId: callId);
   } else {
     DebugLogger.error('CALLKIT', '❌ callerKey is null! Нет данных для звонка!');
     _isProcessingCallKitAnswer = false; // Сбрасываем флаг при ошибке
@@ -440,7 +484,11 @@ Future<void> _handleCallKitDecline(Map<String, dynamic>? body) async {
     DebugLogger.info('CALLKIT', '📥 callerKey from buffer: $callerKey');
   }
   
-  DebugLogger.info('CALLKIT', '❌ Звонок отклонён: callId=$callId, callerKey=$callerKey');
+  DebugLogger.info(
+    'CALLKIT',
+    '❌ Звонок отклонён: callId=$callId, callerKey=$callerKey',
+    context: {'call_id': callId, 'peer_pubkey': callerKey},
+  );
   
   // Скрываем нативный UI СРАЗУ
   await FlutterCallkitIncoming.endAllCalls();
@@ -451,7 +499,11 @@ Future<void> _handleCallKitDecline(Map<String, dynamic>? body) async {
   // Отправляем call-rejected (WebSocket или HTTP fallback)
   // ВАЖНО: sendSignalingMessage сам использует HTTP fallback если WS не подключён!
   if (callerKey != null) {
-    websocketService.sendSignalingMessage(callerKey, 'call-rejected', {});
+    websocketService.sendSignalingMessage(
+      callerKey,
+      'call-rejected',
+      callId != null ? {'call_id': callId} : {},
+    );
     DebugLogger.info('CALLKIT', '✅ Отправлен call-rejected к $callerKey');
   } else {
     DebugLogger.error('CALLKIT', '❌ callerKey null, не могу отправить call-rejected');
@@ -460,7 +512,12 @@ Future<void> _handleCallKitDecline(Map<String, dynamic>? body) async {
 
 /// Открыть CallScreen после принятия звонка через CallKit
 /// autoAnswer=true означает что звонок уже принят через нативный UI
-void _openCallScreenFromCallKit(String callerKey, Map<String, dynamic>? extra, {bool autoAnswer = true}) {
+void _openCallScreenFromCallKit(
+  String callerKey,
+  Map<String, dynamic>? extra, {
+  bool autoAnswer = true,
+  String? callId,
+}) {
   // Получаем offer data если есть
   Map<String, dynamic>? offerData;
   final offerJson = extra?['offerData'] as String?;
@@ -472,20 +529,35 @@ void _openCallScreenFromCallKit(String callerKey, Map<String, dynamic>? extra, {
   
   DebugLogger.info('CALLKIT', 'Открываю CallScreen, offer: ${offerData != null}, autoAnswer: $autoAnswer');
   
+  final resolvedCallId = callId ??
+      (offerData != null ? CallIdStorage.extractCallId(offerData, callerKey) : null);
+
   // Если приложение заблокировано (PIN) — сохраняем звонок как pending
   // CallScreen откроется после разблокировки
   if (authService.requiresUnlock) {
     DebugLogger.info('CALLKIT', '🔒 Приложение заблокировано, сохраняю pending call');
-    _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
+    _pendingCall = PendingCallData(
+      callerKey: callerKey,
+      offerData: offerData,
+      autoAnswer: autoAnswer,
+      callId: resolvedCallId,
+    );
     return;
   }
   
   // Открываем CallScreen сразу с autoAnswer
-  _navigateToCallScreen(callerKey, offerData, autoAnswer: autoAnswer);
+  _navigateToCallScreen(callerKey, offerData, autoAnswer: autoAnswer, callId: resolvedCallId);
 }
 
 /// Навигация на CallScreen (используется напрямую и после разблокировки)
-void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {bool autoAnswer = false}) {
+void _navigateToCallScreen(
+  String callerKey,
+  Map<String, dynamic>? offerData, {
+  bool autoAnswer = false,
+  String? callId,
+}) {
+  final resolvedCallId = callId ??
+      (offerData != null ? CallIdStorage.extractCallId(offerData, callerKey) : null);
   // Проверяем что нет уже активного звонка
   if (CallStateService.instance.isCallActive.value) {
     DebugLogger.warn('CALLKIT', 'Уже есть активный звонок, игнорирую');
@@ -497,7 +569,12 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
   // сохраняем pending call — он будет обработан в _checkActiveCallOnStart() или при первом frame
   if (navigatorKey.currentState == null) {
     DebugLogger.warn('CALLKIT', '⚠️ Navigator ещё null, сохраняю pending call');
-    _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
+    _pendingCall = PendingCallData(
+      callerKey: callerKey,
+      offerData: offerData,
+      autoAnswer: autoAnswer,
+      callId: resolvedCallId,
+    );
     _isProcessingCallKitAnswer = false;
     return;
   }
@@ -526,7 +603,12 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
     if (navigatorKey.currentState == null) {
       // Если Navigator всё ещё null — сохраняем pending call для обработки при resumed
       DebugLogger.warn('CALLKIT', '⚠️ Navigator null после postFrame, сохраняю pending call');
-      _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
+      _pendingCall = PendingCallData(
+        callerKey: callerKey,
+        offerData: offerData,
+        autoAnswer: autoAnswer,
+        callId: resolvedCallId,
+      );
       _isProcessingCallKitAnswer = false;
       return;
     }
@@ -537,6 +619,7 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
         contactPublicKey: callerKey,
         offer: offerData,
         autoAnswer: autoAnswer,
+        callId: resolvedCallId,
       ),
     ));
     
@@ -559,7 +642,12 @@ void _navigateToCallScreen(String callerKey, Map<String, dynamic>? offerData, {b
       DebugLogger.warn('CALLKIT', '⏰ PostFrame callback не выполнился за 2с, pending call уже в storage');
       callbackExecuted = true;
       // RAM fallback на случай если storage не работает
-      _pendingCall = PendingCallData(callerKey: callerKey, offerData: offerData, autoAnswer: autoAnswer);
+      _pendingCall = PendingCallData(
+        callerKey: callerKey,
+        offerData: offerData,
+        autoAnswer: autoAnswer,
+        callId: resolvedCallId,
+      );
       _isProcessingCallKitAnswer = false;
     }
   });
@@ -578,7 +666,12 @@ void processPendingCallAfterUnlock() {
   }
   
   DebugLogger.info('CALLKIT', '🔓 Обработка pending call после разблокировки, autoAnswer=${pending.autoAnswer}');
-  _navigateToCallScreen(pending.callerKey, pending.offerData, autoAnswer: pending.autoAnswer);
+  _navigateToCallScreen(
+    pending.callerKey,
+    pending.offerData,
+    autoAnswer: pending.autoAnswer,
+    callId: pending.callId,
+  );
 }
 
 /// Проверка активных CallKit звонков при возврате из background
@@ -622,6 +715,7 @@ Future<void> _checkActiveCallOnResumed() async {
     
     if (callerKey != null) {
       DebugLogger.info('LIFECYCLE', '📞 Открываю CallScreen для активного звонка (resumed)');
+      final callId = call['id'] as String?;
       
       Map<String, dynamic> callExtra = extra ?? {};
       if (callExtra['offerData'] == null) {
@@ -632,7 +726,7 @@ Future<void> _checkActiveCallOnResumed() async {
       }
       callExtra['callerKey'] = callerKey;
       
-      _openCallScreenFromCallKit(callerKey, callExtra);
+      _openCallScreenFromCallKit(callerKey, callExtra, callId: callId);
     } else {
       DebugLogger.warn('LIFECYCLE', '⚠️ callerKey is null при resumed, пропускаю');
       _isProcessingCallKitAnswer = false;
@@ -649,7 +743,7 @@ void _listenForMessages() {
     database: _IncomingDatabaseAdapter(DatabaseService.instance),
     notifications: _IncomingNotificationsAdapter(),
     callBuffer: incomingCallBuffer,
-    openCallScreen: ({required contactPublicKey, required offer}) {
+    openCallScreen: ({required contactPublicKey, required offer, String? callId}) {
       // ВАЖНО: используем централизованную навигацию с проверками
       // Если приложение в foreground, WebSocket может доставить call-offer
       // но если CallKit уже обрабатывает ответ - игнорируем дубль
@@ -662,7 +756,11 @@ void _listenForMessages() {
         return;
       }
       navigatorKey.currentState?.push(MaterialPageRoute(
-        builder: (context) => CallScreen(contactPublicKey: contactPublicKey, offer: offer),
+        builder: (context) => CallScreen(
+          contactPublicKey: contactPublicKey,
+          offer: offer,
+          callId: callId,
+        ),
       ));
     },
     emitSignaling: (msg) => signalingStreamController.add(msg),
@@ -749,6 +847,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _keysExist = _hasKeys;
     _isLocked = authService.requiresUnlock;
+    
+    // Подписываемся на изменения локали
+    LocaleService.instance.addListener(_onLocaleChanged);
     
     // Подписываемся на panic wipe
     panicWipeService.onPanicWipe = () async {
@@ -841,9 +942,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     });
   }
 
+  void _onLocaleChanged() {
+    // Обновляем Intl локаль при смене языка
+    Intl.defaultLocale = LocaleService.instance.effectiveLocale.languageCode;
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    LocaleService.instance.removeListener(_onLocaleChanged);
     _licenseSubscription?.cancel();
     super.dispose();
   }
@@ -918,6 +1026,33 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       themeMode: ThemeMode.dark,
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
+      
+      // Локализация
+      locale: LocaleService.instance.selectedLocale,
+      supportedLocales: LocaleService.supportedLocales,
+      localizationsDelegates: const [
+        L10n.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      localeResolutionCallback: (locale, supportedLocales) {
+        // Если пользователь выбрал конкретную локаль — используем её
+        if (LocaleService.instance.selectedLocale != null) {
+          return LocaleService.instance.selectedLocale;
+        }
+        // Иначе ищем подходящую среди системных
+        if (locale != null) {
+          for (final supported in supportedLocales) {
+            if (supported.languageCode == locale.languageCode) {
+              return supported;
+            }
+          }
+        }
+        // Fallback на английский
+        return const Locale('en');
+      },
+      
       home: _buildHome(),
     );
   }

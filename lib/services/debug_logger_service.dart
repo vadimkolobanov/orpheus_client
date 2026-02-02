@@ -25,13 +25,23 @@ class DebugLogger {
   static final StreamController<void> _updateController = StreamController.broadcast();
   static Stream<void> get onUpdate => _updateController.stream;
 
+  // Stream для передачи каждого лога (телеметрия/анализ)
+  static final StreamController<LogEntry> _entryController = StreamController.broadcast();
+  static Stream<LogEntry> get onEntry => _entryController.stream;
+
   /// Добавить лог
-  static void log(String tag, String message, {LogLevel level = LogLevel.info}) {
+  static void log(
+    String tag,
+    String message, {
+    LogLevel level = LogLevel.info,
+    Map<String, dynamic>? context,
+  }) {
     final entry = LogEntry(
       timestamp: DateTime.now(),
       tag: tag,
       message: message,
       level: level,
+      context: context,
     );
     
     _logs.add(entry);
@@ -41,31 +51,32 @@ class DebugLogger {
       _logs.removeAt(0);
     }
     
-    // Уведомляем UI
+    // Уведомляем UI и телеметрию
     _updateController.add(null);
+    _entryController.add(entry);
     
     // Также выводим в консоль для ADB logcat
     print('[${entry.levelIcon}] [${entry.tag}] ${entry.message}');
   }
 
   /// Информационный лог
-  static void info(String tag, String message) {
-    log(tag, message, level: LogLevel.info);
+  static void info(String tag, String message, {Map<String, dynamic>? context}) {
+    log(tag, message, level: LogLevel.info, context: context);
   }
 
   /// Предупреждение
-  static void warn(String tag, String message) {
-    log(tag, message, level: LogLevel.warning);
+  static void warn(String tag, String message, {Map<String, dynamic>? context}) {
+    log(tag, message, level: LogLevel.warning, context: context);
   }
 
   /// Ошибка
-  static void error(String tag, String message) {
-    log(tag, message, level: LogLevel.error);
+  static void error(String tag, String message, {Map<String, dynamic>? context}) {
+    log(tag, message, level: LogLevel.error, context: context);
   }
 
   /// Успех
-  static void success(String tag, String message) {
-    log(tag, message, level: LogLevel.success);
+  static void success(String tag, String message, {Map<String, dynamic>? context}) {
+    log(tag, message, level: LogLevel.success, context: context);
   }
 
   /// Получить все логи
@@ -112,12 +123,14 @@ class LogEntry {
   final String tag;
   final String message;
   final LogLevel level;
+  final Map<String, dynamic>? context;
 
   LogEntry({
     required this.timestamp,
     required this.tag,
     required this.message,
     required this.level,
+    this.context,
   });
 
   String get levelIcon {
@@ -141,7 +154,10 @@ class LogEntry {
   }
 
   String toFormattedString() {
-    return '[$timeString] [$levelIcon $tag] $message';
+    final ctx = context != null && context!.isNotEmpty
+        ? ' | ${context.toString()}'
+        : '';
+    return '[$timeString] [$levelIcon $tag] $message$ctx';
   }
 }
 

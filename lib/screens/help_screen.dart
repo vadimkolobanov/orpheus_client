@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_card.dart';
 import 'package:orpheus_project/widgets/app_scaffold.dart';
@@ -8,82 +9,84 @@ class HelpScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    
     return AppScaffold(
       safeArea: false,
-      appBar: AppBar(title: const Text('Как пользоваться')),
+      appBar: AppBar(title: Text(l10n.howToUse)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
+          children: [
             _Section(
-              title: 'Быстрый старт',
+              title: l10n.helpQuickStart,
               bullets: [
-                'Ваш ID — это публичный ключ. Им делятся, чтобы вас добавили.',
-                'Контакт работает «в обе стороны»: вы добавляете человека по его ID/QR, и он добавляет вас по вашему ID/QR.',
-                'Чат и звонки идут по защищённому каналу, сообщения шифруются.',
+                l10n.helpQuickStartBullet1,
+                l10n.helpQuickStartBullet2,
+                l10n.helpQuickStartBullet3,
               ],
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             _Section(
-              title: 'Экспорт аккаунта (важно)',
+              title: l10n.helpExportTitle,
               bullets: [
-                'Профиль → Экспорт аккаунта показывает приватный ключ.',
-                'Приватный ключ — это полный доступ к аккаунту. Не показывайте его никому.',
-                'Потеряли приватный ключ и удалили приложение — восстановление невозможно.',
+                l10n.helpExportBullet1,
+                l10n.helpExportBullet2,
+                l10n.helpExportBullet3,
               ],
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             _Section(
-              title: 'PIN‑код',
+              title: l10n.helpPinTitle,
               bullets: [
-                'Профиль → Безопасность → PIN. Если PIN не задан — вход открыт.',
-                'Если PIN включён — приложение блокируется при сворачивании и при запуске.',
+                l10n.helpPinBullet1,
+                l10n.helpPinBullet2,
               ],
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             _Section(
-              title: 'Код принуждения (Duress)',
+              title: l10n.helpDuressTitle,
               bullets: [
-                'Это второй PIN. При вводе показывается «пустой профиль» (0 контактов/сообщений).',
-                'Реальные данные не удаляются — они скрыты, пока вы в duress‑режиме.',
+                l10n.helpDuressBullet1,
+                l10n.helpDuressBullet2,
               ],
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             _Section(
-              title: 'Код удаления (Panic wipe)',
+              title: l10n.helpWipeCodeTitle,
               bullets: [
-                'Это отдельный код для полного удаления данных.',
-                'После ввода кода появится подтверждение: удерживайте кнопку 2 секунды.',
-                'Сделано так, чтобы нельзя было стереть всё случайно.',
+                l10n.helpWipeCodeBullet1,
+                l10n.helpWipeCodeBullet2,
+                l10n.helpWipeCodeBullet3,
               ],
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             _Section(
-              title: 'Auto‑wipe',
+              title: l10n.helpAutoWipeTitle,
               bullets: [
-                'Опция: удалить данные после N неверных попыток введения PIN.',
-                'Включайте только если понимаете риск необратимой потери данных.',
+                l10n.helpAutoWipeBullet1,
+                l10n.helpAutoWipeBullet2,
               ],
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             _Section(
-              title: 'Жест panic wipe',
+              title: l10n.helpPanicGestureTitle,
               bullets: [
-                'Опция (по умолчанию выключена): 3 быстрых ухода приложения в фон → wipe.',
-                'Жест основан на событиях ухода приложения в фон и может срабатывать менее предсказуемо, чем код удаления.',
+                l10n.helpPanicGestureBullet1,
+                l10n.helpPanicGestureBullet2,
               ],
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             _Section(
-              title: 'Регионы и контроль трафика',
+              title: l10n.helpRegionsTitle,
               bullets: [
-                'Экран «Система» показывает режим: «Стандартный» или «Усиленная защита».',
-                'Если обнаружен регион с контролем трафика, приложение включает «усиленный» режим в системном мониторе.',
-                'Если есть проблемы со связью — откройте «Система» и проверьте статус сети/режима.',
+                l10n.helpRegionsBullet1,
+                l10n.helpRegionsBullet2,
+                l10n.helpRegionsBullet3,
               ],
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
           ],
         ),
       ),

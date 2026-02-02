@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:orpheus_project/config.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/screens/debug_logs_screen.dart';
 import 'package:orpheus_project/screens/help_screen.dart';
@@ -12,9 +13,11 @@ import 'package:orpheus_project/services/auth_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
+import 'package:orpheus_project/services/locale_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/updates_screen.dart';
+import 'package:orpheus_project/widgets/language_selector.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
@@ -46,6 +49,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadStats();
     _loadAppInfo();
+    LocaleService.instance.addListener(_onLocaleChanged);
+  }
+
+  @override
+  void dispose() {
+    LocaleService.instance.removeListener(_onLocaleChanged);
+    super.dispose();
+  }
+
+  void _onLocaleChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadStats() async {
@@ -76,7 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (_secretTapCount >= 5) {
       _secretTapCount = 0;
-      DebugLogger.info('UI', 'Debug logs screen opened via secret tap');
+      DebugLogger.info('UI', 'Открыт экран логов через секретный тап');
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => const DebugLogsScreen()),
@@ -85,6 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _exportAccount() async {
+    final l10n = L10n.of(context);
     final LocalAuthentication auth = LocalAuthentication();
     final bool canAuth =
         await auth.canCheckBiometrics || await auth.isDeviceSupported();
@@ -92,9 +107,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!canAuth) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  "Биометрия недоступна. Настройте безопасность устройства.")),
+          SnackBar(content: Text(l10n.biometryUnavailable)),
         );
       }
       return;
@@ -102,7 +115,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final bool didAuthenticate = await auth.authenticate(
-        localizedReason: 'Подтвердите личность для экспорта ключей',
+        localizedReason: l10n.confirmIdentity,
         options:
             const AuthenticationOptions(stickyAuth: true, biometricOnly: false),
       );
@@ -119,19 +132,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Ошибка аутентификации")),
+          SnackBar(content: Text(l10n.authError)),
         );
       }
     }
   }
 
   Future<void> _copyToClipboard(String text) async {
+    final l10n = L10n.of(context);
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     setState(() => _isCopied = true);
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("ID скопирован")),
+      SnackBar(content: Text(l10n.idCopied)),
     );
 
     await Future.delayed(const Duration(seconds: 2));
@@ -139,6 +153,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _showDeleteAccountDialog() async {
+    final l10n = L10n.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => const _DeleteAccountDialog(),
@@ -151,14 +166,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-          content: Text("Аккаунт удалён. Перезапустите приложение.")),
+      SnackBar(content: Text(l10n.accountDeleted)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final myKey = cryptoService.publicKeyBase64 ?? "Ошибка";
+    final l10n = L10n.of(context);
+    final myKey = cryptoService.publicKeyBase64 ?? l10n.error;
     final versionLabel = _appVersionLabel ?? AppConfig.appVersion;
 
     return Scaffold(
@@ -166,7 +181,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(
         title: GestureDetector(
           onTap: _handleSecretTap,
-          child: const Text("Профиль"),
+          child: Text(l10n.profile),
         ),
         actions: [
           Padding(
@@ -183,22 +198,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
           children: [
-            _QrCard(myKey: myKey),
+            _QrCard(myKey: myKey, l10n: l10n),
             const SizedBox(height: 12),
             _IdCard(
                 myKey: myKey,
+                l10n: l10n,
                 isCopied: _isCopied,
                 onCopy: () => _copyToClipboard(myKey)),
             const SizedBox(height: 12),
             _PrimaryActions(
               myKey: myKey,
-              onShare: () => Share.share(
-                  "Привет! Добавь меня в Orpheus.\nМой ключ:\n$myKey"),
+              l10n: l10n,
+              onShare: () => Share.share(l10n.shareMessage(myKey)),
             ),
             const SizedBox(height: 14),
-            _StatsCard(stats: _stats),
+            _StatsCard(stats: _stats, l10n: l10n),
             const SizedBox(height: 14),
             _MenuCard(
+              l10n: l10n,
               onSecurity: () => Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -220,10 +237,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onExport: _exportAccount,
               onNotifications: () =>
                   DeviceSettingsService.showSetupDialog(context),
+              onLanguageChanged: () => setState(() {}),
             ),
             const SizedBox(height: 14),
             _VersionCard(
               versionLabel: versionLabel,
+              l10n: l10n,
               registrationDate: cryptoService.registrationDate,
               onCheckUpdates: () => UpdateService.checkForUpdate(context),
             ),
@@ -231,8 +250,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             TextButton.icon(
               onPressed: _showDeleteAccountDialog,
               icon: const Icon(Icons.delete_outline, color: AppColors.danger),
-              label: const Text('Удалить аккаунт',
-                  style: TextStyle(color: AppColors.danger)),
+              label: Text(l10n.deleteAccount,
+                  style: const TextStyle(color: AppColors.danger)),
             ),
             const SizedBox(height: 20),
           ],
@@ -243,8 +262,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class _QrCard extends StatelessWidget {
-  const _QrCard({required this.myKey});
+  const _QrCard({required this.myKey, required this.l10n});
   final String myKey;
+  final L10n l10n;
 
   @override
   Widget build(BuildContext context) {
@@ -259,7 +279,7 @@ class _QrCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('QR-код', style: Theme.of(context).textTheme.labelLarge),
+          Text(l10n.qrCode, style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 12),
           Center(
             child: Container(
@@ -289,10 +309,15 @@ class _QrCard extends StatelessWidget {
 }
 
 class _IdCard extends StatelessWidget {
-  const _IdCard(
-      {required this.myKey, required this.isCopied, required this.onCopy});
+  const _IdCard({
+    required this.myKey,
+    required this.l10n,
+    required this.isCopied,
+    required this.onCopy,
+  });
 
   final String myKey;
+  final L10n l10n;
   final bool isCopied;
   final VoidCallback onCopy;
 
@@ -309,7 +334,7 @@ class _IdCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Ваш ID', style: Theme.of(context).textTheme.labelLarge),
+          Text(l10n.yourId, style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 10),
           InkWell(
             onTap: onCopy,
@@ -356,8 +381,13 @@ class _IdCard extends StatelessWidget {
 }
 
 class _PrimaryActions extends StatelessWidget {
-  const _PrimaryActions({required this.myKey, required this.onShare});
+  const _PrimaryActions({
+    required this.myKey,
+    required this.l10n,
+    required this.onShare,
+  });
   final String myKey;
+  final L10n l10n;
   final VoidCallback onShare;
 
   @override
@@ -370,7 +400,7 @@ class _PrimaryActions extends StatelessWidget {
             child: ElevatedButton.icon(
               onPressed: onShare,
               icon: const Icon(Icons.share, size: 18),
-              label: const Text('Поделиться'),
+              label: Text(l10n.share),
             ),
           ),
         ),
@@ -380,8 +410,9 @@ class _PrimaryActions extends StatelessWidget {
 }
 
 class _StatsCard extends StatelessWidget {
-  const _StatsCard({required this.stats});
+  const _StatsCard({required this.stats, required this.l10n});
   final Map<String, int> stats;
+  final L10n l10n;
 
   @override
   Widget build(BuildContext context) {
@@ -397,12 +428,12 @@ class _StatsCard extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _stat(context, Icons.people_outline, stats['contacts'] ?? 0,
-              'контактов'),
+              l10n.contactsCount(stats['contacts'] ?? 0)),
           _divider(),
           _stat(context, Icons.chat_outlined, stats['messages'] ?? 0,
-              'сообщений'),
+              l10n.messagesCount(stats['messages'] ?? 0)),
           _divider(),
-          _stat(context, Icons.send_outlined, stats['sent'] ?? 0, 'отправлено'),
+          _stat(context, Icons.send_outlined, stats['sent'] ?? 0, l10n.sentCount),
         ],
       ),
     );
@@ -444,20 +475,24 @@ class _StatsCard extends StatelessWidget {
 
 class _MenuCard extends StatelessWidget {
   const _MenuCard({
+    required this.l10n,
     required this.onSecurity,
     required this.onSupport,
     required this.onHelp,
     required this.onUpdates,
     required this.onExport,
     required this.onNotifications,
+    required this.onLanguageChanged,
   });
 
+  final L10n l10n;
   final VoidCallback onSecurity;
   final VoidCallback onSupport;
   final VoidCallback onHelp;
   final VoidCallback onUpdates;
   final VoidCallback onExport;
   final VoidCallback onNotifications;
+  final VoidCallback onLanguageChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -470,26 +505,32 @@ class _MenuCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _tile(context, Icons.security, 'Безопасность', 'PIN, duress, wipe',
+          _tile(context, Icons.security, l10n.security, l10n.securityDesc,
               onSecurity),
           _divider(),
-          _tile(context, Icons.support_agent, 'Поддержка',
-              'Написать разработчику', onSupport),
+          // Выбор языка
+          LanguageSelector(
+            compact: false,
+            onChanged: onLanguageChanged,
+          ),
           _divider(),
-          _tile(context, Icons.help_outline, 'Как пользоваться',
-              'Краткая инструкция', onHelp),
+          _tile(context, Icons.support_agent, l10n.support,
+              l10n.supportDesc, onSupport),
           _divider(),
-          _tile(context, Icons.history, 'История обновлений', null, onUpdates),
+          _tile(context, Icons.help_outline, l10n.howToUse,
+              l10n.howToUseDesc, onHelp),
           _divider(),
-          _tile(context, Icons.shield_outlined, 'Экспорт аккаунта',
-              'Показать приватный ключ', onExport,
+          _tile(context, Icons.history, l10n.updateHistory, null, onUpdates),
+          _divider(),
+          _tile(context, Icons.shield_outlined, l10n.exportAccount,
+              l10n.exportAccountDesc, onExport,
               isDanger: true),
           _divider(),
           _tile(
             context,
             Icons.notifications_none,
-            'Настройка уведомлений',
-            'Для Android (Vivo, Xiaomi и др.)',
+            l10n.notificationSettings,
+            l10n.notificationSettingsDesc,
             onNotifications,
           ),
         ],
@@ -534,17 +575,23 @@ class _MenuCard extends StatelessWidget {
 }
 
 class _VersionCard extends StatelessWidget {
-  const _VersionCard(
-      {required this.versionLabel,
-      required this.registrationDate,
-      required this.onCheckUpdates});
+  const _VersionCard({
+    required this.versionLabel,
+    required this.l10n,
+    required this.registrationDate,
+    required this.onCheckUpdates,
+  });
 
   final String versionLabel;
+  final L10n l10n;
   final DateTime? registrationDate;
   final VoidCallback onCheckUpdates;
 
   @override
   Widget build(BuildContext context) {
+    final locale = LocaleService.instance.effectiveLocale.languageCode;
+    final dateFormat = locale == 'ru' ? 'dd.MM.yyyy' : 'MMM d, yyyy';
+    
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -572,7 +619,7 @@ class _VersionCard extends StatelessWidget {
                 if (registrationDate != null) ...[
                   const SizedBox(height: 2),
                   Text(
-                    "Аккаунт создан ${DateFormat('dd.MM.yyyy').format(registrationDate!)}",
+                    l10n.accountCreated(DateFormat(dateFormat).format(registrationDate!)),
                     style: Theme.of(context)
                         .textTheme
                         .labelMedium
@@ -582,7 +629,7 @@ class _VersionCard extends StatelessWidget {
               ],
             ),
           ),
-          TextButton(onPressed: onCheckUpdates, child: const Text('Проверить')),
+          TextButton(onPressed: onCheckUpdates, child: Text(l10n.checkUpdates)),
         ],
       ),
     );
@@ -595,14 +642,15 @@ class _ExportKeyDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return AlertDialog(
-      title: const Text('Приватный ключ'),
+      title: Text(l10n.privateKey),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Никому не показывайте этот ключ. Владение им даёт полный доступ к вашему аккаунту.',
+            l10n.privateKeyWarning,
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 12),
@@ -627,15 +675,15 @@ class _ExportKeyDialog extends StatelessWidget {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Закрыть')),
+            child: Text(l10n.close)),
         TextButton(
           onPressed: () {
             Clipboard.setData(ClipboardData(text: privateKey));
             Navigator.pop(context);
             ScaffoldMessenger.of(context)
-                .showSnackBar(const SnackBar(content: Text('Ключ скопирован')));
+                .showSnackBar(SnackBar(content: Text(l10n.keyCopied)));
           },
-          child: const Text('Копировать'),
+          child: Text(l10n.copy),
         ),
       ],
     );
@@ -654,20 +702,20 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return AlertDialog(
-      title: const Text('Удалить аккаунт?'),
+      title: Text(l10n.deleteAccountTitle),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-              'Это действие удалит ключи, контакты и историю сообщений без возможности восстановления.'),
+          Text(l10n.deleteAccountWarning),
           const SizedBox(height: 12),
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,
             value: _confirmed,
             onChanged: (v) => setState(() => _confirmed = v ?? false),
-            title: const Text('Я понимаю, что это необратимо'),
+            title: Text(l10n.deleteAccountConfirm),
             controlAffinity: ListTileControlAffinity.leading,
           ),
         ],
@@ -675,11 +723,11 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Отмена')),
+            child: Text(l10n.cancel)),
         TextButton(
           onPressed: _confirmed ? () => Navigator.pop(context, true) : null,
           style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-          child: const Text('Удалить'),
+          child: Text(l10n.delete),
         ),
       ],
     );

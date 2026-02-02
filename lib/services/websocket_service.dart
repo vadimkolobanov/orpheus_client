@@ -71,7 +71,7 @@ class WebSocketService {
   void _forceReconnect({String? reason}) {
     if (_currentPublicKey == null || _isDisconnectingIntentional) return;
     
-    DebugLogger.info('WS', '🔄 Принудительный реконнект: ${reason ?? "unknown"}');
+    DebugLogger.info('WS', '🔄 Принудительный реконнект: ${reason ?? "неизвестно"}');
     
     // Отменяем текущий таймер реконнекта
     _reconnectTimer?.cancel();
@@ -297,6 +297,12 @@ class WebSocketService {
 
   // --- ОТПРАВКА СИГНАЛОВ С HTTP FALLBACK ---
   void sendSignalingMessage(String recipientPublicKey, String type, Map<String, dynamic> data) {
+    final callId = data['call_id'] ?? data['callId'] ?? data['id'];
+    final signalContext = <String, dynamic>{
+      'call_id': callId,
+      'peer_pubkey': recipientPublicKey,
+      'signal_type': type,
+    };
     final msg = {
       "recipient_pubkey": recipientPublicKey,
       "type": type,
@@ -315,18 +321,22 @@ class WebSocketService {
     
     if (isImportant) {
       print("📤📞 WS SEND [$type] → ${recipientPublicKey.substring(0, 8)}... | Status: $statusStr | Channel: ${_channel != null ? 'OK' : 'NULL'}");
-      DebugLogger.info('SIGNAL', '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}... | Status: $statusStr | Ch: ${_channel != null ? 'OK' : 'NULL'}');
+      DebugLogger.info(
+        'SIGNAL',
+        '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}... | Status: $statusStr | Ch: ${_channel != null ? 'OK' : 'NULL'}',
+        context: signalContext,
+      );
       
       // Если WebSocket недоступен - сразу HTTP
       if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
         print("⚠️ WS недоступен для [$type] - используем HTTP fallback");
-        DebugLogger.warn('SIGNAL', 'WS недоступен для [$type] - используем HTTP fallback');
+        DebugLogger.warn('SIGNAL', 'WS недоступен для [$type] - используем HTTP fallback', context: signalContext);
         _sendSignalViaHttpWithData(recipientPublicKey, type, data);
         return;
       }
     } else {
       print("📤 WS SEND $type → ${recipientPublicKey.substring(0, 8)}... Size: ${data.toString().length}");
-      DebugLogger.info('SIGNAL', '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}...');
+      DebugLogger.info('SIGNAL', '📤 OUT: $type → ${recipientPublicKey.substring(0, 8)}...', context: signalContext);
     }
     
     _sendMessage(msg);
@@ -346,7 +356,13 @@ class WebSocketService {
   /// HTTP fallback для гарантированной доставки сигналов с данными (ice-restart, etc)
   /// Отправляет на ВСЕ хосты параллельно для гарантии доставки
   Future<void> _sendSignalViaHttpWithData(String recipientPublicKey, String signalType, Map<String, dynamic> data) async {
-    DebugLogger.info('HTTP', 'Отправка $signalType через HTTP fallback на все хосты...');
+    final callId = data['call_id'] ?? data['callId'] ?? data['id'];
+    final signalContext = <String, dynamic>{
+      'call_id': callId,
+      'peer_pubkey': recipientPublicKey,
+      'signal_type': signalType,
+    };
+    DebugLogger.info('HTTP', 'Отправка $signalType через HTTP fallback на все хосты...', context: signalContext);
     
     final body = json.encode({
       'sender_pubkey': _currentPublicKey,
@@ -369,14 +385,14 @@ class WebSocketService {
       
       if (successCount > 0) {
         print("✅ HTTP: [$signalType] доставлен на $successCount/${futures.length} хостов");
-        DebugLogger.success('HTTP', '[$signalType] доставлен на $successCount/${futures.length} хостов');
+        DebugLogger.success('HTTP', '[$signalType] доставлен на $successCount/${futures.length} хостов', context: signalContext);
       } else {
         print("❌ HTTP: [$signalType] не удалось доставить ни на один хост");
-        DebugLogger.error('HTTP', '[$signalType] не удалось доставить ни на один хост');
+        DebugLogger.error('HTTP', '[$signalType] не удалось доставить ни на один хост', context: signalContext);
       }
     } catch (e) {
       print("❌ HTTP: [$signalType] исключение: $e");
-      DebugLogger.error('HTTP', '[$signalType] исключение: $e');
+      DebugLogger.error('HTTP', '[$signalType] исключение: $e', context: signalContext);
     }
   }
 
@@ -407,6 +423,13 @@ class WebSocketService {
 
   void _sendMessage(Map<String, dynamic> map) {
     final type = map['type'] as String?;
+    final data = map['data'];
+    final callId = data is Map ? data['call_id'] ?? data['callId'] ?? data['id'] : null;
+    final signalContext = <String, dynamic>{
+      'call_id': callId,
+      'peer_pubkey': map['recipient_pubkey'],
+      'signal_type': type,
+    };
     // Все call-related сигналы считаются важными
     final isImportant = type == 'hang-up' || type == 'call-rejected' ||
                         type == 'call-offer' || type == 'call-answer' ||
@@ -416,6 +439,7 @@ class WebSocketService {
     if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
       if (isImportant) {
         print("⚠️ WS ERROR: Не удалось отправить [$type] - нет соединения! Status: ${_statusController.value}");
+        DebugLogger.error('SIGNAL', 'WS ERROR: нет соединения для [$type]', context: signalContext);
       } else {
         print("WS ERROR: Нет соединения для отправки сообщения.");
       }
@@ -426,6 +450,7 @@ class WebSocketService {
     
     if (isImportant) {
       print("✅ WS: [$type] успешно отправлен в канал");
+      DebugLogger.success('SIGNAL', '✅ WS: [$type] отправлен', context: signalContext);
     }
   }
 }

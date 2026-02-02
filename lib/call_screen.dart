@@ -7,6 +7,7 @@ import 'package:orpheus_project/services/background_call_service.dart';
 import 'package:orpheus_project/services/call_native_ui_service.dart';
 import 'package:orpheus_project/services/call_state_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:orpheus_project/services/call_id_storage.dart';
 import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/sound_service.dart';
@@ -23,6 +24,7 @@ enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed, Rec
 class CallScreen extends StatefulWidget {
   final String contactPublicKey;
   final Map<String, dynamic>? offer;
+  final String? callId;
   /// Если true — звонок принимается автоматически (ответ через CallKit)
   final bool autoAnswer;
 
@@ -30,6 +32,7 @@ class CallScreen extends StatefulWidget {
     super.key,
     required this.contactPublicKey,
     this.offer,
+    this.callId,
     this.autoAnswer = false,
   });
 
@@ -54,6 +57,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   String _displayName = "Аноним";
   String _debugStatus = "Init";
   String _durationText = "00:00";
+  late final String _callId;
 
   // Состояние сети
   NetworkState _networkState = NetworkState.online;
@@ -105,6 +109,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
     _displayName = widget.contactPublicKey.substring(0, 8);
     _resolveContactName();
+
+    // Единый call_id для корреляции логов
+    _callId = widget.callId
+        ?? (widget.offer != null
+            ? CallIdStorage.extractCallId(widget.offer!, widget.contactPublicKey)
+            : CallIdStorage.generateFallbackCallId(
+                cryptoService.publicKeyBase64 ?? widget.contactPublicKey,
+              ));
 
     // Устанавливаем начальное состояние звонка
     // autoAnswer=true означает что звонок уже принят через CallKit - сразу в режим Connecting
@@ -250,11 +262,19 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         offer: offer,
         onAnswerCreated: (answer) {
           _addLog("📤 ICE restart answer");
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-restart-answer', answer);
+          websocketService.sendSignalingMessage(
+            widget.contactPublicKey,
+            'ice-restart-answer',
+            _attachCallId(answer),
+          );
         },
         onCandidateCreated: (cand) {
           _addLog("📤 ICE restart candidate");
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
+          websocketService.sendSignalingMessage(
+            widget.contactPublicKey,
+            'ice-candidate',
+            _attachCallId(cand),
+          );
         },
       );
       
@@ -314,10 +334,18 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           _addLog("📤 ICE restart offer (ice-restart signal)");
           // ВАЖНО: используем 'ice-restart' а не 'call-offer' чтобы получатель
           // знал что это renegotiation, а не новый звонок
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-restart', offer);
+          websocketService.sendSignalingMessage(
+            widget.contactPublicKey,
+            'ice-restart',
+            _attachCallId(offer),
+          );
         },
         onCandidateCreated: (cand) {
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
+          websocketService.sendSignalingMessage(
+            widget.contactPublicKey,
+            'ice-candidate',
+            _attachCallId(cand),
+          );
         },
       );
 
@@ -450,11 +478,19 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       await _webrtcService.initiateCall(
         onOfferCreated: (offer) {
           _addLog("📤 call-offer");
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-offer', offer);
+          websocketService.sendSignalingMessage(
+            widget.contactPublicKey,
+            'call-offer',
+            _attachCallId(offer),
+          );
         },
         onCandidateCreated: (cand) {
           _addLog("📤 ice-candidate");
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
+          websocketService.sendSignalingMessage(
+            widget.contactPublicKey,
+            'ice-candidate',
+            _attachCallId(cand),
+          );
         },
       );
     } catch (e) {
@@ -472,11 +508,19 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         offer: widget.offer!,
         onAnswerCreated: (ans) {
           _addLog("📤 call-answer");
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-answer', ans);
+          websocketService.sendSignalingMessage(
+            widget.contactPublicKey,
+            'call-answer',
+            _attachCallId(ans),
+          );
         },
         onCandidateCreated: (cand) {
           _addLog("📤 ice-candidate");
-          websocketService.sendSignalingMessage(widget.contactPublicKey, 'ice-candidate', cand);
+          websocketService.sendSignalingMessage(
+            widget.contactPublicKey,
+            'ice-candidate',
+            _attachCallId(cand),
+          );
         },
       );
     } catch (e) {
@@ -496,7 +540,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
     // СНАЧАЛА отправляем hang-up сигнал
     print("📞 Отправка $signal к ${widget.contactPublicKey.substring(0, 8)}...");
-    websocketService.sendSignalingMessage(widget.contactPublicKey, signal, {});
+    websocketService.sendSignalingMessage(
+      widget.contactPublicKey,
+      signal,
+      _attachCallId({}),
+    );
 
     // Небольшая задержка чтобы WebSocket успел отправить сообщение
     await Future.delayed(const Duration(milliseconds: 100));
@@ -627,7 +675,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       await DatabaseService.instance.addMessage(callMessage, widget.contactPublicKey);
       messageUpdateController.add(widget.contactPublicKey);
     } catch (e) {
-      print("Error saving local msg: $e");
+      DebugLogger.error('CALL', 'Ошибка сохранения локального сообщения: $e',
+          context: _callContext());
     }
   }
 
@@ -636,7 +685,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       final payload = await cryptoService.encrypt(widget.contactPublicKey, messageText);
       websocketService.sendChatMessage(widget.contactPublicKey, payload);
     } catch (e) {
-      print("Error sending remote msg: $e");
+      DebugLogger.error('CALL', 'Ошибка отправки сообщения собеседнику: $e',
+          context: _callContext());
     }
   }
 
@@ -652,6 +702,29 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         }
       });
     }
+    DebugLogger.info('CALL', message, context: _callContext());
+  }
+
+  Map<String, dynamic> _callContext({Map<String, dynamic>? extra}) {
+    final ctx = <String, dynamic>{
+      'call_id': _callId,
+      'peer_pubkey': widget.contactPublicKey,
+      'state': _callState.name,
+      'ws_status': _wsStatus.name,
+      'network': _networkState.name,
+    };
+    if (extra != null && extra.isNotEmpty) {
+      ctx.addAll(extra);
+    }
+    return ctx;
+  }
+
+  Map<String, dynamic> _attachCallId(Map<String, dynamic> data) {
+    if (data.containsKey('call_id')) return data;
+    return {
+      ...data,
+      'call_id': _callId,
+    };
   }
 
   String _getStatusText() {
@@ -737,7 +810,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       print("📞 Dispose: отправка hang-up (state=$finalState)");
       
       if (finalState == CallState.Connected || finalState == CallState.Dialing) {
-        websocketService.sendSignalingMessage(widget.contactPublicKey, 'hang-up', {});
+        websocketService.sendSignalingMessage(
+          widget.contactPublicKey,
+          'hang-up',
+          _attachCallId({}),
+        );
 
         if (finalState == CallState.Connected) {
           _saveCallStatusMessageLocally("Исходящий звонок", true);
@@ -747,7 +824,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           _sendCallStatusMessageToContact("Пропущен звонок");
         }
       } else if (finalState == CallState.Incoming) {
-        websocketService.sendSignalingMessage(widget.contactPublicKey, 'call-rejected', {});
+        websocketService.sendSignalingMessage(
+          widget.contactPublicKey,
+          'call-rejected',
+          _attachCallId({}),
+        );
         _saveCallStatusMessageLocally("Пропущен звонок", false);
       }
     }

@@ -6,8 +6,10 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/models/security_config.dart';
 import 'package:orpheus_project/services/auth_service.dart';
+import 'package:orpheus_project/services/locale_service.dart';
 
 class LockScreen extends StatefulWidget {
   final VoidCallback onUnlocked;
@@ -113,13 +115,16 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   Future<void> _tryBiometricAuth() async {
     if (!_auth.config.isBiometricEnabled) return;
     
+    final locale = LocaleService.instance.effectiveLocale.languageCode;
+    final isRu = locale == 'ru';
+    
     try {
       final canAuth = await _localAuth.canCheckBiometrics || 
                       await _localAuth.isDeviceSupported();
       if (!canAuth) return;
       
       final didAuth = await _localAuth.authenticate(
-        localizedReason: 'Разблокируйте Orpheus',
+        localizedReason: isRu ? 'Разблокируйте Orpheus' : 'Unlock Orpheus',
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,
@@ -132,7 +137,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
         widget.onUnlocked();
       }
     } catch (e) {
-      print("Biometric auth error: $e");
+      // Ошибка биометрии
     }
   }
 
@@ -234,6 +239,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   }
 
   void _showError() {
+    final l10n = L10n.of(context);
     HapticFeedback.heavyImpact();
     
     setState(() {
@@ -242,9 +248,9 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
       
       final remaining = _auth.attemptsUntilWipe;
       if (remaining != null && remaining <= 3) {
-        _errorMessage = 'Осталось попыток: $remaining';
+        _errorMessage = l10n.attemptsLeft(remaining);
       } else {
-        _errorMessage = 'Неверный PIN-код';
+        _errorMessage = l10n.wrongPin;
       }
     });
     
@@ -265,16 +271,21 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   }
 
   String _formatDuration(Duration duration) {
+    final locale = LocaleService.instance.effectiveLocale.languageCode;
+    final isRu = locale == 'ru';
     final minutes = duration.inMinutes;
     final seconds = duration.inSeconds % 60;
     if (minutes > 0) {
       return '$minutes:${seconds.toString().padLeft(2, '0')}';
     }
-    return '$seconds сек';
+    return isRu ? '$seconds сек' : '${seconds}s';
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    final locale = LocaleService.instance.effectiveLocale.languageCode;
+    final isRu = locale == 'ru';
     final isLockedOut = _auth.config.isLockedOut;
     final timeUntilUnlock = _auth.timeUntilUnlock;
     
@@ -306,7 +317,9 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
                   
                   // Заголовок
                   Text(
-                    isLockedOut ? 'ЗАБЛОКИРОВАНО' : 'ВВЕДИТЕ PIN',
+                    isLockedOut 
+                        ? (isRu ? 'ЗАБЛОКИРОВАНО' : 'LOCKED') 
+                        : (isRu ? 'ВВЕДИТЕ PIN' : 'ENTER PIN'),
                     style: TextStyle(
                       color: isLockedOut ? Colors.red.shade400 : Colors.grey,
                       fontSize: 12,
@@ -320,7 +333,9 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
                   // Сообщение об ошибке или таймер
                   if (isLockedOut && timeUntilUnlock != null)
                     Text(
-                      'Повтор через ${_formatDuration(timeUntilUnlock)}',
+                      isRu 
+                          ? 'Повтор через ${_formatDuration(timeUntilUnlock)}'
+                          : 'Retry in ${_formatDuration(timeUntilUnlock)}',
                       style: TextStyle(
                         color: Colors.red.shade400,
                         fontSize: 14,
@@ -349,7 +364,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
                   
                   // Биометрия
                   if (_auth.config.isBiometricEnabled && !isLockedOut)
-                    _buildBiometricButton(),
+                    _buildBiometricButton(l10n),
                   
                   const SizedBox(height: 32),
                 ],
@@ -544,7 +559,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildBiometricButton() {
+  Widget _buildBiometricButton(L10n l10n) {
     return TextButton.icon(
       onPressed: _tryBiometricAuth,
       icon: Icon(
@@ -552,7 +567,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
         color: Colors.grey.shade500,
       ),
       label: Text(
-        'Использовать биометрию',
+        l10n.useBiometry,
         style: TextStyle(
           color: Colors.grey.shade500,
           fontSize: 13,
@@ -619,6 +634,10 @@ class _HoldToWipeDialogState extends State<_HoldToWipeDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    final locale = LocaleService.instance.effectiveLocale.languageCode;
+    final isRu = locale == 'ru';
+    
     return AlertDialog(
       backgroundColor: const Color(0xFF120505),
       shape: RoundedRectangleBorder(
@@ -636,10 +655,10 @@ class _HoldToWipeDialogState extends State<_HoldToWipeDialog> {
             child: const Icon(Icons.delete_forever, color: Colors.red, size: 20),
           ),
           const SizedBox(width: 10),
-          const Expanded(
+          Expanded(
             child: Text(
-              'УДАЛИТЬ ВСЕ ДАННЫЕ?',
-              style: TextStyle(color: Colors.red, fontSize: 14, letterSpacing: 1),
+              isRu ? 'УДАЛИТЬ ВСЕ ДАННЫЕ?' : 'DELETE ALL DATA?',
+              style: const TextStyle(color: Colors.red, fontSize: 14, letterSpacing: 1),
             ),
           ),
         ],
@@ -648,9 +667,9 @@ class _HoldToWipeDialogState extends State<_HoldToWipeDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Это действие необратимо: будут удалены ключи, контакты и история сообщений.',
-            style: TextStyle(color: Colors.white70, height: 1.35),
+          Text(
+            l10n.deleteAccountWarning,
+            style: const TextStyle(color: Colors.white70, height: 1.35),
           ),
           const SizedBox(height: 14),
           ClipRRect(
@@ -664,7 +683,9 @@ class _HoldToWipeDialogState extends State<_HoldToWipeDialog> {
           ),
           const SizedBox(height: 10),
           Text(
-            _isHolding ? 'Удерживайте...' : 'Удерживайте кнопку ниже 2 секунды',
+            _isHolding 
+                ? (isRu ? 'Удерживайте...' : 'Hold...')
+                : (isRu ? 'Удерживайте кнопку ниже 2 секунды' : 'Hold the button below for 2 seconds'),
             style: TextStyle(color: Colors.red.shade200, fontSize: 12),
           ),
         ],
@@ -676,7 +697,7 @@ class _HoldToWipeDialogState extends State<_HoldToWipeDialog> {
             Expanded(
               child: TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Отмена', style: TextStyle(color: Colors.grey)),
+                child: Text(l10n.cancel, style: const TextStyle(color: Colors.grey)),
               ),
             ),
             const SizedBox(width: 10),
@@ -690,10 +711,10 @@ class _HoldToWipeDialogState extends State<_HoldToWipeDialog> {
                     color: Colors.red.shade700,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
-                      'УДЕРЖИВАТЬ',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1),
+                      isRu ? 'УДЕРЖИВАТЬ' : 'HOLD',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1),
                     ),
                   ),
                 ),
@@ -734,4 +755,3 @@ class _LockParticlesPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
-

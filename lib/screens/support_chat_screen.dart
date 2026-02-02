@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart' show websocketService;
 import 'package:orpheus_project/models/support_message.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
@@ -113,9 +114,10 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
       setState(() => _isSending = false);
       
       if (!success) {
+        final l10n = L10n.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Не удалось отправить сообщение'),
+          SnackBar(
+            content: Text(l10n.messageNotSent),
             backgroundColor: Colors.red,
           ),
         );
@@ -128,6 +130,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
   Future<void> _sendLogs() async {
     if (_isSendingLogs) return;
     
+    final l10n = L10n.of(context);
     final logsCount = DebugLogger.logs.length;
     
     // Подтверждение
@@ -135,20 +138,19 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text('Отправить логи?', style: TextStyle(color: Colors.white)),
+        title: Text(l10n.sendLogsQuestion, style: const TextStyle(color: Colors.white)),
         content: Text(
-          'Будет отправлено $logsCount записей.\n\n'
-          'Логи помогут разработчику разобраться в проблеме.',
+          l10n.logsWillBeSent(logsCount),
           style: const TextStyle(color: Colors.grey),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Отмена'),
+            child: Text(l10n.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Отправить', style: TextStyle(color: Colors.green)),
+            child: Text(l10n.send, style: const TextStyle(color: Colors.green)),
           ),
         ],
       ),
@@ -165,7 +167,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Логи отправлены' : 'Ошибка отправки логов'),
+          content: Text(success ? l10n.logsSent : l10n.logsError),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
@@ -174,20 +176,21 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Column(
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'ЧАТ С РАЗРАБОТЧИКОМ',
-              style: TextStyle(fontSize: 16, letterSpacing: 1),
+              l10n.developerChat,
+              style: const TextStyle(fontSize: 16, letterSpacing: 1),
             ),
             Text(
-              'Ответим в ближайшее время',
-              style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.normal),
+              l10n.willReply,
+              style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.normal),
             ),
           ],
         ),
@@ -195,7 +198,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadMessages,
-            tooltip: 'Обновить',
+            tooltip: l10n.refreshTooltip,
           ),
         ],
       ),
@@ -203,17 +206,17 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
         children: [
           // Сообщения
           Expanded(
-            child: _buildMessagesList(),
+            child: _buildMessagesList(l10n),
           ),
           
           // Панель ввода
-          _buildInputPanel(),
+          _buildInputPanel(l10n),
         ],
       ),
     );
   }
 
-  Widget _buildMessagesList() {
+  Widget _buildMessagesList(L10n l10n) {
     if (_service.isLoading && _service.messages.isEmpty) {
       return const Center(
         child: CircularProgressIndicator(color: Colors.grey),
@@ -234,7 +237,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
             const SizedBox(height: 16),
             TextButton(
               onPressed: _loadMessages,
-              child: const Text('Повторить'),
+              child: Text(l10n.retry),
             ),
           ],
         ),
@@ -261,19 +264,19 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              const Text(
-                'Напишите нам!',
-                style: TextStyle(
+              Text(
+                l10n.writeToUs,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Вопросы, проблемы, предложения — мы читаем всё и отвечаем.',
+              Text(
+                l10n.questionsProblemsIdeas,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
+                style: const TextStyle(color: Colors.grey),
               ),
             ],
           ),
@@ -287,12 +290,12 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
       itemCount: _service.messages.length,
       itemBuilder: (context, index) {
         final message = _service.messages[index];
-        return _buildMessageBubble(message);
+        return _buildMessageBubble(message, l10n);
       },
     );
   }
 
-  Widget _buildMessageBubble(SupportMessage message) {
+  Widget _buildMessageBubble(SupportMessage message, L10n l10n) {
     final isAdmin = message.direction == MessageDirection.admin;
     final isSystem = message.isSystemMessage;
     
@@ -333,9 +336,9 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (isAdmin) ...[
-                  const Text(
-                    'Разработчик',
-                    style: TextStyle(
+                  Text(
+                    l10n.developer,
+                    style: const TextStyle(
                       color: Colors.grey,
                       fontSize: 10,
                     ),
@@ -343,7 +346,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
                   const SizedBox(width: 8),
                 ],
                 Text(
-                  _formatTime(message.createdAt),
+                  _formatTime(message.createdAt, l10n),
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.5),
                     fontSize: 10,
@@ -357,7 +360,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
     );
   }
 
-  Widget _buildInputPanel() {
+  Widget _buildInputPanel(L10n l10n) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: const BoxDecoration(
@@ -382,7 +385,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
                     )
                   : const Icon(Icons.attach_file, color: Colors.grey),
               onPressed: _isSendingLogs ? null : _sendLogs,
-              tooltip: 'Отправить логи',
+              tooltip: l10n.sendLogs,
             ),
             
             // Поле ввода
@@ -391,7 +394,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
                 controller: _messageController,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  hintText: 'Сообщение...',
+                  hintText: l10n.messagePlaceholder,
                   hintStyle: const TextStyle(color: Colors.grey),
                   filled: true,
                   fillColor: const Color(0xFF252525),
@@ -433,16 +436,16 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
     );
   }
 
-  String _formatTime(DateTime dateTime) {
+  String _formatTime(DateTime dateTime, L10n l10n) {
     final now = DateTime.now();
     final diff = now.difference(dateTime);
     
-    if (diff.inMinutes < 1) return 'сейчас';
-    if (diff.inHours < 1) return '${diff.inMinutes} мин';
+    if (diff.inMinutes < 1) return l10n.now;
+    if (diff.inHours < 1) return l10n.minAgo(diff.inMinutes);
     if (diff.inDays < 1) {
       return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
     }
-    if (diff.inDays < 7) return '${diff.inDays} дн';
+    if (diff.inDays < 7) return l10n.daysAgo(diff.inDays);
     
     return '${dateTime.day}.${dateTime.month}.${dateTime.year}';
   }

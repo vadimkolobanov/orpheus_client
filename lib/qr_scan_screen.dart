@@ -3,6 +3,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 
 class QrScanScreen extends StatefulWidget {
   /// Для widget-тестов: позволяет подменить виджет камеры (mobile_scanner),
@@ -90,6 +91,7 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     final size = MediaQuery.of(context).size;
     final scanAreaSize = size.width * 0.75;
     
@@ -222,7 +224,7 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
                     children: [
                       _buildBackButton(),
                       const Spacer(),
-                      _buildTitle(),
+                      _buildTitle(l10n),
                       const Spacer(),
                       const SizedBox(width: 48), // Балансировка
                     ],
@@ -232,7 +234,7 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
                 const Spacer(),
                 
                 // Подсказка внизу
-                _buildHintSection(),
+                _buildHintSection(l10n),
                 
                 const SizedBox(height: 60),
               ],
@@ -344,7 +346,7 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
     );
   }
 
-  Widget _buildTitle() {
+  Widget _buildTitle(L10n l10n) {
     return AnimatedBuilder(
       animation: _pulseController,
       builder: (context, child) {
@@ -375,9 +377,9 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
                 ),
               ),
               const SizedBox(width: 10),
-              const Text(
-                "СКАНИРОВАНИЕ QR",
-                style: TextStyle(
+              Text(
+                l10n.scanQrTitle.toUpperCase(),
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1,
@@ -391,7 +393,7 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
     );
   }
 
-  Widget _buildHintSection() {
+  Widget _buildHintSection(L10n l10n) {
     return AnimatedBuilder(
       animation: _pulseController,
       builder: (context, child) {
@@ -424,9 +426,9 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      "Наведите камеру на QR-код",
-                      style: TextStyle(
+                    Text(
+                      l10n.pointCameraAtQr,
+                      style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w500,
                         fontSize: 14,
@@ -434,7 +436,7 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      "Публичный ключ контакта будет распознан автоматически",
+                      l10n.publicKeyAutoRecognized,
                       style: TextStyle(
                         color: Colors.grey.shade500,
                         fontSize: 12,

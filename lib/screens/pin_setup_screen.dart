@@ -4,6 +4,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/models/security_config.dart';
 import 'package:orpheus_project/services/auth_service.dart';
 
@@ -55,55 +56,55 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
 
-  String get _title {
+  String _getTitle(L10n l10n) {
     switch (widget.mode) {
       case PinSetupMode.setPin:
-        return _step == 0 ? 'НОВЫЙ PIN' : 'ПОДТВЕРДИТЕ PIN';
+        return _step == 0 ? l10n.newPin : l10n.confirmPinTitle;
       case PinSetupMode.changePin:
-        if (_step == 0) return 'ТЕКУЩИЙ PIN';
-        if (_step == 1) return 'НОВЫЙ PIN';
-        return 'ПОДТВЕРДИТЕ PIN';
+        if (_step == 0) return l10n.currentPin;
+        if (_step == 1) return l10n.newPin;
+        return l10n.confirmPinTitle;
       case PinSetupMode.disablePin:
-        return 'ВВЕДИТЕ PIN';
+        return l10n.enterPin;
       case PinSetupMode.setDuress:
-        if (_step == 0) return 'ОСНОВНОЙ PIN';
-        if (_step == 1) return 'КОД ПРИНУЖДЕНИЯ';
-        return 'ПОДТВЕРДИТЕ КОД';
+        if (_step == 0) return l10n.mainPin;
+        if (_step == 1) return l10n.duressCodeTitle;
+        return l10n.confirmCodeTitle;
       case PinSetupMode.disableDuress:
-        return 'ОСНОВНОЙ PIN';
+        return l10n.mainPin;
       case PinSetupMode.setWipeCode:
-        if (_step == 0) return 'ОСНОВНОЙ PIN';
-        if (_step == 1) return 'КОД УДАЛЕНИЯ';
-        return 'ПОДТВЕРДИТЕ КОД';
+        if (_step == 0) return l10n.mainPin;
+        if (_step == 1) return l10n.wipeCodeTitle;
+        return l10n.confirmCodeTitle;
       case PinSetupMode.disableWipeCode:
-        return 'ОСНОВНОЙ PIN';
+        return l10n.mainPin;
     }
   }
 
-  String get _subtitle {
+  String _getSubtitle(L10n l10n) {
     switch (widget.mode) {
       case PinSetupMode.setPin:
         return _step == 0 
-            ? 'Введите $_pinLength-значный PIN-код'
-            : 'Повторите PIN-код для подтверждения';
+            ? l10n.enterDigitPin(_pinLength)
+            : l10n.repeatPinToConfirm;
       case PinSetupMode.changePin:
-        if (_step == 0) return 'Введите текущий PIN-код';
-        if (_step == 1) return 'Введите новый $_pinLength-значный PIN-код';
-        return 'Повторите новый PIN-код';
+        if (_step == 0) return l10n.enterCurrentPin;
+        if (_step == 1) return l10n.enterNewDigitPin(_pinLength);
+        return l10n.repeatNewPin;
       case PinSetupMode.disablePin:
-        return 'Для отключения введите текущий PIN';
+        return l10n.enterPinToDisable;
       case PinSetupMode.setDuress:
-        if (_step == 0) return 'Подтвердите основной PIN';
-        if (_step == 1) return 'Введите код принуждения (отличный от основного)';
-        return 'Повторите код принуждения';
+        if (_step == 0) return l10n.confirmMainPin;
+        if (_step == 1) return l10n.enterDuressCode;
+        return l10n.repeatDuressCode;
       case PinSetupMode.disableDuress:
-        return 'Введите основной PIN для отключения';
+        return l10n.enterMainPinToDisable;
       case PinSetupMode.setWipeCode:
-        if (_step == 0) return 'Подтвердите основной PIN';
-        if (_step == 1) return 'Введите код удаления (отличный от основного PIN)';
-        return 'Повторите код удаления';
+        if (_step == 0) return l10n.confirmMainPin;
+        if (_step == 1) return l10n.enterWipeCode;
+        return l10n.repeatWipeCode;
       case PinSetupMode.disableWipeCode:
-        return 'Введите основной PIN для отключения кода удаления';
+        return l10n.enterMainPinToDisableWipe;
     }
   }
 
@@ -210,6 +211,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   }
 
   Future<void> _processSetPin() async {
+    final l10n = L10n.of(context);
     if (_step == 0) {
       // Первый ввод — сохраняем и переходим к подтверждению
       _confirmedPin = _enteredPin;
@@ -222,9 +224,9 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
       if (_enteredPin == _confirmedPin) {
         await _auth.setPin(_enteredPin, pinLength: _pinLength);
         HapticFeedback.mediumImpact();
-        _showSuccessAndPop('PIN-код установлен');
+        _showSuccessAndPop(l10n.pinCodeSetSuccess);
       } else {
-        _showError('PIN-коды не совпадают');
+        _showError(l10n.pinsDoNotMatch);
         _confirmedPin = '';
         _step = 0;
       }
@@ -232,6 +234,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   }
 
   Future<void> _processChangePin() async {
+    final l10n = L10n.of(context);
     if (_step == 0) {
       // Проверяем текущий PIN
       final result = _auth.verifyPin(_enteredPin);
@@ -242,7 +245,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
           _step = 1;
         });
       } else {
-        _showError('Неверный PIN-код');
+        _showError(l10n.invalidPinCode);
       }
     } else if (_step == 1) {
       // Новый PIN
@@ -257,12 +260,12 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
         final success = await _auth.changePin(_currentPin, _enteredPin);
         if (success) {
           HapticFeedback.mediumImpact();
-          _showSuccessAndPop('PIN-код изменён');
+          _showSuccessAndPop(l10n.pinCodeChangedSuccess);
         } else {
-          _showError('Ошибка изменения PIN');
+          _showError(l10n.pinChangeError);
         }
       } else {
-        _showError('PIN-коды не совпадают');
+        _showError(l10n.pinsDoNotMatch);
         _confirmedPin = '';
         _step = 1;
       }
@@ -270,16 +273,18 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   }
 
   Future<void> _processDisablePin() async {
+    final l10n = L10n.of(context);
     final success = await _auth.disablePin(_enteredPin);
     if (success) {
       HapticFeedback.mediumImpact();
-      _showSuccessAndPop('PIN-код отключён');
+      _showSuccessAndPop(l10n.pinCodeDisabledSuccess);
     } else {
-      _showError('Неверный PIN-код');
+      _showError(l10n.invalidPinCode);
     }
   }
 
   Future<void> _processSetDuress() async {
+    final l10n = L10n.of(context);
     if (_step == 0) {
       // Проверяем основной PIN
       final result = _auth.verifyPin(_enteredPin);
@@ -290,12 +295,12 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
           _step = 1;
         });
       } else {
-        _showError('Неверный PIN-код');
+        _showError(l10n.invalidPinCode);
       }
     } else if (_step == 1) {
       // Проверяем, что duress != основной PIN
       if (_enteredPin == _currentPin) {
-        _showError('Код должен отличаться от основного PIN');
+        _showError(l10n.codeMustBeDifferent);
         return;
       }
       _confirmedPin = _enteredPin;
@@ -309,12 +314,12 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
         final success = await _auth.setDuressCode(_currentPin, _enteredPin);
         if (success) {
           HapticFeedback.mediumImpact();
-          _showSuccessAndPop('Код принуждения установлен');
+          _showSuccessAndPop(l10n.duressCodeSetSuccess);
         } else {
-          _showError('Ошибка установки кода');
+          _showError(l10n.codeSetupError);
         }
       } else {
-        _showError('Коды не совпадают');
+        _showError(l10n.codesDoNotMatch);
         _confirmedPin = '';
         _step = 1;
       }
@@ -322,16 +327,18 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   }
 
   Future<void> _processDisableDuress() async {
+    final l10n = L10n.of(context);
     final success = await _auth.disableDuressCode(_enteredPin);
     if (success) {
       HapticFeedback.mediumImpact();
-      _showSuccessAndPop('Код принуждения отключён');
+      _showSuccessAndPop(l10n.duressCodeDisabledSuccess);
     } else {
-      _showError('Неверный PIN-код');
+      _showError(l10n.invalidPinCode);
     }
   }
 
   Future<void> _processSetWipeCode() async {
+    final l10n = L10n.of(context);
     if (_step == 0) {
       final result = _auth.verifyPin(_enteredPin);
       if (result == PinVerifyResult.success) {
@@ -341,11 +348,11 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
           _step = 1;
         });
       } else {
-        _showError('Неверный PIN-код');
+        _showError(l10n.invalidPinCode);
       }
     } else if (_step == 1) {
       if (_enteredPin == _currentPin) {
-        _showError('Код должен отличаться от основного PIN');
+        _showError(l10n.codeMustBeDifferent);
         return;
       }
       _confirmedPin = _enteredPin;
@@ -358,12 +365,12 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
         final success = await _auth.setWipeCode(_currentPin, _enteredPin);
         if (success) {
           HapticFeedback.mediumImpact();
-          _showSuccessAndPop('Код удаления установлен');
+          _showSuccessAndPop(l10n.wipeCodeSetSuccess);
         } else {
-          _showError('Ошибка установки кода');
+          _showError(l10n.codeSetupError);
         }
       } else {
-        _showError('Коды не совпадают');
+        _showError(l10n.codesDoNotMatch);
         _confirmedPin = '';
         _step = 1;
       }
@@ -371,12 +378,13 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   }
 
   Future<void> _processDisableWipeCode() async {
+    final l10n = L10n.of(context);
     final success = await _auth.disableWipeCode(_enteredPin);
     if (success) {
       HapticFeedback.mediumImpact();
-      _showSuccessAndPop('Код удаления отключён');
+      _showSuccessAndPop(l10n.wipeCodeDisabledSuccess);
     } else {
-      _showError('Неверный PIN-код');
+      _showError(l10n.invalidPinCode);
     }
   }
 
@@ -411,9 +419,10 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
     // Если нужно показать экран выбора длины PIN
     if (_showLengthSelection) {
-      return _buildLengthSelectionScreen();
+      return _buildLengthSelectionScreen(l10n);
     }
     
     return Scaffold(
@@ -425,7 +434,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
           onPressed: () => Navigator.pop(context, false),
         ),
         title: Text(
-          _getAppBarTitle(),
+          _getAppBarTitle(l10n),
           style: const TextStyle(fontSize: 16, letterSpacing: 1),
         ),
         centerTitle: true,
@@ -442,7 +451,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
             
             // Заголовок
             Text(
-              _title,
+              _getTitle(l10n),
               style: const TextStyle(
                 color: Colors.grey,
                 fontSize: 12,
@@ -457,7 +466,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 40),
               child: Text(
-                _subtitle,
+                _getSubtitle(l10n),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.grey.shade600,
@@ -495,22 +504,22 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
     );
   }
 
-  String _getAppBarTitle() {
+  String _getAppBarTitle(L10n l10n) {
     switch (widget.mode) {
       case PinSetupMode.setPin:
-        return 'Установка PIN';
+        return l10n.pinSetupTitle;
       case PinSetupMode.changePin:
-        return 'Изменение PIN';
+        return l10n.changePinTitle;
       case PinSetupMode.disablePin:
-        return 'Отключение PIN';
+        return l10n.disablePinTitle;
       case PinSetupMode.setDuress:
-        return 'Код принуждения';
+        return l10n.duressCodeSetupTitle;
       case PinSetupMode.disableDuress:
-        return 'Отключение кода';
+        return l10n.disableCodeTitle;
       case PinSetupMode.setWipeCode:
-        return 'Код удаления';
+        return l10n.wipeCodeSetupTitle;
       case PinSetupMode.disableWipeCode:
-        return 'Отключение кода удаления';
+        return l10n.disableWipeCodeTitle;
     }
   }
 
@@ -681,7 +690,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   }
 
   /// Экран выбора длины PIN-кода (только для setPin)
-  Widget _buildLengthSelectionScreen() {
+  Widget _buildLengthSelectionScreen(L10n l10n) {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -690,9 +699,9 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context, false),
         ),
-        title: const Text(
-          'Установка PIN',
-          style: TextStyle(fontSize: 16, letterSpacing: 1),
+        title: Text(
+          l10n.pinSetupTitle,
+          style: const TextStyle(fontSize: 16, letterSpacing: 1),
         ),
         centerTitle: true,
       ),
@@ -724,9 +733,9 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
               
               const SizedBox(height: 32),
               
-              const Text(
-                'ВЫБЕРИТЕ ДЛИНУ PIN',
-                style: TextStyle(
+              Text(
+                l10n.selectPinLength,
+                style: const TextStyle(
                   color: Colors.grey,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -737,7 +746,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
               const SizedBox(height: 12),
               
               Text(
-                'Короткий PIN быстрее вводить,\nдлинный — безопаснее',
+                l10n.shorterPinFaster,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.grey.shade600,
@@ -751,9 +760,10 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
               // Кнопка 6 цифр (рекомендуемая — первой)
               _buildLengthOption(
                 length: 6,
-                title: '6 цифр',
-                subtitle: 'Повышенная безопасность',
+                title: l10n.sixDigits,
+                subtitle: l10n.enhancedSecurity,
                 icon: Icons.shield_outlined,
+                l10n: l10n,
               ),
               
               const SizedBox(height: 16),
@@ -761,15 +771,16 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
               // Кнопка 4 цифры
               _buildLengthOption(
                 length: 4,
-                title: '4 цифры',
-                subtitle: 'Быстрый ввод',
+                title: l10n.fourDigits,
+                subtitle: l10n.fastEntry,
                 icon: Icons.flash_on,
+                l10n: l10n,
               ),
               
               const SizedBox(height: 24),
               
               // Предупреждение о безопасности
-              _buildSecurityNote(),
+              _buildSecurityNote(l10n),
               
               const Spacer(flex: 2),
             ],
@@ -780,7 +791,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
   }
 
   /// Информационная заметка о безопасности
-  Widget _buildSecurityNote() {
+  Widget _buildSecurityNote(L10n l10n) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 4),
       padding: const EdgeInsets.all(16),
@@ -813,7 +824,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Уровень защиты',
+                  l10n.securityLevel,
                   style: TextStyle(
                     color: Colors.amber.shade600,
                     fontWeight: FontWeight.w600,
@@ -822,7 +833,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '4-значный PIN: ~10 000 комбинаций\n6-значный PIN: ~1 000 000 комбинаций',
+                  '${l10n.fourDigitCombinations}\n${l10n.sixDigitCombinations}',
                   style: TextStyle(
                     color: Colors.grey.shade500,
                     fontSize: 12,
@@ -843,6 +854,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
     required String title,
     required String subtitle,
     required IconData icon,
+    required L10n l10n,
   }) {
     final isRecommended = length == 6;
     final color = isRecommended ? const Color(0xFF6AD394) : const Color(0xFFB0BEC5);
@@ -906,7 +918,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> with SingleTickerProvid
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              'рекомендуется',
+                              l10n.recommended,
                               style: TextStyle(
                                 color: color,
                                 fontSize: 10,
