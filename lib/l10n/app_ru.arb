@@ -35,6 +35,9 @@
   "exportAccountDesc": "Показать приватный ключ",
   "notificationSettings": "Настройка уведомлений",
   "notificationSettingsDesc": "Для Android (Vivo, Xiaomi и др.)",
+  "orpheusNotificationsDesc": "Оповещения о сообщениях в общем чате Орфея.",
+  "orpheusOfficialNotifications": "Официальные ответы Орфея",
+  "systemNotificationSettings": "Системные настройки уведомлений",
   "language": "Язык",
   "languageDesc": "English, Русский",
   
@@ -68,6 +71,7 @@
   "startConversation": "Начните диалог",
   "messagesEncrypted": "Сообщения шифруются и сохраняются локально.",
   "messagePlaceholder": "Сообщение…",
+  "writeAsOrpheus": "Писать от лица Орфея",
   
   "today": "Сегодня",
   "yesterday": "Вчера",
@@ -82,6 +86,11 @@
   "chats": "Чаты",
   "contacts": "Контакты",
   "settings": "Настройки",
+  "orpheusRoomName": "Орфей",
+  "orpheusOfficialBadge": "OFFICIAL",
+  "orpheusOfficialName": "Орфей",
+  "orpheusRoomWarning": "Публичный чат. Не публикуйте личные данные.",
+  "orpheusRoomUnavailable": "Общий чат Орфея пока недоступен. Проверьте сервер или попробуйте позже.",
   
   "noChats": "Нет чатов",
   "noChatsDesc": "Добавьте контакт, чтобы начать общение",

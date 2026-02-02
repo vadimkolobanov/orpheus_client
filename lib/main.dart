@@ -195,6 +195,28 @@ Future<void> _initializeApp() async {
   _initCallKit();
   DebugLogger.success('APP', 'CallKit инициализирован');
 
+  // Обработка клика по уведомлению о звонке (fallback)
+  NotificationService.onIncomingCallFromNotification = (data) {
+    final callerKey = data['caller_key'] ?? data['callerKey'];
+    if (callerKey == null) return;
+    Map<String, dynamic>? offerData;
+    final offerJson = data['offer_data'] ?? data['offerData'];
+    if (offerJson is String && offerJson.isNotEmpty) {
+      try {
+        offerData = json.decode(offerJson) as Map<String, dynamic>;
+      } catch (_) {}
+    } else if (offerJson is Map<String, dynamic>) {
+      offerData = offerJson;
+    }
+    final callId = data['call_id'] ?? data['callId'] ?? data['id'];
+    _navigateToCallScreen(
+      callerKey.toString(),
+      offerData,
+      autoAnswer: true,
+      callId: callId?.toString(),
+    );
+  };
+
   DebugLogger.success('APP', '✅ Приложение запущено');
 }
 
@@ -489,6 +511,16 @@ Future<void> _handleCallKitDecline(Map<String, dynamic>? body) async {
     '❌ Звонок отклонён: callId=$callId, callerKey=$callerKey',
     context: {'call_id': callId, 'peer_pubkey': callerKey},
   );
+
+  // Если CallKit отклонён системой в фоне сразу после показа — не сбрасываем звонок.
+  if (!isAppInForeground && callId != null) {
+    final ageMs = await CallIdStorage.getActiveCallAgeMs();
+    if (ageMs != null && ageMs < 2000) {
+      DebugLogger.warn('CALLKIT', '⚠️ Системный decline в фоне, пропускаю call-rejected',
+          context: {'call_id': callId, 'peer_pubkey': callerKey, 'age_ms': ageMs});
+      return;
+    }
+  }
   
   // Скрываем нативный UI СРАЗУ
   await FlutterCallkitIncoming.endAllCalls();
@@ -813,8 +845,8 @@ class _IncomingDatabaseAdapter implements IncomingMessageDatabase {
 
 class _IncomingNotificationsAdapter implements IncomingMessageNotifications {
   @override
-  Future<void> showCallNotification({required String callerName}) {
-    return NotificationService.showCallNotification(callerName: callerName);
+  Future<void> showCallNotification({required String callerName, String? payload}) {
+    return NotificationService.showCallNotification(callerName: callerName, payload: payload);
   }
 
   @override
@@ -996,15 +1028,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       final hasActiveCall = CallStateService.instance.isCallActive.value;
       final hasPendingCall = _pendingCall != null && _pendingCall!.isValid;
       
-      // КРИТИЧНО: Отключаем WebSocket в background чтобы избежать race condition с FCM!
-      // Когда app свёрнут, звонки приходят ТОЛЬКО через FCM → нет дублей → стабильная работа.
-      // НО: не отключаем во время активного звонка или pending call!
-      if (!hasActiveCall && !hasPendingCall) {
-        DebugLogger.info('LIFECYCLE', '📴 Отключаю WebSocket в background (FCM-only mode)');
-        websocketService.disconnect();
-      } else {
-        DebugLogger.info('LIFECYCLE', '📞 WebSocket остаётся подключённым (активный/pending звонок)');
-      }
+      // ВАЖНО: сохраняем WebSocket в фоне, чтобы звонки доходили даже без CallKit/FCM.
+      // Дедуп выполняется через call_id (CallIdStorage) в обработчике входящих сигналов.
+      DebugLogger.info('LIFECYCLE', '📶 WebSocket остаётся подключённым в background');
       
       // Блокируем приложение при сворачивании (если PIN включен),
       // но НЕ во время активного звонка и НЕ если есть pending call.

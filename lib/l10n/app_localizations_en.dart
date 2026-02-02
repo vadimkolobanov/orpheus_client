@@ -123,6 +123,16 @@ class L10nEn extends L10n {
   String get notificationSettingsDesc => 'For Android (Vivo, Xiaomi, etc.)';
 
   @override
+  String get orpheusNotificationsDesc =>
+      'Notifications for messages in Orpheus public chat.';
+
+  @override
+  String get orpheusOfficialNotifications => 'Official Orpheus replies';
+
+  @override
+  String get systemNotificationSettings => 'System notification settings';
+
+  @override
   String get language => 'Language';
 
   @override
@@ -210,6 +220,9 @@ class L10nEn extends L10n {
   String get messagePlaceholder => 'Message...';
 
   @override
+  String get writeAsOrpheus => 'Write as Orpheus';
+
+  @override
   String get today => 'Today';
 
   @override
@@ -241,6 +254,22 @@ class L10nEn extends L10n {
 
   @override
   String get settings => 'Settings';
+
+  @override
+  String get orpheusRoomName => 'Orpheus';
+
+  @override
+  String get orpheusOfficialBadge => 'OFFICIAL';
+
+  @override
+  String get orpheusOfficialName => 'Orpheus';
+
+  @override
+  String get orpheusRoomWarning => 'Public chat. Do not share personal data.';
+
+  @override
+  String get orpheusRoomUnavailable =>
+      'Orpheus public chat is not available yet. Check the server or try again later.';
 
   @override
   String get noChats => 'No chats yet';

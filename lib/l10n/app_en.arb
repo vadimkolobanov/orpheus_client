@@ -108,6 +108,15 @@
   
   "notificationSettingsDesc": "For Android (Vivo, Xiaomi, etc.)",
   "@notificationSettingsDesc": {"description": "Notifications menu description"},
+
+  "orpheusNotificationsDesc": "Notifications for messages in Orpheus public chat.",
+  "@orpheusNotificationsDesc": {"description": "Orpheus notifications description"},
+
+  "orpheusOfficialNotifications": "Official Orpheus replies",
+  "@orpheusOfficialNotifications": {"description": "Toggle for official Orpheus notifications"},
+
+  "systemNotificationSettings": "System notification settings",
+  "@systemNotificationSettings": {"description": "Open system notification settings"},
   
   "language": "Language",
   "@language": {"description": "Language menu item"},
@@ -194,6 +203,9 @@
   
   "messagePlaceholder": "Message...",
   "@messagePlaceholder": {"description": "Message input placeholder"},
+
+  "writeAsOrpheus": "Write as Orpheus",
+  "@writeAsOrpheus": {"description": "Toggle to send messages as Orpheus"},
   
   "today": "Today",
   "@today": {"description": "Today date label"},
@@ -227,6 +239,21 @@
   
   "settings": "Settings",
   "@settings": {"description": "Settings tab"},
+
+  "orpheusRoomName": "Orpheus",
+  "@orpheusRoomName": {"description": "Orpheus public room name"},
+
+  "orpheusOfficialBadge": "OFFICIAL",
+  "@orpheusOfficialBadge": {"description": "Official badge label in Orpheus room"},
+
+  "orpheusOfficialName": "Orpheus",
+  "@orpheusOfficialName": {"description": "Displayed name for Orpheus official messages"},
+
+  "orpheusRoomWarning": "Public chat. Do not share personal data.",
+  "@orpheusRoomWarning": {"description": "Warning banner for Orpheus public room"},
+
+  "orpheusRoomUnavailable": "Orpheus public chat is not available yet. Check the server or try again later.",
+  "@orpheusRoomUnavailable": {"description": "Orpheus room unavailable message"},
   
   "noChats": "No chats yet",
   "@noChats": {"description": "Empty chats title"},

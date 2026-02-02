@@ -14,9 +14,11 @@ import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
 import 'package:orpheus_project/services/locale_service.dart';
+import 'package:orpheus_project/services/notification_prefs_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/updates_screen.dart';
+import 'package:orpheus_project/widgets/app_dialog.dart';
 import 'package:orpheus_project/widgets/language_selector.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -56,6 +58,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     LocaleService.instance.removeListener(_onLocaleChanged);
     super.dispose();
+  }
+
+  Future<void> _showNotificationSettingsDialog() async {
+    final l10n = L10n.of(context);
+    var orpheusEnabled =
+        await NotificationPrefsService.isOrpheusOfficialEnabled();
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AppDialog(
+          icon: Icons.notifications_none,
+          title: l10n.notificationSettings,
+          contentWidget: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l10n.orpheusNotificationsDesc,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: orpheusEnabled,
+                title: Text(l10n.orpheusOfficialNotifications),
+                onChanged: (value) async {
+                  await NotificationPrefsService.setOrpheusOfficialEnabled(
+                      value);
+                  setState(() => orpheusEnabled = value);
+                },
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    DeviceSettingsService.showSetupDialog(context);
+                  },
+                  child: Text(l10n.systemNotificationSettings),
+                ),
+              ),
+            ],
+          ),
+          primaryLabel: l10n.close,
+        ),
+      ),
+    );
   }
 
   void _onLocaleChanged() {
@@ -235,8 +288,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 MaterialPageRoute(builder: (context) => const UpdatesScreen()),
               ),
               onExport: _exportAccount,
-              onNotifications: () =>
-                  DeviceSettingsService.showSetupDialog(context),
+              onNotifications: _showNotificationSettingsDialog,
               onLanguageChanged: () => setState(() {}),
             ),
             const SizedBox(height: 14),

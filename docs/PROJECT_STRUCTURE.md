@@ -53,6 +53,8 @@
 - **`lib/services/incoming_message_handler.dart`**: единая точка обработки входящих WS сообщений (чат/звонки); TTL/дедуп для call-offer; порядок “сначала в CallScreen, потом hide notification”.
 - **`lib/services/network_monitor_service.dart`**: монитор сети (события network switch/reconnect/disconnect), триггеры реконнекта.
 - **`lib/services/presence_service.dart`**: online‑статусы; subscribe/unsubscribe на pubkeys; resubscribe при реконнекте WS.
+ - **`lib/services/telemetry_service.dart`**: сбор полной телеметрии клиента и отправка батчей на сервер.
+ - **`lib/services/locale_service.dart`**: выбор/сохранение локали и поддержка мультиязычности.
 
 #### Звонки и медиа
 - **`lib/services/webrtc_service.dart`**: WebRTC peer connection, offer/answer, очередь ICE до remote SDP, ICE restart.
@@ -86,6 +88,7 @@
 - **`lib/widgets/badge_widget.dart`**: UI бейджа.
 - **`lib/widgets/call/background_painters.dart`**: painter’ы фона экрана звонка.
 - **`lib/widgets/call/control_panel.dart`**: панель управления звонком (кнопки/состояния/коллбеки).
+ - **`lib/widgets/language_selector.dart`**: выбор языка интерфейса.
 
 ## 3) `android/` — нативные компоненты (что за что отвечает)
 - **`android/app/src/main/kotlin/.../MainActivity.kt`**: основной Android activity.

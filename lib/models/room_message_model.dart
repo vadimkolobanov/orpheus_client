@@ -3,6 +3,7 @@ class RoomMessage {
   final String text;
   final String? senderKey;
   final String? senderName;
+  final String? authorType;
   final DateTime createdAt;
   final bool isSystem;
   final String? systemCode;
@@ -13,6 +14,7 @@ class RoomMessage {
     required this.createdAt,
     this.senderKey,
     this.senderName,
+    this.authorType,
     this.isSystem = false,
     this.systemCode,
   });
@@ -33,6 +35,7 @@ class RoomMessage {
       text: text,
       senderKey: json['sender_pubkey'] as String?,
       senderName: json['sender_name'] as String?,
+      authorType: json['author_type'] as String? ?? json['sender_type'] as String?,
       createdAt: createdAt,
       isSystem: json['is_system'] == true || json['type'] == 'system',
       systemCode: json['system_code'] as String?,

@@ -17,7 +17,7 @@ abstract interface class IncomingMessageDatabase {
 }
 
 abstract interface class IncomingMessageNotifications {
-  Future<void> showCallNotification({required String callerName});
+  Future<void> showCallNotification({required String callerName, String? payload});
   Future<void> hideCallNotification();
   Future<void> showMessageNotification({required String senderName});
 }
@@ -129,6 +129,17 @@ class IncomingMessageHandler {
       // Единый call_id для корреляции
       final callId = CallIdStorage.extractCallId(data, senderKey);
 
+      // Дедуп по call_id (особенно важно при WS+FCM в фоне)
+      final canShow = await CallIdStorage.trySetActiveCall(
+        callId: callId,
+        source: CallIdStorage.sourceWebSocket,
+      );
+      if (!canShow) {
+        DebugLogger.info('CALL', '📞 call_id уже активен, пропускаю WS звонок',
+            context: {'call_id': callId, 'peer_pubkey': senderKey});
+        return;
+      }
+
       // Сохраняем данные звонка в буфер (fallback для CallKit)
       _callBuffer.setLastIncomingCall(senderKey, data);
       
@@ -141,6 +152,17 @@ class IncomingMessageHandler {
       } else {
         DebugLogger.info('CALL', '📞 Background: показываю CallKit UI',
             context: {'call_id': callId, 'peer_pubkey': senderKey});
+        // Доп. фолбек: локальное уведомление, если CallKit не покажется
+        await _notif.showCallNotification(
+          callerName: displayName,
+          payload: json.encode({
+            'type': 'incoming_call',
+            'caller_key': senderKey,
+            'caller_name': displayName,
+            'offer_data': json.encode(data),
+            'call_id': callId,
+          }),
+        );
         await _showCallKitIncoming(
           callerName: displayName,
           callerKey: senderKey,

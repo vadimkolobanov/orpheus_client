@@ -8,6 +8,7 @@ import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart' show cryptoService, websocketService;
 import 'package:orpheus_project/models/room_message_model.dart';
 import 'package:orpheus_project/models/room_model.dart';
+import 'package:orpheus_project/services/badge_service.dart';
 import 'package:orpheus_project/services/rooms_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_dialog.dart';
@@ -23,6 +24,9 @@ class RoomChatScreen extends StatefulWidget {
 }
 
 class _RoomChatScreenState extends State<RoomChatScreen> {
+  static const String _orpheusRoomId = 'orpheus';
+  static const String _orpheusRoomError = 'orpheus_unavailable';
+
   final RoomsService _service = RoomsService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -33,11 +37,14 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
   bool _isLoading = true;
   bool _isSending = false;
   String? _error;
+  bool _canSendAsOrpheus = false;
+  bool _sendAsOrpheus = false;
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
+    _loadMyBadge();
     _wsSub = websocketService.stream.listen(_handleWsMessage);
   }
 
@@ -47,6 +54,20 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  bool get _isOrpheusRoom => widget.room.id == _orpheusRoomId;
+
+  Future<void> _loadMyBadge() async {
+    final myKey = cryptoService.publicKeyBase64;
+    if (myKey == null) return;
+    final badge = await BadgeService.instance.getBadge(myKey);
+    if (!mounted) return;
+    final canSend = badge?.typeString == 'core' || badge?.typeString == 'owner';
+    setState(() {
+      _canSendAsOrpheus = canSend;
+      if (!canSend) _sendAsOrpheus = false;
+    });
   }
 
   Future<void> _loadMessages() async {
@@ -68,7 +89,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _error = 'error';
+        _error = _isOrpheusRoom ? _orpheusRoomError : 'error';
       });
     }
   }
@@ -122,7 +143,11 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
     _messageController.clear();
 
     try {
-      final response = await _service.sendMessage(widget.room.id, text);
+      final response = await _service.sendMessage(
+        widget.room.id,
+        text,
+        asOrpheus: _isOrpheusRoom && _canSendAsOrpheus && _sendAsOrpheus,
+      );
       if (!mounted) return;
 
       final warningCode = response['moderation_warning_code'] as String?;
@@ -143,7 +168,10 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
             id: DateTime.now().millisecondsSinceEpoch.toString(),
             text: text,
             senderKey: cryptoService.publicKeyBase64,
-            senderName: null,
+            senderName: _isOrpheusRoom && _sendAsOrpheus
+                ? l10n.orpheusOfficialName
+                : null,
+            authorType: _isOrpheusRoom && _sendAsOrpheus ? 'orpheus' : null,
             createdAt: DateTime.now(),
           ),
         );
@@ -277,7 +305,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
               }
             },
             itemBuilder: (context) => [
-              if (widget.room.isOwner)
+              if (widget.room.isOwner && !_isOrpheusRoom)
                 PopupMenuItem(
                   value: 'rotate',
                   child: Text(l10n.rotateInvite),
@@ -286,17 +314,22 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
                 value: 'panic',
                 child: Text(l10n.panicClear),
               ),
-              PopupMenuItem(
-                value: 'leave',
-                child: Text(l10n.leaveRoom),
-              ),
+              if (!_isOrpheusRoom)
+                PopupMenuItem(
+                  value: 'leave',
+                  child: Text(l10n.leaveRoom),
+                ),
             ],
           ),
         ],
       ),
       body: Column(
         children: [
-          _WarningBanner(text: l10n.roomWarningUnprotected),
+          _WarningBanner(
+            text: _isOrpheusRoom
+                ? l10n.orpheusRoomWarning
+                : l10n.roomWarningUnprotected,
+          ),
           Expanded(child: _buildMessagesList(l10n)),
           _buildInputBar(l10n),
         ],
@@ -310,6 +343,34 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
     }
 
     if (_error != null && _messages.isEmpty) {
+      if (_error == _orpheusRoomError) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off,
+                    color: AppColors.textTertiary, size: 36),
+                const SizedBox(height: 12),
+                Text(
+                  l10n.orpheusRoomUnavailable,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: _loadMessages,
+                  child: Text(l10n.retry),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
       return Center(
         child: Text(
           l10n.connectionError,
@@ -354,42 +415,70 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
         border: Border(top: BorderSide(color: AppColors.outline)),
       ),
       child: SafeArea(
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: TextField(
-                controller: _messageController,
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: l10n.messagePlaceholder,
-                  filled: true,
-                  fillColor: AppColors.bg,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+            if (_isOrpheusRoom && _canSendAsOrpheus) ...[
+              Row(
+                children: [
+                  const Icon(Icons.verified, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      l10n.writeAsOrpheus,
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelMedium
+                          ?.copyWith(color: AppColors.textSecondary),
+                    ),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
+                  Switch(
+                    value: _sendAsOrpheus,
+                    onChanged: (value) =>
+                        setState(() => _sendAsOrpheus = value),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    style: const TextStyle(color: AppColors.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: l10n.messagePlaceholder,
+                      filled: true,
+                      fillColor: AppColors.bg,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                    ),
+                    maxLines: 3,
+                    minLines: 1,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
-                maxLines: 3,
-                minLines: 1,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _sendMessage(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: _isSending
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.send, color: AppColors.primary),
-              onPressed: _isSending ? null : _sendMessage,
-              tooltip: l10n.send,
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: _isSending
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send, color: AppColors.primary),
+                  onPressed: _isSending ? null : _sendMessage,
+                  tooltip: l10n.send,
+                ),
+              ],
             ),
           ],
         ),
@@ -439,14 +528,19 @@ class _RoomMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final myKey = cryptoService.publicKeyBase64;
-    final isMine =
-        !message.isSystem && message.senderKey != null && message.senderKey == myKey;
+    final isOfficial = message.authorType == 'orpheus';
+    final isMine = !message.isSystem &&
+        !isOfficial &&
+        message.senderKey != null &&
+        message.senderKey == myKey;
 
-    final senderLabel = message.senderName ??
-        (message.senderKey?.substring(0, 8) ?? '—');
+    final l10n = L10n.of(context);
+    final senderLabel = isOfficial
+        ? l10n.orpheusOfficialName
+        : (message.senderName ??
+            (message.senderKey?.substring(0, 8) ?? '—'));
 
     if (message.isSystem) {
-      final l10n = L10n.of(context);
       final systemText = _mapSystemMessage(message, l10n);
       return Center(
         child: Container(
@@ -475,7 +569,11 @@ class _RoomMessageBubble extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: isMine ? AppColors.actionDark : AppColors.surface,
+          color: isMine
+              ? AppColors.actionDark
+              : isOfficial
+                  ? AppColors.primary.withOpacity(0.12)
+                  : AppColors.surface,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -488,12 +586,22 @@ class _RoomMessageBubble extends StatelessWidget {
               isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             if (!isMine) ...[
-              Text(
-                senderLabel,
-                style: Theme.of(context)
-                    .textTheme
-                    .labelSmall
-                    ?.copyWith(color: AppColors.textSecondary),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isOfficial) ...[
+                    const Icon(Icons.verified,
+                        size: 14, color: AppColors.primary),
+                    const SizedBox(width: 6),
+                  ],
+                  Text(
+                    senderLabel,
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: AppColors.textSecondary),
+                  ),
+                ],
               ),
               const SizedBox(height: 4),
             ],

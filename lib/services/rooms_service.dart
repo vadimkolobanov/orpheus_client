@@ -102,14 +102,21 @@ class RoomsService {
         .toList();
   }
 
-  Future<Map<String, dynamic>> sendMessage(String roomId, String text) async {
+  Future<Map<String, dynamic>> sendMessage(
+    String roomId,
+    String text, {
+    bool asOrpheus = false,
+  }) async {
     if (_pubkey == null) throw Exception('Keys not initialized');
     final url = AppConfig.httpUrl('/api/rooms/$roomId/message');
     final response = await _httpClient
         .post(
           Uri.parse(url),
           headers: _headers,
-          body: json.encode({'text': text}),
+          body: json.encode({
+            'text': text,
+            if (asOrpheus) 'author_type': 'orpheus',
+          }),
         )
         .timeout(const Duration(seconds: 10));
 

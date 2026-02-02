@@ -283,6 +283,24 @@ abstract class L10n {
   /// **'For Android (Vivo, Xiaomi, etc.)'**
   String get notificationSettingsDesc;
 
+  /// Orpheus notifications description
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications for messages in Orpheus public chat.'**
+  String get orpheusNotificationsDesc;
+
+  /// Toggle for official Orpheus notifications
+  ///
+  /// In en, this message translates to:
+  /// **'Official Orpheus replies'**
+  String get orpheusOfficialNotifications;
+
+  /// Open system notification settings
+  ///
+  /// In en, this message translates to:
+  /// **'System notification settings'**
+  String get systemNotificationSettings;
+
   /// Language menu item
   ///
   /// In en, this message translates to:
@@ -445,6 +463,12 @@ abstract class L10n {
   /// **'Message...'**
   String get messagePlaceholder;
 
+  /// Toggle to send messages as Orpheus
+  ///
+  /// In en, this message translates to:
+  /// **'Write as Orpheus'**
+  String get writeAsOrpheus;
+
   /// Today date label
   ///
   /// In en, this message translates to:
@@ -510,6 +534,36 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'Settings'**
   String get settings;
+
+  /// Orpheus public room name
+  ///
+  /// In en, this message translates to:
+  /// **'Orpheus'**
+  String get orpheusRoomName;
+
+  /// Official badge label in Orpheus room
+  ///
+  /// In en, this message translates to:
+  /// **'OFFICIAL'**
+  String get orpheusOfficialBadge;
+
+  /// Displayed name for Orpheus official messages
+  ///
+  /// In en, this message translates to:
+  /// **'Orpheus'**
+  String get orpheusOfficialName;
+
+  /// Warning banner for Orpheus public room
+  ///
+  /// In en, this message translates to:
+  /// **'Public chat. Do not share personal data.'**
+  String get orpheusRoomWarning;
+
+  /// Orpheus room unavailable message
+  ///
+  /// In en, this message translates to:
+  /// **'Orpheus public chat is not available yet. Check the server or try again later.'**
+  String get orpheusRoomUnavailable;
 
   /// Empty chats title
   ///

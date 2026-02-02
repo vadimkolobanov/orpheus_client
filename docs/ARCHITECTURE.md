@@ -39,6 +39,33 @@
 6. `NetworkMonitorService.init()` (события сети)
 7. `WebSocketService.connect(pubkey)` (если ключи есть)
 8. Подписка на WS‑стрим и обработка через `IncomingMessageHandler`
+9. `TelemetryService.init()` (полные логи в БД в режиме разработки)
+
+## Телеметрия (режим разработки, временно)
+Цель: видеть **полный цикл жизни клиента** и события сервера в БД, включая звонки, WS/HTTP, FCM background.
+
+### Клиент
+- Источник событий: `DebugLogger` + перехват `debugPrint` и `FlutterError`.
+- Сервис: `lib/services/telemetry_service.dart`
+- Транспорт: HTTP батчи на `/api/logs/batch`
+- Контекст событий:
+  - `pubkey`, `peer_pubkey`, `call_id` (если есть)
+  - `app_version`, `device_info`, `os`
+  - `network`, `app_state`
+- Фоновый FCM handler также отправляет базовую телеметрию (с `recipient_pubkey` из push data).
+
+### Сервер (репозиторий `D:\Programs\orpheus`)
+- Таблица: `telemetry_logs`
+- Логируются:
+  - все HTTP запросы/ответы (middleware),
+  - все WS сообщения (raw payload),
+  - Redis‑routing события (если включён Redis bridge).
+- TTL на очистку: `TELEMETRY_RETENTION_DAYS` (по умолчанию 14)
+- Ограничение размера деталей: `TELEMETRY_MAX_DETAILS_SIZE` (по умолчанию 100000)
+
+### Анализ
+- По клиенту: `WHERE pubkey = '...'`
+- По звонку: `WHERE call_id = '...'`
 
 ## Потоки данных (как работает функционал)
 

@@ -18,6 +18,8 @@ class RoomsScreen extends StatefulWidget {
 }
 
 class _RoomsScreenState extends State<RoomsScreen> {
+  static const String _orpheusRoomId = 'orpheus';
+
   final RoomsService _service = RoomsService();
   late Future<List<Room>> _roomsFuture;
 
@@ -183,7 +185,8 @@ class _RoomsScreenState extends State<RoomsScreen> {
             );
           }
 
-          final rooms = snapshot.data ?? const <Room>[];
+          final rawRooms = snapshot.data ?? const <Room>[];
+          final rooms = _ensureOrpheusRoom(rawRooms, l10n);
           if (rooms.isEmpty) {
             return EmptyState(
               title: l10n.noRooms,
@@ -203,6 +206,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
               final room = rooms[index];
               return _RoomRow(
                 room: room,
+                isOrpheus: room.id == _orpheusRoomId,
                 onTap: () async {
                   await Navigator.push(
                     context,
@@ -217,13 +221,34 @@ class _RoomsScreenState extends State<RoomsScreen> {
       ),
     );
   }
+
+  List<Room> _ensureOrpheusRoom(List<Room> rooms, L10n l10n) {
+    final hasOrpheus = rooms.any((room) => room.id == _orpheusRoomId);
+    if (hasOrpheus) {
+      return rooms;
+    }
+
+    return [
+      Room(
+        id: _orpheusRoomId,
+        name: l10n.orpheusRoomName,
+        membersCount: 0,
+      ),
+      ...rooms,
+    ];
+  }
 }
 
 class _RoomRow extends StatelessWidget {
-  const _RoomRow({required this.room, required this.onTap});
+  const _RoomRow({
+    required this.room,
+    required this.onTap,
+    required this.isOrpheus,
+  });
 
   final Room room;
   final VoidCallback onTap;
+  final bool isOrpheus;
 
   @override
   Widget build(BuildContext context) {
@@ -242,10 +267,25 @@ class _RoomRow extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.12),
+                  color: isOrpheus
+                      ? AppColors.primary.withOpacity(0.18)
+                      : AppColors.primary.withOpacity(0.12),
                   borderRadius: AppRadii.sm,
                 ),
-                child: const Icon(Icons.forum_outlined, color: AppColors.primary),
+                child: isOrpheus
+                    ? Center(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.asset(
+                            'assets/images/logo.png',
+                            width: 26,
+                            height: 26,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      )
+                    : const Icon(Icons.forum_outlined,
+                        color: AppColors.primary),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -262,6 +302,26 @@ class _RoomRow extends StatelessWidget {
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
                         ),
+                        if (isOrpheus) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                  color: AppColors.primary.withOpacity(0.35)),
+                            ),
+                            child: Text(
+                              L10n.of(context).orpheusOfficialBadge,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(color: AppColors.primary),
+                            ),
+                          ),
+                        ],
                         if (room.isOwner) ...[
                           const SizedBox(width: 6),
                           const Icon(Icons.shield, size: 16, color: AppColors.warning),

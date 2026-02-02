@@ -9,10 +9,12 @@ import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:orpheus_project/services/notification_prefs_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 import 'package:orpheus_project/config.dart';
+import 'package:orpheus_project/services/call_id_storage.dart';
 
 /// Обработчик фоновых FCM сообщений (top-level функция)
 /// Вызывается когда приложение убито или в фоне
@@ -38,7 +40,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   
   // === НОВОЕ СООБЩЕНИЕ ===
   // Показываем локальное уведомление
-  if (type == 'new_message' || type == 'chat') {
+  if (type == 'new_message' ||
+      type == 'chat' ||
+      type == 'room-message' ||
+      type == 'room_message') {
     // Только если нет notification payload (data-only message)
     if (message.notification == null) {
       await NotificationService._handleBackgroundMessage(data);
@@ -153,6 +158,12 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
     // Используем call_id от сервера если есть, иначе генерируем
     // КРИТИЧНО: сервер должен передавать уникальный call_id для каждого звонка!
     final callId = _extractOrGenerateCallId(data, callerKey.toString());
+
+    final canShow = await CallIdStorage.tryShowCallKitForFcm(callId: callId);
+    if (!canShow) {
+      print("📞 CALLKIT FCM: callId=$callId уже активен, пропускаю показ");
+      return;
+    }
     
     // Проверяем, нет ли уже активного звонка
     // ВАЖНО: FCM и WebSocket могут генерировать РАЗНЫЕ callId для одного звонка!
@@ -247,6 +258,40 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
     print("📞 CALLKIT: UI звонка показан");
   } catch (e) {
     print("📞 CALLKIT ERROR: $e");
+    await _showFallbackLocalCallNotification(data);
+  }
+}
+
+Future<void> _showFallbackLocalCallNotification(Map<String, dynamic> data) async {
+  try {
+    final callerKey = data['caller_key'] ?? data['sender_pubkey'] ?? '';
+    final callerName = data['caller_name'] ?? data['sender_name'] ?? callerKey.toString().substring(0, 8);
+    final plugin = FlutterLocalNotificationsPlugin();
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: androidSettings);
+    await plugin.initialize(initSettings);
+
+    const androidDetails = AndroidNotificationDetails(
+      'incoming_calls_fallback',
+      'Входящие звонки (fallback)',
+      channelDescription: 'Fallback-уведомления, если CallKit не показался',
+      importance: Importance.max,
+      priority: Priority.max,
+      fullScreenIntent: true,
+      category: AndroidNotificationCategory.call,
+      ticker: 'incoming_call',
+    );
+    const details = NotificationDetails(android: androidDetails);
+
+    await plugin.show(
+      9901,
+      'Входящий звонок',
+      'От: $callerName',
+      details,
+      payload: json.encode(data),
+    );
+  } catch (_) {
+    // best-effort
   }
 }
 
@@ -277,6 +322,7 @@ class NotificationService {
   /// Callbacks для обработки событий
   static VoidCallback? onTokenUpdated;
   static Function(String callerKey)? onIncomingCallFromPush;
+  static Function(Map<String, dynamic> data)? onIncomingCallFromNotification;
 
   // ID каналов уведомлений
   // Сервер указывает этот channel_id в AndroidNotification.channel_id
@@ -286,6 +332,7 @@ class NotificationService {
   static const String _callChannelName = 'Входящие звонки';
   static const String _messageChannelId = 'orpheus_messages';
   static const String _messageChannelName = 'Сообщения';
+  static const String _orpheusRoomId = 'orpheus';
 
   /// Android small icon для уведомлений.
   ///
@@ -422,9 +469,21 @@ class NotificationService {
     final senderName = (data['sender_name'] ?? data['caller_name'] ?? 'Неизвестный').toString();
 
     if (type == 'incoming_call' || type == 'call') {
-      await showCallNotification(callerName: callerName);
+      await showCallNotification(
+        callerName: callerName,
+        payload: json.encode(data),
+      );
     } else if (type == 'new_message' || type == 'message') {
       await showMessageNotification(senderName: senderName);
+    } else if (type == 'room-message' || type == 'room_message') {
+      final roomId = data['room_id']?.toString();
+      final authorType = data['author_type']?.toString();
+      if (roomId == _orpheusRoomId && authorType == 'orpheus') {
+        final enabled =
+            await NotificationPrefsService.isOrpheusOfficialEnabled();
+        if (!enabled) return;
+        await showOrpheusOfficialNotification();
+      }
     }
   }
 
@@ -446,7 +505,9 @@ class NotificationService {
     return type == 'incoming_call' ||
         type == 'call' ||
         type == 'new_message' ||
-        type == 'message';
+        type == 'message' ||
+        type == 'room-message' ||
+        type == 'room_message';
   }
 
   /// Обработка клика по уведомлению FCM
@@ -457,12 +518,19 @@ class NotificationService {
     if (data.containsKey('caller_key')) {
       onIncomingCallFromPush?.call(data['caller_key']);
     }
+    if (data.isNotEmpty) {
+      onIncomingCallFromNotification?.call(Map<String, dynamic>.from(data));
+    }
   }
 
   /// Обработка клика по локальному уведомлению
   static void _onNotificationTap(NotificationResponse response) {
     print('🔔 Local notification tap: ${response.payload}');
-    // Можно добавить навигацию к чату/звонку по payload
+    try {
+      if (response.payload == null || response.payload!.isEmpty) return;
+      final data = json.decode(response.payload!) as Map<String, dynamic>;
+      onIncomingCallFromNotification?.call(data);
+    } catch (_) {}
   }
 
   // ==================== ПУБЛИЧНЫЕ МЕТОДЫ ====================
@@ -471,6 +539,7 @@ class NotificationService {
   /// Простое, без кнопок, со звуком и вибрацией
   static Future<void> showCallNotification({
     required String callerName,
+    String? payload,
   }) async {
     try {
       await _ensureLocalNotificationsInitialized();
@@ -485,6 +554,7 @@ class NotificationService {
         androidSmallIcon: _androidSmallIcon,
         fullScreenIntent: true,
         ongoing: true,
+        payload: payload,
       );
 
       print("🔔 Call notification shown: $callerName");
@@ -535,6 +605,30 @@ class NotificationService {
     } catch (e) {
       print("🔔 showMessageNotification error: $e");
       DebugLogger.error('NOTIF', 'showMessageNotification ошибка: $e');
+    }
+  }
+
+  /// Показать уведомление "Официальный ответ Орфея".
+  static Future<void> showOrpheusOfficialNotification() async {
+    try {
+      await _ensureLocalNotificationsInitialized();
+
+      await _localBackend!.show(
+        id: _messageNotificationId + 999,
+        channelId: _messageChannelId,
+        channelName: _messageChannelName,
+        title: 'Орфей',
+        body: 'Официальный ответ Орфея',
+        category: AndroidNotificationCategory.message,
+        androidSmallIcon: _androidSmallIcon,
+        groupKey: 'orpheus_messages_group',
+        ongoing: false,
+        fullScreenIntent: false,
+      );
+
+      DebugLogger.success('NOTIF', '📩 Официальный ответ Орфея');
+    } catch (e) {
+      DebugLogger.error('NOTIF', 'showOrpheusOfficialNotification ошибка: $e');
     }
   }
 
@@ -593,6 +687,7 @@ abstract class NotificationLocalBackend {
     required bool fullScreenIntent,
     required bool ongoing,
     String? groupKey,
+    String? payload,
   });
 
   Future<void> cancel(int id);
@@ -650,6 +745,7 @@ class PluginNotificationLocalBackend implements NotificationLocalBackend {
     required bool fullScreenIntent,
     required bool ongoing,
     String? groupKey,
+    String? payload,
   }) async {
     final androidDetails = AndroidNotificationDetails(
       channelId,
@@ -672,6 +768,7 @@ class PluginNotificationLocalBackend implements NotificationLocalBackend {
       title,
       body,
       NotificationDetails(android: androidDetails),
+      payload: payload,
     );
   }
 

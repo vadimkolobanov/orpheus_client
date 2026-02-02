@@ -127,6 +127,16 @@ class L10nRu extends L10n {
   String get notificationSettingsDesc => 'Для Android (Vivo, Xiaomi и др.)';
 
   @override
+  String get orpheusNotificationsDesc =>
+      'Оповещения о сообщениях в общем чате Орфея.';
+
+  @override
+  String get orpheusOfficialNotifications => 'Официальные ответы Орфея';
+
+  @override
+  String get systemNotificationSettings => 'Системные настройки уведомлений';
+
+  @override
   String get language => 'Язык';
 
   @override
@@ -214,6 +224,9 @@ class L10nRu extends L10n {
   String get messagePlaceholder => 'Сообщение…';
 
   @override
+  String get writeAsOrpheus => 'Писать от лица Орфея';
+
+  @override
   String get today => 'Сегодня';
 
   @override
@@ -245,6 +258,23 @@ class L10nRu extends L10n {
 
   @override
   String get settings => 'Настройки';
+
+  @override
+  String get orpheusRoomName => 'Орфей';
+
+  @override
+  String get orpheusOfficialBadge => 'OFFICIAL';
+
+  @override
+  String get orpheusOfficialName => 'Орфей';
+
+  @override
+  String get orpheusRoomWarning =>
+      'Публичный чат. Не публикуйте личные данные.';
+
+  @override
+  String get orpheusRoomUnavailable =>
+      'Общий чат Орфея пока недоступен. Проверьте сервер или попробуйте позже.';
 
   @override
   String get noChats => 'Нет чатов';
