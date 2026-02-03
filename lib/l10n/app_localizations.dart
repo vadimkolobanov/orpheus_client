@@ -2599,6 +2599,30 @@ abstract class L10n {
   /// **'AI conversation history will be deleted.'**
   String get aiClearChatDesc;
 
+  /// Clear AI memory button
+  ///
+  /// In en, this message translates to:
+  /// **'Clear memory'**
+  String get aiClearMemory;
+
+  /// Clear AI memory dialog title
+  ///
+  /// In en, this message translates to:
+  /// **'Clear memory?'**
+  String get aiClearMemoryTitle;
+
+  /// Clear AI memory dialog description
+  ///
+  /// In en, this message translates to:
+  /// **'AI memory and dialog history will be deleted.'**
+  String get aiClearMemoryDesc;
+
+  /// AI memory indicator
+  ///
+  /// In en, this message translates to:
+  /// **'Memory: {count} AI replies'**
+  String aiMemoryIndicator(int count);
+
   /// AI suggestion 1
   ///
   /// In en, this message translates to:

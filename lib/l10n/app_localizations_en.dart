@@ -1367,6 +1367,21 @@ class L10nEn extends L10n {
   String get aiClearChatDesc => 'AI conversation history will be deleted.';
 
   @override
+  String get aiClearMemory => 'Clear memory';
+
+  @override
+  String get aiClearMemoryTitle => 'Clear memory?';
+
+  @override
+  String get aiClearMemoryDesc =>
+      'AI memory and dialog history will be deleted.';
+
+  @override
+  String aiMemoryIndicator(int count) {
+    return 'Memory: $count AI replies';
+  }
+
+  @override
   String get aiSuggestion1 => 'What\'s new in this version?';
 
   @override

@@ -5,6 +5,7 @@ import 'package:path/path.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/services/auth_service.dart';
+import 'package:orpheus_project/models/ai_message_model.dart';
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
@@ -34,10 +35,10 @@ class DatabaseService {
       print("DB: Путь к БД: $path");
 
       print("DB: Открытие базы данных...");
-      // Увеличиваем версию до 3
+      // Увеличиваем версию до 4
       final db = await openDatabase(
         path, 
-        version: 3, 
+        version: 4, 
         onCreate: _createDB, 
         onUpgrade: _upgradeDB,
         singleInstance: true, // Важно для избежания блокировок
@@ -58,6 +59,7 @@ class DatabaseService {
   Future _createDB(Database db, int version) async {
     await _createContactsTable(db);
     await _createMessagesTable(db);
+    await _createAiTables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -82,6 +84,10 @@ class DatabaseService {
         } catch (e) {
           print("DB: Колонка isRead уже существует или ошибка: $e");
         }
+      }
+      if (oldVersion < 4) {
+        print("DB: Миграция до версии 4...");
+        await _createAiTables(db);
       }
       print("DB: Миграция завершена");
     } catch (e) {
@@ -110,6 +116,24 @@ class DatabaseService {
         timestamp INTEGER NOT NULL,
         status INTEGER DEFAULT 1,
         isRead INTEGER DEFAULT 1
+      )
+    ''');
+  }
+
+  Future<void> _createAiTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ai_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        is_error INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ai_context (
+        key TEXT PRIMARY KEY,
+        value TEXT
       )
     ''');
   }
@@ -253,6 +277,113 @@ class DatabaseService {
         status: MessageStatus.values[(maps[i]['status'] as int?) ?? 1],
         isRead: ((maps[i]['isRead'] as int?) ?? 1) == 1,
       );
+    });
+  }
+
+  // --- AI Assistant ---
+
+  Future<void> addAiMessage(AiMessage message, {int assistantLimit = 20}) async {
+    final db = await instance.database;
+    await db.insert('ai_messages', {
+      'role': message.role.name,
+      'content': message.content,
+      'created_at': message.createdAt.millisecondsSinceEpoch,
+      'is_error': message.isError ? 1 : 0,
+    });
+    await _trimAiMessages(db, assistantLimit);
+  }
+
+  Future<List<AiMessage>> getAiMessages({int assistantLimit = 20}) async {
+    if (_isDuressMode) return [];
+    final db = await instance.database;
+    final rows = await db.query(
+      'ai_messages',
+      orderBy: 'created_at ASC',
+    );
+    return rows.map((row) {
+      final role = AiMessageRole.values.firstWhere(
+        (r) => r.name == row['role'],
+        orElse: () => AiMessageRole.assistant,
+      );
+      return AiMessage(
+        id: (row['id'] as int).toString(),
+        role: role,
+        content: row['content'] as String,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+        isError: (row['is_error'] as int? ?? 0) == 1,
+      );
+    }).toList(growable: false);
+  }
+
+  Future<void> setAiParentMessageId(String? id) async {
+    final db = await instance.database;
+    if (id == null || id.isEmpty) {
+      await db.delete('ai_context', where: 'key = ?', whereArgs: ['parent_message_id']);
+      return;
+    }
+    await db.insert(
+      'ai_context',
+      {'key': 'parent_message_id', 'value': id},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<String?> getAiParentMessageId() async {
+    if (_isDuressMode) return null;
+    final db = await instance.database;
+    final rows = await db.query(
+      'ai_context',
+      where: 'key = ?',
+      whereArgs: ['parent_message_id'],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['value'] as String?;
+  }
+
+  Future<void> clearAiChat() async {
+    final db = await instance.database;
+    await db.delete('ai_messages');
+    await db.delete('ai_context', where: 'key = ?', whereArgs: ['parent_message_id']);
+  }
+
+  Future<void> _trimAiMessages(Database db, int assistantLimit) async {
+    if (assistantLimit <= 0) return;
+    final rows = await db.query(
+      'ai_messages',
+      columns: ['id', 'role'],
+      orderBy: 'created_at ASC',
+    );
+    if (rows.isEmpty) return;
+
+    final assistantIndices = <int>[];
+    for (var i = 0; i < rows.length; i++) {
+      if ((rows[i]['role'] as String?) == 'assistant') {
+        assistantIndices.add(i);
+      }
+    }
+    if (assistantIndices.length <= assistantLimit) return;
+
+    final startAssistantIndex =
+        assistantIndices[assistantIndices.length - assistantLimit];
+    var keepStart = startAssistantIndex;
+    for (var i = startAssistantIndex - 1; i >= 0; i--) {
+      if ((rows[i]['role'] as String?) == 'user') {
+        keepStart = i;
+        break;
+      }
+    }
+
+    final idsToDelete = <int>[];
+    for (var i = 0; i < keepStart; i++) {
+      final id = rows[i]['id'] as int;
+      idsToDelete.add(id);
+    }
+    if (idsToDelete.isEmpty) return;
+    await db.transaction((txn) async {
+      for (final id in idsToDelete) {
+        await txn.delete('ai_messages', where: 'id = ?', whereArgs: [id]);
+      }
     });
   }
 

@@ -483,6 +483,10 @@
   "aiClearChat": "Очистить чат",
   "aiClearChatTitle": "Очистить историю?",
   "aiClearChatDesc": "История диалога с AI будет удалена.",
+  "aiClearMemory": "Очистить память",
+  "aiClearMemoryTitle": "Очистить память?",
+  "aiClearMemoryDesc": "Память и история диалога с AI будут удалены.",
+  "aiMemoryIndicator": "Память: {count} ответов ИИ",
   "aiSuggestion1": "Что нового в этой версии?",
   "aiSuggestion2": "Как работает шифрование?",
   "aiSuggestion3": "Что такое код принуждения?"

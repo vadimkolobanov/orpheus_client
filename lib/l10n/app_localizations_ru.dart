@@ -1379,6 +1379,21 @@ class L10nRu extends L10n {
   String get aiClearChatDesc => 'История диалога с AI будет удалена.';
 
   @override
+  String get aiClearMemory => 'Очистить память';
+
+  @override
+  String get aiClearMemoryTitle => 'Очистить память?';
+
+  @override
+  String get aiClearMemoryDesc =>
+      'Память и история диалога с AI будут удалены.';
+
+  @override
+  String aiMemoryIndicator(int count) {
+    return 'Память: $count ответов ИИ';
+  }
+
+  @override
   String get aiSuggestion1 => 'Что нового в этой версии?';
 
   @override
