@@ -43,7 +43,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (type == 'new_message' ||
       type == 'chat' ||
       type == 'room-message' ||
-      type == 'room_message') {
+      type == 'room_message' ||
+      type == 'support-reply') {
     // Только если нет notification payload (data-only message)
     if (message.notification == null) {
       await NotificationService._handleBackgroundMessage(data);
@@ -466,23 +467,31 @@ class NotificationService {
     //
     // Оставляем совместимость со старыми call/message.
     final callerName = (data['caller_name'] ?? data['sender_name'] ?? 'Неизвестный').toString();
-    final senderName = (data['sender_name'] ?? data['caller_name'] ?? 'Неизвестный').toString();
+    final senderName = (data['sender_name'] ??
+            data['caller_name'] ??
+            data['sender'] ??
+            data['from'] ??
+            'Developer')
+        .toString();
 
     if (type == 'incoming_call' || type == 'call') {
       await showCallNotification(
         callerName: callerName,
         payload: json.encode(data),
       );
-    } else if (type == 'new_message' || type == 'message') {
+    } else if (type == 'new_message' || type == 'message' || type == 'support-reply') {
       await showMessageNotification(senderName: senderName);
     } else if (type == 'room-message' || type == 'room_message') {
       final roomId = data['room_id']?.toString();
+      final roomName = (data['room_name'] ?? 'Чат').toString();
       final authorType = data['author_type']?.toString();
       if (roomId == _orpheusRoomId && authorType == 'orpheus') {
         final enabled =
             await NotificationPrefsService.isOrpheusOfficialEnabled();
         if (!enabled) return;
         await showOrpheusOfficialNotification();
+      } else {
+        await showRoomMessageNotification(roomName: roomName);
       }
     }
   }
@@ -507,7 +516,8 @@ class NotificationService {
         type == 'new_message' ||
         type == 'message' ||
         type == 'room-message' ||
-        type == 'room_message';
+        type == 'room_message' ||
+        type == 'support-reply';
   }
 
   /// Обработка клика по уведомлению FCM
@@ -605,6 +615,32 @@ class NotificationService {
     } catch (e) {
       print("🔔 showMessageNotification error: $e");
       DebugLogger.error('NOTIF', 'showMessageNotification ошибка: $e');
+    }
+  }
+
+  /// Показать уведомление о новом сообщении в чате.
+  static Future<void> showRoomMessageNotification({
+    required String roomName,
+  }) async {
+    try {
+      await _ensureLocalNotificationsInitialized();
+
+      await _localBackend!.show(
+        id: _messageNotificationId + roomName.hashCode % 1000,
+        channelId: _messageChannelId,
+        channelName: _messageChannelName,
+        title: roomName,
+        body: 'Новое сообщение в чате',
+        category: AndroidNotificationCategory.message,
+        androidSmallIcon: _androidSmallIcon,
+        groupKey: 'orpheus_messages_group',
+        ongoing: false,
+        fullScreenIntent: false,
+      );
+
+      DebugLogger.success('NOTIF', '💬 Чат-уведомление: $roomName');
+    } catch (e) {
+      DebugLogger.error('NOTIF', 'showRoomMessageNotification ошибка: $e');
     }
   }
 

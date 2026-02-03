@@ -335,6 +335,16 @@ class AuthService {
     print("AUTH: Panic gesture ${enabled ? 'включен' : 'выключен'}");
   }
 
+  // === БЛОКИРОВКА ПО ТАЙМАУТУ НЕАКТИВНОСТИ ===
+
+  int get inactivityLockSeconds => _config.inactivityLockSeconds;
+
+  Future<void> setInactivityLockSeconds(int seconds) async {
+    _config = _config.copyWith(inactivityLockSeconds: seconds);
+    await _saveConfig();
+    print("AUTH: Inactivity lock timeout = ${seconds}s");
+  }
+
   // === АВТОУДАЛЕНИЕ СООБЩЕНИЙ ===
 
   /// Текущая политика хранения сообщений

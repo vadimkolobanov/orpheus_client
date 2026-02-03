@@ -21,11 +21,11 @@ class RoomMessage {
 
   factory RoomMessage.fromJson(Map<String, dynamic> json) {
     final createdAtRaw = json['created_at'];
-    DateTime createdAt = DateTime.now();
+    DateTime createdAt = DateTime.now().toUtc();
     if (createdAtRaw is String) {
-      createdAt = DateTime.tryParse(createdAtRaw) ?? createdAt;
+      createdAt = _parseServerDateTime(createdAtRaw);
     } else if (createdAtRaw is int) {
-      createdAt = DateTime.fromMillisecondsSinceEpoch(createdAtRaw);
+      createdAt = DateTime.fromMillisecondsSinceEpoch(createdAtRaw, isUtc: true);
     }
 
     final text = (json['text'] as String?) ?? (json['message'] as String?) ?? '';
@@ -41,4 +41,12 @@ class RoomMessage {
       systemCode: json['system_code'] as String?,
     );
   }
+}
+
+DateTime _parseServerDateTime(String raw) {
+  final hasTimezone =
+      raw.endsWith('Z') || RegExp(r'[+\-]\d{2}:?\d{2}$').hasMatch(raw);
+  final normalized = hasTimezone ? raw : '${raw}Z';
+  final parsed = DateTime.tryParse(normalized);
+  return parsed?.toUtc() ?? DateTime.now().toUtc();
 }

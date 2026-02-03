@@ -165,6 +165,15 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
     final isPinEnabled = config.isPinEnabled;
     final isDuressEnabled = config.isDuressEnabled;
     final isWipeCodeEnabled = config.isWipeCodeEnabled;
+    final inactivityOptions = <int, String>{
+      30: l10n.inactivity30s,
+      60: l10n.inactivity1m,
+      300: l10n.inactivity5m,
+      600: l10n.inactivity10m,
+    };
+    final inactivitySeconds = inactivityOptions.containsKey(config.inactivityLockSeconds)
+        ? config.inactivityLockSeconds
+        : 60;
     
     return Scaffold(
       backgroundColor: Colors.black,
@@ -200,6 +209,18 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
               ),
             ] else ...[
               _buildPinStatusCard(config.pinLength, l10n),
+              const SizedBox(height: 12),
+              _buildSelectTile(
+                icon: Icons.timer_outlined,
+                title: l10n.inactivityLockTitle,
+                subtitle: l10n.inactivityLockDesc,
+                value: inactivitySeconds,
+                options: inactivityOptions,
+                onChanged: (value) async {
+                  await _auth.setInactivityLockSeconds(value);
+                  _refresh();
+                },
+              ),
               const SizedBox(height: 12),
               _buildActionButton(
                 icon: Icons.edit,
@@ -658,6 +679,83 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
             onChanged: onChanged,
             activeColor: isDestructive ? Colors.red : const Color(0xFF6AD394),
             activeTrackColor: (isDestructive ? Colors.red : const Color(0xFF6AD394)).withOpacity(0.3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectTile({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required int value,
+    required Map<int, String> options,
+    required ValueChanged<int> onChanged,
+  }) {
+    final color = const Color(0xFFB0BEC5);
+    final items = options.entries
+        .map(
+          (entry) => DropdownMenuItem<int>(
+            value: entry.key,
+            child: Text(entry.value),
+          ),
+        )
+        .toList(growable: false);
+    final effectiveValue = options.containsKey(value) ? value : options.keys.first;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          DropdownButton<int>(
+            value: effectiveValue,
+            items: items,
+            dropdownColor: const Color(0xFF1A1A1A),
+            underline: const SizedBox.shrink(),
+            style: const TextStyle(color: Colors.white),
+            onChanged: (next) {
+              if (next == null) return;
+              onChanged(next);
+            },
           ),
         ],
       ),

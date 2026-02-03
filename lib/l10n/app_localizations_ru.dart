@@ -574,7 +574,7 @@ class L10nRu extends L10n {
 
   @override
   String get helpPinBullet2 =>
-      'Если PIN включён — приложение блокируется при сворачивании и при запуске.';
+      'Если PIN включён — приложение блокируется после неактивности.';
 
   @override
   String get helpDuressTitle => 'Код принуждения (Duress)';
@@ -771,6 +771,24 @@ class L10nRu extends L10n {
 
   @override
   String get pinCodeSection => 'PIN-КОД';
+
+  @override
+  String get inactivityLockTitle => 'Таймер автоблокировки';
+
+  @override
+  String get inactivityLockDesc => 'Блокировка при отсутствии активности';
+
+  @override
+  String get inactivity30s => '30 секунд';
+
+  @override
+  String get inactivity1m => '1 минута';
+
+  @override
+  String get inactivity5m => '5 минут';
+
+  @override
+  String get inactivity10m => '10 минут';
 
   @override
   String get pinNotSet =>
@@ -1266,6 +1284,18 @@ class L10nRu extends L10n {
       'Внимание: сообщения в этом чате не защищены и хранятся на сервере. Не передавайте чувствительную информацию.';
 
   @override
+  String get enableRoomNotifications => 'Включить уведомления чата';
+
+  @override
+  String get disableRoomNotifications => 'Отключить уведомления чата';
+
+  @override
+  String get roomNotificationsOn => 'Уведомления чата включены';
+
+  @override
+  String get roomNotificationsOff => 'Уведомления чата отключены';
+
+  @override
   String get rotateInvite => 'Ротация пригласительного кода';
 
   @override
@@ -1316,4 +1346,44 @@ class L10nRu extends L10n {
 
   @override
   String get ok => 'Ок';
+
+  @override
+  String get aiAssistantName => 'Оракул Орфея';
+
+  @override
+  String get aiAssistantShortName => 'AI Помощник';
+
+  @override
+  String get aiAssistantOnline => 'Всегда онлайн';
+
+  @override
+  String get aiAssistantDesc => 'Умный помощник по Orpheus';
+
+  @override
+  String get aiAssistantWelcome =>
+      'Привет! Я ваш персональный AI-консультант Orpheus. Задайте любой вопрос о функциях приложения, безопасности или настройках.';
+
+  @override
+  String get aiThinking => 'Думаю...';
+
+  @override
+  String get aiMessageHint => 'Задайте вопрос...';
+
+  @override
+  String get aiClearChat => 'Очистить чат';
+
+  @override
+  String get aiClearChatTitle => 'Очистить историю?';
+
+  @override
+  String get aiClearChatDesc => 'История диалога с AI будет удалена.';
+
+  @override
+  String get aiSuggestion1 => 'Что нового в этой версии?';
+
+  @override
+  String get aiSuggestion2 => 'Как работает шифрование?';
+
+  @override
+  String get aiSuggestion3 => 'Что такое код принуждения?';
 }

@@ -205,7 +205,7 @@
   
   "helpPinTitle": "PIN-код",
   "helpPinBullet1": "Профиль → Безопасность → PIN. Если PIN не задан — вход открыт.",
-  "helpPinBullet2": "Если PIN включён — приложение блокируется при сворачивании и при запуске.",
+  "helpPinBullet2": "Если PIN включён — приложение блокируется после неактивности.",
   
   "helpDuressTitle": "Код принуждения (Duress)",
   "helpDuressBullet1": "Это второй PIN. При вводе показывается «пустой профиль» (0 контактов/сообщений).",
@@ -275,6 +275,12 @@
   
   "securityTitle": "БЕЗОПАСНОСТЬ",
   "pinCodeSection": "PIN-КОД",
+  "inactivityLockTitle": "Таймер автоблокировки",
+  "inactivityLockDesc": "Блокировка при отсутствии активности",
+  "inactivity30s": "30 секунд",
+  "inactivity1m": "1 минута",
+  "inactivity5m": "5 минут",
+  "inactivity10m": "10 минут",
   "pinNotSet": "PIN-код не установлен. Приложение открывается без защиты.",
   "setPinCode": "Установить PIN-код",
   "setPinCodeDesc": "4 или 6-значный код для защиты входа",
@@ -446,6 +452,10 @@
   "roomCreated": "Комната создана",
   "roomJoined": "Подключение выполнено",
   "roomWarningUnprotected": "Внимание: сообщения в этом чате не защищены и хранятся на сервере. Не передавайте чувствительную информацию.",
+  "enableRoomNotifications": "Включить уведомления чата",
+  "disableRoomNotifications": "Отключить уведомления чата",
+  "roomNotificationsOn": "Уведомления чата включены",
+  "roomNotificationsOff": "Уведомления чата отключены",
   "rotateInvite": "Ротация пригласительного кода",
   "rotateInviteTitle": "Ротировать пригласительный код?",
   "rotateInviteDesc": "Ранее выданный код перестанет работать.",
@@ -461,5 +471,19 @@
   "moderationSensitiveWarning": "Внимание: сообщение может содержать чувствительные данные. Будьте осторожны.",
   "roomSystemInviteRotated": "Ротация пригласительного кода. Ранее выданный код больше недействителен.",
   "roomSystemHistoryCleared": "История комнаты очищена.",
-  "ok": "Ок"
+  "ok": "Ок",
+  
+  "aiAssistantName": "Оракул Орфея",
+  "aiAssistantShortName": "AI Помощник",
+  "aiAssistantOnline": "Всегда онлайн",
+  "aiAssistantDesc": "Умный помощник по Orpheus",
+  "aiAssistantWelcome": "Привет! Я ваш персональный AI-консультант Orpheus. Задайте любой вопрос о функциях приложения, безопасности или настройках.",
+  "aiThinking": "Думаю...",
+  "aiMessageHint": "Задайте вопрос...",
+  "aiClearChat": "Очистить чат",
+  "aiClearChatTitle": "Очистить историю?",
+  "aiClearChatDesc": "История диалога с AI будет удалена.",
+  "aiSuggestion1": "Что нового в этой версии?",
+  "aiSuggestion2": "Как работает шифрование?",
+  "aiSuggestion3": "Что такое код принуждения?"
 }

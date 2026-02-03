@@ -1120,7 +1120,7 @@ abstract class L10n {
   /// PIN bullet 2
   ///
   /// In en, this message translates to:
-  /// **'When PIN is enabled — app locks on minimize and on launch.'**
+  /// **'When PIN is enabled — app locks after inactivity.'**
   String get helpPinBullet2;
 
   /// Help section: Duress
@@ -1482,6 +1482,42 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'PIN CODE'**
   String get pinCodeSection;
+
+  /// Inactivity lock title
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-lock timeout'**
+  String get inactivityLockTitle;
+
+  /// Inactivity lock description
+  ///
+  /// In en, this message translates to:
+  /// **'Lock after no activity'**
+  String get inactivityLockDesc;
+
+  /// Inactivity timeout 30s
+  ///
+  /// In en, this message translates to:
+  /// **'30 seconds'**
+  String get inactivity30s;
+
+  /// Inactivity timeout 1m
+  ///
+  /// In en, this message translates to:
+  /// **'1 minute'**
+  String get inactivity1m;
+
+  /// Inactivity timeout 5m
+  ///
+  /// In en, this message translates to:
+  /// **'5 minutes'**
+  String get inactivity5m;
+
+  /// Inactivity timeout 10m
+  ///
+  /// In en, this message translates to:
+  /// **'10 minutes'**
+  String get inactivity10m;
 
   /// PIN not set warning
   ///
@@ -2383,6 +2419,30 @@ abstract class L10n {
   /// **'Warning: messages in this chat are not protected and stored on the server. Do not share sensitive information.'**
   String get roomWarningUnprotected;
 
+  /// Enable room notifications action
+  ///
+  /// In en, this message translates to:
+  /// **'Enable chat notifications'**
+  String get enableRoomNotifications;
+
+  /// Disable room notifications action
+  ///
+  /// In en, this message translates to:
+  /// **'Disable chat notifications'**
+  String get disableRoomNotifications;
+
+  /// Room notifications enabled snackbar
+  ///
+  /// In en, this message translates to:
+  /// **'Chat notifications enabled'**
+  String get roomNotificationsOn;
+
+  /// Room notifications disabled snackbar
+  ///
+  /// In en, this message translates to:
+  /// **'Chat notifications disabled'**
+  String get roomNotificationsOff;
+
   /// Rotate invite action
   ///
   /// In en, this message translates to:
@@ -2478,6 +2538,84 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'OK'**
   String get ok;
+
+  /// AI assistant name
+  ///
+  /// In en, this message translates to:
+  /// **'Orpheus Oracle'**
+  String get aiAssistantName;
+
+  /// AI assistant short name
+  ///
+  /// In en, this message translates to:
+  /// **'AI Assistant'**
+  String get aiAssistantShortName;
+
+  /// AI online status
+  ///
+  /// In en, this message translates to:
+  /// **'Always online'**
+  String get aiAssistantOnline;
+
+  /// AI assistant description
+  ///
+  /// In en, this message translates to:
+  /// **'Smart Orpheus helper'**
+  String get aiAssistantDesc;
+
+  /// AI welcome message
+  ///
+  /// In en, this message translates to:
+  /// **'Hello! I\'m your personal AI consultant for Orpheus. Ask me anything about app features, security, or settings.'**
+  String get aiAssistantWelcome;
+
+  /// AI thinking indicator
+  ///
+  /// In en, this message translates to:
+  /// **'Thinking...'**
+  String get aiThinking;
+
+  /// AI message input hint
+  ///
+  /// In en, this message translates to:
+  /// **'Ask a question...'**
+  String get aiMessageHint;
+
+  /// Clear AI chat button
+  ///
+  /// In en, this message translates to:
+  /// **'Clear chat'**
+  String get aiClearChat;
+
+  /// Clear AI chat dialog title
+  ///
+  /// In en, this message translates to:
+  /// **'Clear history?'**
+  String get aiClearChatTitle;
+
+  /// Clear AI chat dialog description
+  ///
+  /// In en, this message translates to:
+  /// **'AI conversation history will be deleted.'**
+  String get aiClearChatDesc;
+
+  /// AI suggestion 1
+  ///
+  /// In en, this message translates to:
+  /// **'What\'s new in this version?'**
+  String get aiSuggestion1;
+
+  /// AI suggestion 2
+  ///
+  /// In en, this message translates to:
+  /// **'How does encryption work?'**
+  String get aiSuggestion2;
+
+  /// AI suggestion 3
+  ///
+  /// In en, this message translates to:
+  /// **'What is the duress code?'**
+  String get aiSuggestion3;
 }
 
 class _L10nDelegate extends LocalizationsDelegate<L10n> {

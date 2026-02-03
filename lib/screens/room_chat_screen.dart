@@ -39,12 +39,16 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
   String? _error;
   bool _canSendAsOrpheus = false;
   bool _sendAsOrpheus = false;
+  bool _prefsLoaded = false;
+  bool _warningDismissed = true;
+  bool _notificationsEnabled = true;
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
     _loadMyBadge();
+    _loadRoomPrefs();
     _wsSub = websocketService.stream.listen(_handleWsMessage);
   }
 
@@ -91,6 +95,57 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
         _isLoading = false;
         _error = _isOrpheusRoom ? _orpheusRoomError : 'error';
       });
+    }
+  }
+
+  Future<void> _loadRoomPrefs() async {
+    try {
+      final prefs = await _service.loadRoomPrefs(widget.room.id);
+      if (!mounted) return;
+      setState(() {
+        _notificationsEnabled = prefs['notifications_enabled'] != false;
+        _warningDismissed = prefs['warning_dismissed'] == true;
+        _prefsLoaded = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _prefsLoaded = true;
+        _warningDismissed = true;
+      });
+    }
+  }
+
+  Future<void> _dismissWarning() async {
+    setState(() => _warningDismissed = true);
+    try {
+      await _service.updateRoomPrefs(widget.room.id, warningDismissed: true);
+    } catch (_) {
+      // best-effort: не возвращаем баннер, чтобы не мешал
+    }
+  }
+
+  Future<void> _toggleRoomNotifications() async {
+    final l10n = L10n.of(context);
+    final nextValue = !_notificationsEnabled;
+    setState(() => _notificationsEnabled = nextValue);
+    try {
+      await _service.updateRoomPrefs(
+        widget.room.id,
+        notificationsEnabled: nextValue,
+      );
+      if (!mounted) return;
+      final message =
+          nextValue ? l10n.roomNotificationsOn : l10n.roomNotificationsOff;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _notificationsEnabled = !nextValue);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.connectionError)),
+      );
     }
   }
 
@@ -172,7 +227,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
                 ? l10n.orpheusOfficialName
                 : null,
             authorType: _isOrpheusRoom && _sendAsOrpheus ? 'orpheus' : null,
-            createdAt: DateTime.now(),
+            createdAt: DateTime.now().toUtc(),
           ),
         );
       }
@@ -293,6 +348,9 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
           PopupMenuButton<String>(
             onSelected: (value) {
               switch (value) {
+                case 'toggle_notifications':
+                  _toggleRoomNotifications();
+                  break;
                 case 'rotate':
                   _confirmRotateInvite();
                   break;
@@ -305,6 +363,14 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
               }
             },
             itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'toggle_notifications',
+                child: Text(
+                  _notificationsEnabled
+                      ? l10n.disableRoomNotifications
+                      : l10n.enableRoomNotifications,
+                ),
+              ),
               if (widget.room.isOwner && !_isOrpheusRoom)
                 PopupMenuItem(
                   value: 'rotate',
@@ -325,11 +391,13 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
       ),
       body: Column(
         children: [
-          _WarningBanner(
-            text: _isOrpheusRoom
-                ? l10n.orpheusRoomWarning
-                : l10n.roomWarningUnprotected,
-          ),
+          if (_prefsLoaded && !_warningDismissed)
+            _WarningBanner(
+              text: _isOrpheusRoom
+                  ? l10n.orpheusRoomWarning
+                  : l10n.roomWarningUnprotected,
+              onDismiss: _dismissWarning,
+            ),
           Expanded(child: _buildMessagesList(l10n)),
           _buildInputBar(l10n),
         ],
@@ -488,9 +556,10 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
 }
 
 class _WarningBanner extends StatelessWidget {
-  const _WarningBanner({required this.text});
+  const _WarningBanner({required this.text, this.onDismiss});
 
   final String text;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -514,6 +583,12 @@ class _WarningBanner extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
+          if (onDismiss != null)
+            IconButton(
+              icon: const Icon(Icons.close, size: 18, color: AppColors.textSecondary),
+              onPressed: onDismiss,
+              tooltip: L10n.of(context).close,
+            ),
         ],
       ),
     );
@@ -614,7 +689,9 @@ class _RoomMessageBubble extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              DateFormat.Hm().format(message.createdAt),
+              DateFormat.Hm().format(
+                message.createdAt.toUtc().add(const Duration(hours: 3)),
+              ),
               style: Theme.of(context)
                   .textTheme
                   .labelSmall

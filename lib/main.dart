@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -871,6 +872,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _isCheckCompleted = false;
   late bool _keysExist;
   bool _isLocked = false;
+  Timer? _inactivityTimer;
+  DateTime _lastUserActivity = DateTime.now();
   StreamSubscription<String>? _licenseSubscription;
 
   @override
@@ -879,6 +882,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _keysExist = _hasKeys;
     _isLocked = authService.requiresUnlock;
+    RawKeyboard.instance.addListener(_handleRawKeyEvent);
+    _registerUserActivity('init');
     
     // Подписываемся на изменения локали
     LocaleService.instance.addListener(_onLocaleChanged);
@@ -946,6 +951,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void _onUnlocked() {
     DebugLogger.info('APP', '🔓 App unlocked');
     setState(() => _isLocked = false);
+    _registerUserActivity('unlock');
     
     // Обработать отложенный звонок если есть
     // Используем небольшую задержку чтобы UI успел перестроиться
@@ -985,7 +991,40 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     LocaleService.instance.removeListener(_onLocaleChanged);
     _licenseSubscription?.cancel();
+    _inactivityTimer?.cancel();
+    RawKeyboard.instance.removeListener(_handleRawKeyEvent);
     super.dispose();
+  }
+
+  void _handleRawKeyEvent(RawKeyEvent event) {
+    _registerUserActivity('keyboard');
+  }
+
+  void _registerUserActivity(String source) {
+    _lastUserActivity = DateTime.now();
+    _resetInactivityTimer();
+  }
+
+  Duration? _getInactivityTimeout() {
+    final seconds = authService.inactivityLockSeconds;
+    if (seconds <= 0) return null;
+    return Duration(seconds: seconds);
+  }
+
+  void _resetInactivityTimer() {
+    _inactivityTimer?.cancel();
+    final timeout = _getInactivityTimeout();
+    if (timeout == null) return;
+    if (!authService.config.isPinEnabled || _isLocked) return;
+    _inactivityTimer = Timer(timeout, () {
+      if (!mounted) return;
+      final elapsed = DateTime.now().difference(_lastUserActivity);
+      if (elapsed >= timeout && authService.config.isPinEnabled && !_isLocked) {
+        authService.lock();
+        setState(() => _isLocked = true);
+        DebugLogger.info('LIFECYCLE', '🔒 App locked by inactivity timeout');
+      }
+    });
   }
 
   @override
@@ -1022,6 +1061,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           _checkActiveCallOnResumed();
         });
       }
+      final timeout = _getInactivityTimeout();
+      if (timeout != null &&
+          authService.config.isPinEnabled &&
+          !_isLocked &&
+          DateTime.now().difference(_lastUserActivity) >= timeout) {
+        authService.lock();
+        setState(() => _isLocked = true);
+        DebugLogger.info('LIFECYCLE', '🔒 App locked on resume (inactivity timeout)');
+      } else {
+        _resetInactivityTimer();
+      }
     } else if (state == AppLifecycleState.paused) {
       DebugLogger.info('LIFECYCLE', 'Приложение в background');
       
@@ -1032,14 +1082,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       // Дедуп выполняется через call_id (CallIdStorage) в обработчике входящих сигналов.
       DebugLogger.info('LIFECYCLE', '📶 WebSocket остаётся подключённым в background');
       
-      // Блокируем приложение при сворачивании (если PIN включен),
-      // но НЕ во время активного звонка и НЕ если есть pending call.
-      if (authService.config.isPinEnabled && !_isLocked && !hasActiveCall && !hasPendingCall) {
-        authService.lock();
-        setState(() => _isLocked = true);
-        DebugLogger.info('LIFECYCLE', '🔒 App locked on pause');
-      } else if (hasPendingCall) {
-        DebugLogger.info('LIFECYCLE', '📞 Не блокирую - есть pending call');
+      // В фоне не блокируем сразу — полагаемся на таймер неактивности.
+      _inactivityTimer?.cancel();
+      if (hasPendingCall) {
+        DebugLogger.info('LIFECYCLE', '📞 Есть pending call');
       }
     }
   }
@@ -1079,6 +1125,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         return const Locale('en');
       },
       
+      builder: (context, child) => Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _registerUserActivity('pointer'),
+        onPointerMove: (_) => _registerUserActivity('pointer'),
+        onPointerSignal: (_) => _registerUserActivity('pointer'),
+        child: child ?? const SizedBox.shrink(),
+      ),
       home: _buildHome(),
     );
   }

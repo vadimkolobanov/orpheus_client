@@ -102,6 +102,54 @@ class RoomsService {
         .toList();
   }
 
+  Future<Map<String, dynamic>> loadRoomPrefs(String roomId) async {
+    if (_pubkey == null) {
+      return {
+        'notifications_enabled': true,
+        'warning_dismissed': false,
+      };
+    }
+    final url = AppConfig.httpUrl('/api/rooms/$roomId/prefs');
+    final response = await _httpClient
+        .get(Uri.parse(url), headers: _headers)
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}');
+    }
+
+    return json.decode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateRoomPrefs(
+    String roomId, {
+    bool? notificationsEnabled,
+    bool? warningDismissed,
+  }) async {
+    if (_pubkey == null) throw Exception('Keys not initialized');
+    final url = AppConfig.httpUrl('/api/rooms/$roomId/prefs');
+    final body = <String, dynamic>{};
+    if (notificationsEnabled != null) {
+      body['notifications_enabled'] = notificationsEnabled;
+    }
+    if (warningDismissed != null) {
+      body['warning_dismissed'] = warningDismissed;
+    }
+    final response = await _httpClient
+        .post(
+          Uri.parse(url),
+          headers: _headers,
+          body: json.encode(body),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}');
+    }
+
+    return json.decode(response.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> sendMessage(
     String roomId,
     String text, {

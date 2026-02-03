@@ -567,7 +567,7 @@ class L10nEn extends L10n {
 
   @override
   String get helpPinBullet2 =>
-      'When PIN is enabled — app locks on minimize and on launch.';
+      'When PIN is enabled — app locks after inactivity.';
 
   @override
   String get helpDuressTitle => 'Duress Code';
@@ -763,6 +763,24 @@ class L10nEn extends L10n {
 
   @override
   String get pinCodeSection => 'PIN CODE';
+
+  @override
+  String get inactivityLockTitle => 'Auto-lock timeout';
+
+  @override
+  String get inactivityLockDesc => 'Lock after no activity';
+
+  @override
+  String get inactivity30s => '30 seconds';
+
+  @override
+  String get inactivity1m => '1 minute';
+
+  @override
+  String get inactivity5m => '5 minutes';
+
+  @override
+  String get inactivity10m => '10 minutes';
 
   @override
   String get pinNotSet => 'PIN code is not set. App opens without protection.';
@@ -1254,6 +1272,18 @@ class L10nEn extends L10n {
       'Warning: messages in this chat are not protected and stored on the server. Do not share sensitive information.';
 
   @override
+  String get enableRoomNotifications => 'Enable chat notifications';
+
+  @override
+  String get disableRoomNotifications => 'Disable chat notifications';
+
+  @override
+  String get roomNotificationsOn => 'Chat notifications enabled';
+
+  @override
+  String get roomNotificationsOff => 'Chat notifications disabled';
+
+  @override
   String get rotateInvite => 'Rotate invite code';
 
   @override
@@ -1304,4 +1334,44 @@ class L10nEn extends L10n {
 
   @override
   String get ok => 'OK';
+
+  @override
+  String get aiAssistantName => 'Orpheus Oracle';
+
+  @override
+  String get aiAssistantShortName => 'AI Assistant';
+
+  @override
+  String get aiAssistantOnline => 'Always online';
+
+  @override
+  String get aiAssistantDesc => 'Smart Orpheus helper';
+
+  @override
+  String get aiAssistantWelcome =>
+      'Hello! I\'m your personal AI consultant for Orpheus. Ask me anything about app features, security, or settings.';
+
+  @override
+  String get aiThinking => 'Thinking...';
+
+  @override
+  String get aiMessageHint => 'Ask a question...';
+
+  @override
+  String get aiClearChat => 'Clear chat';
+
+  @override
+  String get aiClearChatTitle => 'Clear history?';
+
+  @override
+  String get aiClearChatDesc => 'AI conversation history will be deleted.';
+
+  @override
+  String get aiSuggestion1 => 'What\'s new in this version?';
+
+  @override
+  String get aiSuggestion2 => 'How does encryption work?';
+
+  @override
+  String get aiSuggestion3 => 'What is the duress code?';
 }

@@ -54,6 +54,10 @@ class SecurityConfig {
   /// ВАЖНО: это приближение, а не “перехват кнопки питания”.
   final bool isPanicGestureEnabled;
 
+  /// Таймаут блокировки при неактивности (в секундах).
+  /// 0 или меньше — отключено.
+  final int inactivityLockSeconds;
+
   /// Политика автоудаления сообщений по времени
   final MessageRetentionPolicy messageRetention;
   
@@ -77,6 +81,7 @@ class SecurityConfig {
     this.isAutoWipeEnabled = false,
     this.autoWipeAttempts = 10,
     this.isPanicGestureEnabled = false,
+    this.inactivityLockSeconds = 60,
     this.messageRetention = MessageRetentionPolicy.all,
     this.lastMessageCleanupAt,
   });
@@ -102,6 +107,7 @@ class SecurityConfig {
     bool? isAutoWipeEnabled,
     int? autoWipeAttempts,
     bool? isPanicGestureEnabled,
+    int? inactivityLockSeconds,
     MessageRetentionPolicy? messageRetention,
     DateTime? lastMessageCleanupAt,
     bool clearPinHash = false,
@@ -127,6 +133,7 @@ class SecurityConfig {
       isAutoWipeEnabled: isAutoWipeEnabled ?? this.isAutoWipeEnabled,
       autoWipeAttempts: autoWipeAttempts ?? this.autoWipeAttempts,
       isPanicGestureEnabled: isPanicGestureEnabled ?? this.isPanicGestureEnabled,
+      inactivityLockSeconds: inactivityLockSeconds ?? this.inactivityLockSeconds,
       messageRetention: messageRetention ?? this.messageRetention,
       lastMessageCleanupAt: clearLastMessageCleanupAt ? null : (lastMessageCleanupAt ?? this.lastMessageCleanupAt),
     );
@@ -151,6 +158,7 @@ class SecurityConfig {
       'isAutoWipeEnabled': isAutoWipeEnabled,
       'autoWipeAttempts': autoWipeAttempts,
       'isPanicGestureEnabled': isPanicGestureEnabled,
+      'inactivityLockSeconds': inactivityLockSeconds,
       'messageRetention': messageRetention.configValue,
       'lastMessageCleanupAt': lastMessageCleanupAt?.toIso8601String(),
     };
@@ -178,6 +186,7 @@ class SecurityConfig {
       isAutoWipeEnabled: map['isAutoWipeEnabled'] ?? false,
       autoWipeAttempts: map['autoWipeAttempts'] ?? 10,
       isPanicGestureEnabled: map['isPanicGestureEnabled'] ?? false,
+      inactivityLockSeconds: map['inactivityLockSeconds'] ?? 60,
       messageRetention: MessageRetentionPolicyExtension.fromConfigValue(map['messageRetention']),
       lastMessageCleanupAt: map['lastMessageCleanupAt'] != null 
           ? DateTime.tryParse(map['lastMessageCleanupAt']) 
