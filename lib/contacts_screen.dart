@@ -7,6 +7,7 @@ import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/qr_scan_screen.dart';
+import 'package:orpheus_project/screens/ai_assistant_chat_screen.dart';
 import 'package:orpheus_project/services/badge_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
@@ -99,6 +100,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
         title: Text(l10n.contactsTitle),
         actions: [
           AppIconButton(
+            icon: Icons.person_add_outlined,
+            tooltip: l10n.addContact,
+            onPressed: _showAddContactDialog,
+          ),
+          AppIconButton(
             icon: Icons.qr_code_scanner,
             tooltip: l10n.scanQrTooltip,
             onPressed: () async {
@@ -117,10 +123,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
             onPressed: _refreshContacts,
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddContactDialog,
-        child: const Icon(Icons.add),
       ),
       body: FutureBuilder<
           ({List<Contact> contacts, Map<String, int> unreadCounts})>(
@@ -143,16 +145,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           final contacts = data.contacts;
           final unreadCounts = data.unreadCounts;
 
-          if (contacts.isEmpty) {
-            return EmptyState(
-              title: l10n.noContacts,
-              subtitle: l10n.addFirstContact,
-              icon: Icons.people_outline,
-              actionLabel: l10n.addContact,
-              onAction: _showAddContactDialog,
-            );
-          }
-
+          // Показываем Оракула даже если контактов нет
           return StreamBuilder<Map<String, bool>>(
             stream: presenceService.stream,
             initialData: const <String, bool>{},
@@ -162,6 +155,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 contacts: contacts,
                 presence: presence,
                 unreadCounts: unreadCounts,
+                showEmptyHint: contacts.isEmpty,
               );
             },
           );
@@ -174,29 +168,70 @@ class _ContactsScreenState extends State<ContactsScreen> {
     required List<Contact> contacts,
     required Map<String, bool> presence,
     required Map<String, int> unreadCounts,
+    bool showEmptyHint = false,
   }) {
-    return ListView.separated(
+    final l10n = L10n.of(context);
+    // +1 для Оракула в начале, +1 для подсказки если список пуст
+    final itemCount = contacts.length + 1 + (showEmptyHint ? 1 : 0);
+    
+    return ListView.builder(
       padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, 100),
-      itemCount: contacts.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+          AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xxl),
+      itemCount: itemCount,
       itemBuilder: (context, index) {
-        final c = contacts[index];
+        // Первый элемент — Оракул Орфея (AI контакт)
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: _OracleContactRow(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const AiAssistantChatScreen(),
+                  ),
+                );
+              },
+            ),
+          );
+        }
+        
+        // Подсказка для добавления контактов (если список пуст)
+        if (showEmptyHint && index == 1) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 14, top: 8),
+            child: _AddContactHint(
+              onTap: _showAddContactDialog,
+            ),
+          );
+        }
+        
+        // Обычные контакты (со смещением индекса)
+        final contactIndex = index - 1 - (showEmptyHint ? 1 : 0);
+        if (contactIndex < 0 || contactIndex >= contacts.length) {
+          return const SizedBox.shrink();
+        }
+        
+        final c = contacts[contactIndex];
         final isOnline = presence[c.publicKey] == true;
         final unread = unreadCounts[c.publicKey] ?? 0;
 
-        return _ContactRow(
-          contact: c,
-          isOnline: isOnline,
-          unreadCount: unread,
-          onTap: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => ChatScreen(contact: c)),
-            );
-            _refreshContacts();
-          },
-          onLongPress: () => _showContactActionsSheet(c),
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _ContactRow(
+            contact: c,
+            isOnline: isOnline,
+            unreadCount: unread,
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => ChatScreen(contact: c)),
+              );
+              _refreshContacts();
+            },
+            onLongPress: () => _showContactActionsSheet(c),
+          ),
         );
       },
     );
@@ -786,6 +821,349 @@ class _DeleteContactDialog extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ORACLE CONTACT ROW — ВАУ-контакт Оракула Орфея (AI)
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _OracleContactRow extends StatefulWidget {
+  const _OracleContactRow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_OracleContactRow> createState() => _OracleContactRowState();
+}
+
+class _OracleContactRowState extends State<_OracleContactRow>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _glowController;
+  late Animation<double> _glowAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat(reverse: true);
+
+    _glowAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _glowController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+
+    return AnimatedBuilder(
+      animation: _glowAnimation,
+      builder: (context, child) {
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: AppRadii.md,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                // Градиентный фон
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.action.withOpacity(0.08 + 0.04 * _glowAnimation.value),
+                    AppColors.surface,
+                    const Color(0xFF1A2530).withOpacity(0.95),
+                  ],
+                  stops: const [0.0, 0.4, 1.0],
+                ),
+                borderRadius: AppRadii.md,
+                border: Border.all(
+                  color: AppColors.action.withOpacity(0.25 + 0.15 * _glowAnimation.value),
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.action.withOpacity(0.15 * _glowAnimation.value),
+                    blurRadius: 20 * _glowAnimation.value,
+                    spreadRadius: -2,
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  // Анимированный AI аватар
+                  _OracleAvatar(animation: _glowAnimation),
+                  const SizedBox(width: 14),
+                  // Информация
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            // Имя Оракула
+                            Flexible(
+                              child: Text(
+                                l10n.aiAssistantName,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.textPrimary,
+                                    ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // AI Badge
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    AppColors.action.withOpacity(0.9),
+                                    AppColors.actionDark,
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppColors.action.withOpacity(0.3 * _glowAnimation.value),
+                                    blurRadius: 6,
+                                    spreadRadius: -1,
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.auto_awesome,
+                                    size: 10,
+                                    color: Colors.black.withOpacity(0.8),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  const Text(
+                                    'AI',
+                                    style: TextStyle(
+                                      color: Colors.black87,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        // Статус "Всегда онлайн" 
+                        Row(
+                          children: [
+                            // Пульсирующая точка
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.success,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppColors.success.withOpacity(0.5 * _glowAnimation.value),
+                                    blurRadius: 6 * _glowAnimation.value,
+                                    spreadRadius: 1 * _glowAnimation.value,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              l10n.aiAssistantOnline,
+                              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                    color: AppColors.success,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Стрелка с эффектом
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.action.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      color: AppColors.action.withOpacity(0.6 + 0.4 * _glowAnimation.value),
+                      size: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Анимированный аватар Оракула.
+class _OracleAvatar extends StatelessWidget {
+  const _OracleAvatar({required this.animation});
+
+  final Animation<double> animation;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.action.withOpacity(0.7 + 0.3 * animation.value),
+            AppColors.actionDark,
+            const Color(0xFF2E7D4F),
+          ],
+          stops: const [0.0, 0.5, 1.0],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.action.withOpacity(0.35 * animation.value),
+            blurRadius: 14 * animation.value,
+            spreadRadius: 1,
+          ),
+        ],
+        border: Border.all(
+          color: AppColors.actionLight.withOpacity(0.4 + 0.2 * animation.value),
+          width: 1.5,
+        ),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Иконка мозга/AI
+          Icon(
+            Icons.psychology,
+            color: Colors.white.withOpacity(0.95),
+            size: 28,
+          ),
+          // Искры сверху-справа
+          Positioned(
+            top: 4,
+            right: 4,
+            child: Icon(
+              Icons.auto_awesome,
+              color: Colors.white.withOpacity(0.6 + 0.4 * animation.value),
+              size: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADD CONTACT HINT — Подсказка для добавления первого контакта
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _AddContactHint extends StatelessWidget {
+  const _AddContactHint({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: AppRadii.md,
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: AppRadii.md,
+            border: Border.all(
+              color: AppColors.outline,
+              style: BorderStyle.solid,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: AppColors.surface2,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.outline),
+                ),
+                child: const Icon(
+                  Icons.person_add_outlined,
+                  color: AppColors.textTertiary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.noContacts,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      l10n.addFirstContact,
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: AppColors.action,
+                            fontWeight: FontWeight.w500,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.add_circle_outline,
+                color: AppColors.action.withOpacity(0.7),
+                size: 22,
+              ),
+            ],
+          ),
         ),
       ),
     );

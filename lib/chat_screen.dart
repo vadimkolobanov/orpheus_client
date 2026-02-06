@@ -8,6 +8,7 @@ import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/models/contact_model.dart';
+import 'package:orpheus_project/models/note_model.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/locale_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
@@ -364,7 +365,12 @@ class _ChatScreenState extends State<ChatScreen>
       ),
     );
 
-    if (!shouldAnimate) return bubble;
+    final bubbleWithActions = GestureDetector(
+      onLongPress: () => _showSaveNoteSheet(message.text),
+      child: bubble,
+    );
+
+    if (!shouldAnimate) return bubbleWithActions;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
       duration: const Duration(milliseconds: 220),
@@ -373,9 +379,56 @@ class _ChatScreenState extends State<ChatScreen>
         final dx = isMyMessage ? 12.0 * (1 - v) : -12.0 * (1 - v);
         return Transform.translate(
           offset: Offset(dx, 6 * (1 - v)),
-          child: Opacity(opacity: v, child: bubble),
+          child: Opacity(opacity: v, child: bubbleWithActions),
         );
       },
+    );
+  }
+
+  Future<void> _showSaveNoteSheet(String text) async {
+    final l10n = L10n.of(context);
+    if (text.trim().isEmpty) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textTertiary.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              ListTile(
+                leading: const Icon(Icons.bookmark_add, color: AppColors.action),
+                title: Text(l10n.notesAddFromChat),
+                onTap: () => Navigator.pop(context, 'save'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (action != 'save') return;
+    await DatabaseService.instance.addNote(
+      text: text,
+      sourceType: NoteSourceType.contact.name,
+      sourceId: widget.contact.publicKey,
+      sourceLabel: widget.contact.name,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(l10n.notesAdded)),
     );
   }
 
@@ -401,8 +454,7 @@ class _ChatScreenState extends State<ChatScreen>
                 maxLines: 4,
                 minLines: 1,
                 textCapitalization: TextCapitalization.sentences,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _sendMessage(),
+                textInputAction: TextInputAction.newline,
               ),
             ),
             const SizedBox(width: 10),

@@ -217,6 +217,90 @@ abstract class L10n {
   /// **'sent'**
   String get sentCount;
 
+  /// Desktop Link menu title
+  ///
+  /// In en, this message translates to:
+  /// **'Desktop Link'**
+  String get desktopLinkTitle;
+
+  /// Desktop Link menu description
+  ///
+  /// In en, this message translates to:
+  /// **'Connect phone to desktop'**
+  String get desktopLinkDesc;
+
+  /// Desktop Link status card title
+  ///
+  /// In en, this message translates to:
+  /// **'Connection status'**
+  String get desktopLinkStatusTitle;
+
+  /// Desktop Link scan QR button
+  ///
+  /// In en, this message translates to:
+  /// **'Scan QR code'**
+  String get desktopLinkScanQr;
+
+  /// Desktop Link reset button
+  ///
+  /// In en, this message translates to:
+  /// **'Reset pairing'**
+  String get desktopLinkReset;
+
+  /// Desktop Link connecting state
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting...'**
+  String get desktopLinkConnecting;
+
+  /// Desktop Link not paired state
+  ///
+  /// In en, this message translates to:
+  /// **'Not paired yet'**
+  String get desktopLinkNotPaired;
+
+  /// Desktop Link paired state
+  ///
+  /// In en, this message translates to:
+  /// **'Paired with desktop'**
+  String get desktopLinkPaired;
+
+  /// Desktop Link OTP label
+  ///
+  /// In en, this message translates to:
+  /// **'Confirmation code'**
+  String get desktopLinkOtpLabel;
+
+  /// Desktop Link OTP hint
+  ///
+  /// In en, this message translates to:
+  /// **'Enter this code on desktop'**
+  String get desktopLinkOtpHint;
+
+  /// Desktop Link expired QR error
+  ///
+  /// In en, this message translates to:
+  /// **'QR code expired'**
+  String get desktopLinkExpired;
+
+  /// Desktop Link invalid QR error
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid QR code'**
+  String get desktopLinkInvalidQr;
+
+  /// Desktop Link network error
+  ///
+  /// In en, this message translates to:
+  /// **'Desktop is not reachable'**
+  String get desktopLinkNetworkError;
+
+  /// Desktop Link unknown error
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong'**
+  String get desktopLinkUnknownError;
+
   /// Security menu item
   ///
   /// In en, this message translates to:
@@ -2640,6 +2724,84 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'What is the duress code?'**
   String get aiSuggestion3;
+
+  /// Notes vault title
+  ///
+  /// In en, this message translates to:
+  /// **'Vault'**
+  String get notesVaultTitle;
+
+  /// Notes vault subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Personal notes and important messages'**
+  String get notesVaultDesc;
+
+  /// Empty notes title
+  ///
+  /// In en, this message translates to:
+  /// **'Vault is empty'**
+  String get notesEmptyTitle;
+
+  /// Empty notes subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Save thoughts and important messages here'**
+  String get notesEmptyDesc;
+
+  /// Notes input placeholder
+  ///
+  /// In en, this message translates to:
+  /// **'New note...'**
+  String get notesPlaceholder;
+
+  /// Save note button
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get notesAdd;
+
+  /// Add to notes action
+  ///
+  /// In en, this message translates to:
+  /// **'Add to notes'**
+  String get notesAddFromChat;
+
+  /// Note added snackbar
+  ///
+  /// In en, this message translates to:
+  /// **'Added to notes'**
+  String get notesAdded;
+
+  /// Delete note title
+  ///
+  /// In en, this message translates to:
+  /// **'Delete note?'**
+  String get notesDeleteTitle;
+
+  /// Delete note description
+  ///
+  /// In en, this message translates to:
+  /// **'The note will be deleted permanently.'**
+  String get notesDeleteDesc;
+
+  /// Note source from contact
+  ///
+  /// In en, this message translates to:
+  /// **'From chat with {name}'**
+  String notesFromContact(String name);
+
+  /// Note source from room
+  ///
+  /// In en, this message translates to:
+  /// **'From room {name}'**
+  String notesFromRoom(String name);
+
+  /// Note source from Oracle
+  ///
+  /// In en, this message translates to:
+  /// **'From Oracle chat'**
+  String get notesFromOracle;
 }
 
 class _L10nDelegate extends LocalizationsDelegate<L10n> {

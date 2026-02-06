@@ -90,6 +90,48 @@ class L10nEn extends L10n {
   String get sentCount => 'sent';
 
   @override
+  String get desktopLinkTitle => 'Desktop Link';
+
+  @override
+  String get desktopLinkDesc => 'Connect phone to desktop';
+
+  @override
+  String get desktopLinkStatusTitle => 'Connection status';
+
+  @override
+  String get desktopLinkScanQr => 'Scan QR code';
+
+  @override
+  String get desktopLinkReset => 'Reset pairing';
+
+  @override
+  String get desktopLinkConnecting => 'Connecting...';
+
+  @override
+  String get desktopLinkNotPaired => 'Not paired yet';
+
+  @override
+  String get desktopLinkPaired => 'Paired with desktop';
+
+  @override
+  String get desktopLinkOtpLabel => 'Confirmation code';
+
+  @override
+  String get desktopLinkOtpHint => 'Enter this code on desktop';
+
+  @override
+  String get desktopLinkExpired => 'QR code expired';
+
+  @override
+  String get desktopLinkInvalidQr => 'Invalid QR code';
+
+  @override
+  String get desktopLinkNetworkError => 'Desktop is not reachable';
+
+  @override
+  String get desktopLinkUnknownError => 'Something went wrong';
+
+  @override
   String get security => 'Security';
 
   @override
@@ -1389,4 +1431,47 @@ class L10nEn extends L10n {
 
   @override
   String get aiSuggestion3 => 'What is the duress code?';
+
+  @override
+  String get notesVaultTitle => 'Vault';
+
+  @override
+  String get notesVaultDesc => 'Personal notes and important messages';
+
+  @override
+  String get notesEmptyTitle => 'Vault is empty';
+
+  @override
+  String get notesEmptyDesc => 'Save thoughts and important messages here';
+
+  @override
+  String get notesPlaceholder => 'New note...';
+
+  @override
+  String get notesAdd => 'Save';
+
+  @override
+  String get notesAddFromChat => 'Add to notes';
+
+  @override
+  String get notesAdded => 'Added to notes';
+
+  @override
+  String get notesDeleteTitle => 'Delete note?';
+
+  @override
+  String get notesDeleteDesc => 'The note will be deleted permanently.';
+
+  @override
+  String notesFromContact(String name) {
+    return 'From chat with $name';
+  }
+
+  @override
+  String notesFromRoom(String name) {
+    return 'From room $name';
+  }
+
+  @override
+  String get notesFromOracle => 'From Oracle chat';
 }

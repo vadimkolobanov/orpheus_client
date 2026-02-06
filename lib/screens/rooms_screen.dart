@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/models/room_model.dart';
+import 'package:orpheus_project/screens/notes_vault_screen.dart';
 import 'package:orpheus_project/screens/room_chat_screen.dart';
 import 'package:orpheus_project/services/rooms_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
@@ -18,6 +19,10 @@ class RoomsScreen extends StatefulWidget {
 }
 
 class _RoomsScreenState extends State<RoomsScreen> {
+  /// ID официальной комнаты Orpheus.
+  /// TODO(future): Официальная комната Orpheus — функционал на будущее.
+  /// Сейчас комната скрыта от пользователей (фильтруется в списке).
+  /// Когда будет готова — убрать фильтрацию в методе build().
   static const String _orpheusRoomId = 'orpheus';
 
   final RoomsService _service = RoomsService();
@@ -186,24 +191,36 @@ class _RoomsScreenState extends State<RoomsScreen> {
           }
 
           final rawRooms = snapshot.data ?? const <Room>[];
-          final rooms = _ensureOrpheusRoom(rawRooms, l10n);
-          if (rooms.isEmpty) {
-            return EmptyState(
-              title: l10n.noRooms,
-              subtitle: l10n.noRoomsDesc,
-              icon: Icons.forum_outlined,
-              actionLabel: l10n.createRoom,
-              onAction: _showRoomActionsSheet,
-            );
-          }
-
+          final rooms = rawRooms
+              .where((room) => room.id != _orpheusRoomId)
+              .toList(growable: false);
+          final itemCount = rooms.isEmpty ? 2 : rooms.length + 1;
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(
                 AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, 100),
-            itemCount: rooms.length,
+            itemCount: itemCount,
             separatorBuilder: (_, __) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
-              final room = rooms[index];
+              if (index == 0) {
+                return _VaultRow(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const NotesVaultScreen()),
+                    );
+                  },
+                );
+              }
+              if (rooms.isEmpty) {
+                return EmptyState(
+                  title: l10n.noRooms,
+                  subtitle: l10n.noRoomsDesc,
+                  icon: Icons.forum_outlined,
+                  actionLabel: l10n.createRoom,
+                  onAction: _showRoomActionsSheet,
+                );
+              }
+              final room = rooms[index - 1];
               return _RoomRow(
                 room: room,
                 isOrpheus: room.id == _orpheusRoomId,
@@ -222,20 +239,143 @@ class _RoomsScreenState extends State<RoomsScreen> {
     );
   }
 
-  List<Room> _ensureOrpheusRoom(List<Room> rooms, L10n l10n) {
-    final hasOrpheus = rooms.any((room) => room.id == _orpheusRoomId);
-    if (hasOrpheus) {
-      return rooms;
-    }
+}
 
-    return [
-      Room(
-        id: _orpheusRoomId,
-        name: l10n.orpheusRoomName,
-        membersCount: 0,
-      ),
-      ...rooms,
-    ];
+class _VaultRow extends StatefulWidget {
+  const _VaultRow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_VaultRow> createState() => _VaultRowState();
+}
+
+class _VaultRowState extends State<_VaultRow> with SingleTickerProviderStateMixin {
+  late final AnimationController _glowController;
+  late final Animation<double> _glowAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    )..repeat(reverse: true);
+    _glowAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _glowController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    return AnimatedBuilder(
+      animation: _glowAnimation,
+      builder: (context, _) {
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: AppRadii.md,
+            child: Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.action.withOpacity(0.08 + 0.06 * _glowAnimation.value),
+                    AppColors.surface,
+                    const Color(0xFF1A2033).withOpacity(0.95),
+                  ],
+                  stops: const [0.0, 0.4, 1.0],
+                ),
+                borderRadius: AppRadii.md,
+                border: Border.all(
+                  color: AppColors.action.withOpacity(0.25 + 0.12 * _glowAnimation.value),
+                  width: 1.4,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.action.withOpacity(0.18 * _glowAnimation.value),
+                    blurRadius: 18 * _glowAnimation.value,
+                    spreadRadius: -2,
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      borderRadius: AppRadii.sm,
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppColors.action.withOpacity(0.8),
+                          AppColors.actionDark,
+                          const Color(0xFF2E7D4F),
+                        ],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.action.withOpacity(0.35 * _glowAnimation.value),
+                          blurRadius: 10 * _glowAnimation.value,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.lock, color: Colors.white, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          l10n.notesVaultTitle,
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          l10n.notesVaultDesc,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelMedium
+                              ?.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    size: 16,
+                    color:
+                        AppColors.action.withOpacity(0.6 + 0.3 * _glowAnimation.value),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 

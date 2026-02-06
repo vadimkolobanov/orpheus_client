@@ -10,7 +10,9 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:intl/intl.dart';
 import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/models/ai_message_model.dart';
+import 'package:orpheus_project/models/note_model.dart';
 import 'package:orpheus_project/services/ai_assistant_service.dart';
+import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_scaffold.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -201,7 +203,10 @@ class _AiAssistantChatScreenState extends State<AiAssistantChatScreen>
         if (index == messages.length && _isLoading) {
           return const _ThinkingIndicator();
         }
-        return _MessageBubble(message: messages[index]);
+        return _MessageBubble(
+          message: messages[index],
+          onLongPress: () => _saveNoteFromOracle(messages[index]),
+        );
       },
     );
   }
@@ -346,6 +351,54 @@ class _AiAssistantChatScreenState extends State<AiAssistantChatScreen>
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _saveNoteFromOracle(AiMessage message) async {
+    final l10n = L10n.of(context);
+    final text = message.content.trim();
+    if (text.isEmpty) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textTertiary.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              ListTile(
+                leading: const Icon(Icons.bookmark_add, color: AppColors.action),
+                title: Text(l10n.notesAddFromChat),
+                onTap: () => Navigator.pop(context, 'save'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (action != 'save') return;
+    await DatabaseService.instance.addNote(
+      text: text,
+      sourceType: NoteSourceType.oracle.name,
+      sourceId: 'oracle',
+      sourceLabel: l10n.aiAssistantName,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(l10n.notesAdded)),
     );
   }
 }
@@ -553,16 +606,17 @@ class _ThinkingIndicatorState extends State<_ThinkingIndicator>
 
 /// Пузырь сообщения в чате.
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({required this.message, this.onLongPress});
 
   final AiMessage message;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final isUser = message.role == AiMessageRole.user;
     final isError = message.isError;
 
-    return Align(
+    final bubble = Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         constraints: BoxConstraints(
@@ -627,6 +681,10 @@ class _MessageBubble extends StatelessWidget {
           ],
         ),
       ),
+    );
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: bubble,
     );
   }
 

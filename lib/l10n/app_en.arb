@@ -75,6 +75,48 @@
   
   "sentCount": "sent",
   "@sentCount": {"description": "Sent count label"},
+
+  "desktopLinkTitle": "Desktop Link",
+  "@desktopLinkTitle": {"description": "Desktop Link menu title"},
+
+  "desktopLinkDesc": "Connect phone to desktop",
+  "@desktopLinkDesc": {"description": "Desktop Link menu description"},
+
+  "desktopLinkStatusTitle": "Connection status",
+  "@desktopLinkStatusTitle": {"description": "Desktop Link status card title"},
+
+  "desktopLinkScanQr": "Scan QR code",
+  "@desktopLinkScanQr": {"description": "Desktop Link scan QR button"},
+
+  "desktopLinkReset": "Reset pairing",
+  "@desktopLinkReset": {"description": "Desktop Link reset button"},
+
+  "desktopLinkConnecting": "Connecting...",
+  "@desktopLinkConnecting": {"description": "Desktop Link connecting state"},
+
+  "desktopLinkNotPaired": "Not paired yet",
+  "@desktopLinkNotPaired": {"description": "Desktop Link not paired state"},
+
+  "desktopLinkPaired": "Paired with desktop",
+  "@desktopLinkPaired": {"description": "Desktop Link paired state"},
+
+  "desktopLinkOtpLabel": "Confirmation code",
+  "@desktopLinkOtpLabel": {"description": "Desktop Link OTP label"},
+
+  "desktopLinkOtpHint": "Enter this code on desktop",
+  "@desktopLinkOtpHint": {"description": "Desktop Link OTP hint"},
+
+  "desktopLinkExpired": "QR code expired",
+  "@desktopLinkExpired": {"description": "Desktop Link expired QR error"},
+
+  "desktopLinkInvalidQr": "Invalid QR code",
+  "@desktopLinkInvalidQr": {"description": "Desktop Link invalid QR error"},
+
+  "desktopLinkNetworkError": "Desktop is not reachable",
+  "@desktopLinkNetworkError": {"description": "Desktop Link network error"},
+
+  "desktopLinkUnknownError": "Something went wrong",
+  "@desktopLinkUnknownError": {"description": "Desktop Link unknown error"},
   
   "security": "Security",
   "@security": {"description": "Security menu item"},
@@ -1309,5 +1351,38 @@
   "aiSuggestion2": "How does encryption work?",
   "@aiSuggestion2": {"description": "AI suggestion 2"},
   "aiSuggestion3": "What is the duress code?",
-  "@aiSuggestion3": {"description": "AI suggestion 3"}
+  "@aiSuggestion3": {"description": "AI suggestion 3"},
+
+  "notesVaultTitle": "Vault",
+  "@notesVaultTitle": {"description": "Notes vault title"},
+  "notesVaultDesc": "Personal notes and important messages",
+  "@notesVaultDesc": {"description": "Notes vault subtitle"},
+  "notesEmptyTitle": "Vault is empty",
+  "@notesEmptyTitle": {"description": "Empty notes title"},
+  "notesEmptyDesc": "Save thoughts and important messages here",
+  "@notesEmptyDesc": {"description": "Empty notes subtitle"},
+  "notesPlaceholder": "New note...",
+  "@notesPlaceholder": {"description": "Notes input placeholder"},
+  "notesAdd": "Save",
+  "@notesAdd": {"description": "Save note button"},
+  "notesAddFromChat": "Add to notes",
+  "@notesAddFromChat": {"description": "Add to notes action"},
+  "notesAdded": "Added to notes",
+  "@notesAdded": {"description": "Note added snackbar"},
+  "notesDeleteTitle": "Delete note?",
+  "@notesDeleteTitle": {"description": "Delete note title"},
+  "notesDeleteDesc": "The note will be deleted permanently.",
+  "@notesDeleteDesc": {"description": "Delete note description"},
+  "notesFromContact": "From chat with {name}",
+  "@notesFromContact": {
+    "description": "Note source from contact",
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "notesFromRoom": "From room {name}",
+  "@notesFromRoom": {
+    "description": "Note source from room",
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "notesFromOracle": "From Oracle chat",
+  "@notesFromOracle": {"description": "Note source from Oracle"}
 }

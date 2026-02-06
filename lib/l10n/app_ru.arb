@@ -23,6 +23,21 @@
   "contactsCount": "{count, plural, =0{контактов} =1{контакт} few{контакта} many{контактов} other{контактов}}",
   "messagesCount": "{count, plural, =0{сообщений} =1{сообщение} few{сообщения} many{сообщений} other{сообщений}}",
   "sentCount": "отправлено",
+
+  "desktopLinkTitle": "Desktop Link",
+  "desktopLinkDesc": "Подключение телефона к ПК",
+  "desktopLinkStatusTitle": "Статус подключения",
+  "desktopLinkScanQr": "Сканировать QR",
+  "desktopLinkReset": "Сбросить привязку",
+  "desktopLinkConnecting": "Подключение...",
+  "desktopLinkNotPaired": "Пока не привязано",
+  "desktopLinkPaired": "Привязано к десктопу",
+  "desktopLinkOtpLabel": "Код подтверждения",
+  "desktopLinkOtpHint": "Введите этот код на десктопе",
+  "desktopLinkExpired": "QR-код истёк",
+  "desktopLinkInvalidQr": "Некорректный QR-код",
+  "desktopLinkNetworkError": "Десктоп недоступен",
+  "desktopLinkUnknownError": "Произошла ошибка",
   
   "security": "Безопасность",
   "securityDesc": "PIN, duress, wipe",
@@ -489,5 +504,19 @@
   "aiMemoryIndicator": "Память: {count} ответов ИИ",
   "aiSuggestion1": "Что нового в этой версии?",
   "aiSuggestion2": "Как работает шифрование?",
-  "aiSuggestion3": "Что такое код принуждения?"
+  "aiSuggestion3": "Что такое код принуждения?",
+
+  "notesVaultTitle": "Сейф",
+  "notesVaultDesc": "Личные заметки и важные сообщения",
+  "notesEmptyTitle": "Сейф пуст",
+  "notesEmptyDesc": "Сохраняйте мысли и важные сообщения здесь",
+  "notesPlaceholder": "Новая заметка...",
+  "notesAdd": "Сохранить",
+  "notesAddFromChat": "Добавить в заметки",
+  "notesAdded": "Добавлено в заметки",
+  "notesDeleteTitle": "Удалить заметку?",
+  "notesDeleteDesc": "Заметка будет удалена безвозвратно.",
+  "notesFromContact": "Из чата с {name}",
+  "notesFromRoom": "Из комнаты {name}",
+  "notesFromOracle": "Из чата с Оракулом"
 }

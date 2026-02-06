@@ -6,6 +6,7 @@ import 'package:orpheus_project/config.dart';
 import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/screens/debug_logs_screen.dart';
+import 'package:orpheus_project/screens/desktop_link_screen.dart';
 import 'package:orpheus_project/screens/help_screen.dart';
 import 'package:orpheus_project/screens/security_settings_screen.dart';
 import 'package:orpheus_project/screens/support_chat_screen.dart';
@@ -14,7 +15,6 @@ import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
 import 'package:orpheus_project/services/locale_service.dart';
-import 'package:orpheus_project/services/notification_prefs_service.dart';
 import 'package:orpheus_project/services/update_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/updates_screen.dart';
@@ -62,51 +62,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _showNotificationSettingsDialog() async {
     final l10n = L10n.of(context);
-    var orpheusEnabled =
-        await NotificationPrefsService.isOrpheusOfficialEnabled();
-    if (!mounted) return;
-
     await showDialog<void>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AppDialog(
-          icon: Icons.notifications_none,
-          title: l10n.notificationSettings,
-          contentWidget: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l10n.orpheusNotificationsDesc,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: AppColors.textSecondary),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: orpheusEnabled,
-                title: Text(l10n.orpheusOfficialNotifications),
-                onChanged: (value) async {
-                  await NotificationPrefsService.setOrpheusOfficialEnabled(
-                      value);
-                  setState(() => orpheusEnabled = value);
+      builder: (context) => AppDialog(
+        icon: Icons.notifications_none,
+        title: l10n.notificationSettings,
+        contentWidget: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  DeviceSettingsService.showSetupDialog(context);
                 },
+                child: Text(l10n.systemNotificationSettings),
               ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    DeviceSettingsService.showSetupDialog(context);
-                  },
-                  child: Text(l10n.systemNotificationSettings),
-                ),
-              ),
-            ],
-          ),
-          primaryLabel: l10n.close,
+            ),
+          ],
         ),
+        primaryLabel: l10n.close,
       ),
     );
   }
@@ -269,6 +245,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 14),
             _MenuCard(
               l10n: l10n,
+              onDesktopLink: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const DesktopLinkScreen()),
+              ),
               onSecurity: () => Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -528,6 +508,7 @@ class _StatsCard extends StatelessWidget {
 class _MenuCard extends StatelessWidget {
   const _MenuCard({
     required this.l10n,
+    required this.onDesktopLink,
     required this.onSecurity,
     required this.onSupport,
     required this.onHelp,
@@ -538,6 +519,7 @@ class _MenuCard extends StatelessWidget {
   });
 
   final L10n l10n;
+  final VoidCallback onDesktopLink;
   final VoidCallback onSecurity;
   final VoidCallback onSupport;
   final VoidCallback onHelp;
@@ -557,6 +539,9 @@ class _MenuCard extends StatelessWidget {
       ),
       child: Column(
         children: [
+          _tile(context, Icons.desktop_windows, l10n.desktopLinkTitle,
+              l10n.desktopLinkDesc, onDesktopLink),
+          _divider(),
           _tile(context, Icons.security, l10n.security, l10n.securityDesc,
               onSecurity),
           _divider(),

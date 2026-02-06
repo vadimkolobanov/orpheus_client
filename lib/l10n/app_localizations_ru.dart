@@ -94,6 +94,48 @@ class L10nRu extends L10n {
   String get sentCount => 'отправлено';
 
   @override
+  String get desktopLinkTitle => 'Desktop Link';
+
+  @override
+  String get desktopLinkDesc => 'Подключение телефона к ПК';
+
+  @override
+  String get desktopLinkStatusTitle => 'Статус подключения';
+
+  @override
+  String get desktopLinkScanQr => 'Сканировать QR';
+
+  @override
+  String get desktopLinkReset => 'Сбросить привязку';
+
+  @override
+  String get desktopLinkConnecting => 'Подключение...';
+
+  @override
+  String get desktopLinkNotPaired => 'Пока не привязано';
+
+  @override
+  String get desktopLinkPaired => 'Привязано к десктопу';
+
+  @override
+  String get desktopLinkOtpLabel => 'Код подтверждения';
+
+  @override
+  String get desktopLinkOtpHint => 'Введите этот код на десктопе';
+
+  @override
+  String get desktopLinkExpired => 'QR-код истёк';
+
+  @override
+  String get desktopLinkInvalidQr => 'Некорректный QR-код';
+
+  @override
+  String get desktopLinkNetworkError => 'Десктоп недоступен';
+
+  @override
+  String get desktopLinkUnknownError => 'Произошла ошибка';
+
+  @override
   String get security => 'Безопасность';
 
   @override
@@ -1401,4 +1443,47 @@ class L10nRu extends L10n {
 
   @override
   String get aiSuggestion3 => 'Что такое код принуждения?';
+
+  @override
+  String get notesVaultTitle => 'Сейф';
+
+  @override
+  String get notesVaultDesc => 'Личные заметки и важные сообщения';
+
+  @override
+  String get notesEmptyTitle => 'Сейф пуст';
+
+  @override
+  String get notesEmptyDesc => 'Сохраняйте мысли и важные сообщения здесь';
+
+  @override
+  String get notesPlaceholder => 'Новая заметка...';
+
+  @override
+  String get notesAdd => 'Сохранить';
+
+  @override
+  String get notesAddFromChat => 'Добавить в заметки';
+
+  @override
+  String get notesAdded => 'Добавлено в заметки';
+
+  @override
+  String get notesDeleteTitle => 'Удалить заметку?';
+
+  @override
+  String get notesDeleteDesc => 'Заметка будет удалена безвозвратно.';
+
+  @override
+  String notesFromContact(String name) {
+    return 'Из чата с $name';
+  }
+
+  @override
+  String notesFromRoom(String name) {
+    return 'Из комнаты $name';
+  }
+
+  @override
+  String get notesFromOracle => 'Из чата с Оракулом';
 }
