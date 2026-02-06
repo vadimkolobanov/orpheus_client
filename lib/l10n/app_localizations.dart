@@ -2640,6 +2640,84 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'What is the duress code?'**
   String get aiSuggestion3;
+
+  /// Notes vault title
+  ///
+  /// In en, this message translates to:
+  /// **'Vault'**
+  String get notesVaultTitle;
+
+  /// Notes vault subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Personal notes and important messages'**
+  String get notesVaultDesc;
+
+  /// Empty notes title
+  ///
+  /// In en, this message translates to:
+  /// **'Vault is empty'**
+  String get notesEmptyTitle;
+
+  /// Empty notes subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Save thoughts and important messages here'**
+  String get notesEmptyDesc;
+
+  /// Notes input placeholder
+  ///
+  /// In en, this message translates to:
+  /// **'New note...'**
+  String get notesPlaceholder;
+
+  /// Save note button
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get notesAdd;
+
+  /// Add to notes action
+  ///
+  /// In en, this message translates to:
+  /// **'Add to notes'**
+  String get notesAddFromChat;
+
+  /// Note added snackbar
+  ///
+  /// In en, this message translates to:
+  /// **'Added to notes'**
+  String get notesAdded;
+
+  /// Delete note title
+  ///
+  /// In en, this message translates to:
+  /// **'Delete note?'**
+  String get notesDeleteTitle;
+
+  /// Delete note description
+  ///
+  /// In en, this message translates to:
+  /// **'The note will be deleted permanently.'**
+  String get notesDeleteDesc;
+
+  /// Note source from contact
+  ///
+  /// In en, this message translates to:
+  /// **'From chat with {name}'**
+  String notesFromContact(String name);
+
+  /// Note source from room
+  ///
+  /// In en, this message translates to:
+  /// **'From room {name}'**
+  String notesFromRoom(String name);
+
+  /// Note source from Oracle
+  ///
+  /// In en, this message translates to:
+  /// **'From Oracle chat'**
+  String get notesFromOracle;
 }
 
 class _L10nDelegate extends LocalizationsDelegate<L10n> {

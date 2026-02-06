@@ -35,10 +35,10 @@ class DatabaseService {
       print("DB: Путь к БД: $path");
 
       print("DB: Открытие базы данных...");
-      // Увеличиваем версию до 4
+  // Увеличиваем версию до 5
       final db = await openDatabase(
-        path, 
-        version: 4, 
+        path,
+        version: 5,
         onCreate: _createDB, 
         onUpgrade: _upgradeDB,
         singleInstance: true, // Важно для избежания блокировок
@@ -60,6 +60,7 @@ class DatabaseService {
     await _createContactsTable(db);
     await _createMessagesTable(db);
     await _createAiTables(db);
+    await _createNotesTable(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -88,6 +89,10 @@ class DatabaseService {
       if (oldVersion < 4) {
         print("DB: Миграция до версии 4...");
         await _createAiTables(db);
+      }
+      if (oldVersion < 5) {
+        print("DB: Миграция до версии 5...");
+        await _createNotesTable(db);
       }
       print("DB: Миграция завершена");
     } catch (e) {
@@ -134,6 +139,19 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS ai_context (
         key TEXT PRIMARY KEY,
         value TEXT
+      )
+    ''');
+  }
+
+  Future<void> _createNotesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        source_label TEXT
       )
     ''');
   }
@@ -345,6 +363,49 @@ class DatabaseService {
     final db = await instance.database;
     await db.delete('ai_messages');
     await db.delete('ai_context', where: 'key = ?', whereArgs: ['parent_message_id']);
+  }
+
+  // --- Notes ---
+
+  Future<void> addNote({
+    required String text,
+    required String sourceType,
+    String? sourceId,
+    String? sourceLabel,
+    DateTime? createdAt,
+  }) async {
+    if (_isDuressMode) return;
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    final db = await instance.database;
+    await db.insert('notes', {
+      'text': trimmed,
+      'created_at': (createdAt ?? DateTime.now()).millisecondsSinceEpoch,
+      'source_type': sourceType,
+      'source_id': sourceId,
+      'source_label': sourceLabel,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getNotes() async {
+    if (_isDuressMode) return [];
+    final db = await instance.database;
+    return db.query(
+      'notes',
+      orderBy: 'created_at DESC',
+    );
+  }
+
+  Future<void> deleteNote(int id) async {
+    if (_isDuressMode) return;
+    final db = await instance.database;
+    await db.delete('notes', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> clearNotes() async {
+    if (_isDuressMode) return;
+    final db = await instance.database;
+    await db.delete('notes');
   }
 
   Future<void> _trimAiMessages(Database db, int assistantLimit) async {

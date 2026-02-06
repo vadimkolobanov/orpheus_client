@@ -1,32 +1,32 @@
 // lib/models/message_retention_policy.dart
-// Политика хранения сообщений — автоудаление по времени
+// Message retention policy - auto-delete by time
 
-/// Политика автоматического удаления сообщений.
+/// Message auto-delete policy.
 /// 
-/// Определяет, сколько времени хранятся сообщения перед автоматическим удалением.
-/// Интегрируется с SecurityConfig и выполняется при запуске приложения
-/// и периодически во время работы.
+/// Defines how long messages are stored before automatic deletion.
+/// Integrates with SecurityConfig and executes at app launch
+/// and periodically during operation.
 enum MessageRetentionPolicy {
-  /// Хранить все сообщения (без автоудаления)
+  /// Keep all messages (no auto-delete)
   all,
   
-  /// Хранить сообщения за последние 24 часа
+  /// Keep messages for the last 24 hours
   day,
   
-  /// Хранить сообщения за последние 7 дней
+  /// Keep messages for the last 7 days
   week,
   
-  /// Хранить сообщения за последние 30 дней
+  /// Keep messages for the last 30 days
   month,
 }
 
 /// Расширение для MessageRetentionPolicy с утилитами
 extension MessageRetentionPolicyExtension on MessageRetentionPolicy {
-  /// Получить Duration для расчёта cutoff времени
+  /// Get Duration for cutoff time calculation
   Duration? get retentionDuration {
     switch (this) {
       case MessageRetentionPolicy.all:
-        return null; // Без ограничений
+        return null; // No limit
       case MessageRetentionPolicy.day:
         return const Duration(hours: 24);
       case MessageRetentionPolicy.week:
@@ -36,48 +36,48 @@ extension MessageRetentionPolicyExtension on MessageRetentionPolicy {
     }
   }
   
-  /// Рассчитать cutoff timestamp (сообщения старше будут удалены)
+  /// Calculate cutoff timestamp (messages older will be deleted)
   DateTime? getCutoffTime([DateTime? now]) {
     final duration = retentionDuration;
     if (duration == null) return null;
     return (now ?? DateTime.now()).subtract(duration);
   }
   
-  /// Человекочитаемое название для UI
+  /// Human-readable name for UI
   String get displayName {
     switch (this) {
       case MessageRetentionPolicy.all:
-        return 'Хранить всегда';
+        return 'Keep forever';
       case MessageRetentionPolicy.day:
-        return 'Хранить 24 часа';
+        return 'Keep 24 hours';
       case MessageRetentionPolicy.week:
-        return 'Хранить 7 дней';
+        return 'Keep 7 days';
       case MessageRetentionPolicy.month:
-        return 'Хранить 30 дней';
+        return 'Keep 30 days';
     }
   }
   
-  /// Краткое описание для UI
+  /// Short description for UI
   String get subtitle {
     switch (this) {
       case MessageRetentionPolicy.all:
-        return 'Сообщения не удаляются автоматически';
+        return 'Messages are not deleted automatically';
       case MessageRetentionPolicy.day:
-        return 'Сообщения старше суток удаляются';
+        return 'Messages older than a day are deleted';
       case MessageRetentionPolicy.week:
-        return 'Сообщения старше недели удаляются';
+        return 'Messages older than a week are deleted';
       case MessageRetentionPolicy.month:
-        return 'Сообщения старше месяца удаляются';
+        return 'Messages older than a month are deleted';
     }
   }
   
-  /// Индекс для сохранения в конфиг (int)
+  /// Index for saving to config (int)
   int get configValue => index;
   
-  /// Восстановление из int
+  /// Restore from int
   static MessageRetentionPolicy fromConfigValue(int? value) {
     if (value == null || value < 0 || value >= MessageRetentionPolicy.values.length) {
-      return MessageRetentionPolicy.all; // По умолчанию — хранить всё
+      return MessageRetentionPolicy.all; // Default - keep all
     }
     return MessageRetentionPolicy.values[value];
   }

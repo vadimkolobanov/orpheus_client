@@ -1036,12 +1036,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     isAppInForeground = (state == AppLifecycleState.resumed);
     
     if (state == AppLifecycleState.resumed) {
-      DebugLogger.info('LIFECYCLE', 'Приложение в foreground, переподключение WS...');
-      // Переподключение WebSocket при возврате в приложение
+      DebugLogger.info('LIFECYCLE', 'App in foreground, reconnecting WS...');
+      // Reconnect WebSocket on return to app
       if (cryptoService.publicKeyBase64 != null) {
         websocketService.connect(cryptoService.publicKeyBase64!);
       }
-      // Проверка автоочистки сообщений при возвращении в foreground
+      // Clear notification tray when user opens the app
+      NotificationService.hideMessageNotifications();
+      // Check message auto-cleanup on return to foreground
       messageCleanupService.onAppResumed();
       
       // КРИТИЧНО: Обработка отложенного звонка при возврате из background

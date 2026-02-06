@@ -1,28 +1,28 @@
 class AppConfig {
-  // ФИНАЛЬНЫЙ РЕЛИЗ 1.0.0
+  // Final Release 1.0.0
   static const String appVersion = "v1.1.2";
 
-  // === ХОСТЫ (миграция домена) ===
-  // Старый домен остаётся рабочим для уже выпущенных клиентов.
+  // === HOSTS (domain migration) ===
+  // Legacy domain remains working for already released clients.
   static const String legacyHost = 'vadimkolobanov-orpheus-d95e.twc1.net';
 
-  // Новый домен API/связи (цель миграции).
+  // New API/connection domain (migration target).
   static const String primaryApiHost = 'api.orpheus.click';
 
-  /// Приоритетный список хостов API/WS.
-  /// Важно: первым идёт новый домен, затем старый (fallback).
+  /// Priority list of API/WS hosts.
+  /// Important: new domain first, then old (fallback).
   static const List<String> apiHosts = [
     primaryApiHost,
     legacyHost,
   ];
 
-  /// Для совместимости со старым кодом/тестами.
-  /// В новых релизах это будет `api.orpheus.click`,
-  /// а при проблемах сервисы будут падать обратно на `legacyHost`.
+  /// For compatibility with old code/tests.
+  /// In new releases this will be `api.orpheus.click`,
+  /// and on problems services will fallback to `legacyHost`.
   static const String serverIp = primaryApiHost;
-  // static const String serverIp = '10.0.2.2:8000'; // Для локальных тестов
+  // static const String serverIp = '10.0.2.2:8000'; // For local tests
 
-  // --- Готовые URL ---
+  // --- Ready URLs ---
   static String webSocketUrl(String publicKey, {String? host}) {
     final encodedPublicKey = Uri.encodeComponent(publicKey);
     final h = host ?? serverIp;
@@ -34,7 +34,7 @@ class AppConfig {
     return 'https://$h$path';
   }
 
-  /// Перечень URL (по всем хостам) для безопасного fallback.
+  /// List of URLs (across all hosts) for safe fallback.
   static Iterable<String> httpUrls(String path) sync* {
     for (final h in apiHosts) {
       yield httpUrl(path, host: h);
@@ -47,96 +47,96 @@ class AppConfig {
     }
   }
 
-  // --- История обновлений (Changelog) ---
+  // --- Update History (Changelog) ---
   //
-  // ⚠️ ВАЖНО (политика проекта):
-  // - Пользовательский "Что нового" / changelog НЕ должен вестись в клиенте.
-  // - Единый источник правды для release notes: админ-панель OPHEUS_ADMIN → раздел "Версии".
-  // - Сейчас клиент загружает release notes по публичному API админки:
+  // IMPORTANT (project policy):
+  // - User-facing "What's New" / changelog should NOT be maintained in the client.
+  // - Single source of truth for release notes: admin panel ORPHEUS_ADMIN -> "Versions" section.
+  // - Currently client loads release notes from public admin API:
   //   https://orpheus.click/api/public/releases
-  // - Этот список оставлен как fallback (offline-safe) и может быть удалён позже.
-  // - НЕ добавляйте сюда новые записи.
+  // - This list is kept as fallback (offline-safe) and may be removed later.
+  // - DO NOT add new entries here.
   static const List<Map<String, dynamic>> changelogData = [
     {
       'version': '1.1.0',
       'date': '12.12.2025',
       'changes': [
-        'SECURITY: PIN-код (6 цифр) — опциональная защита входа.',
-        'SECURITY: Duress code — второй PIN, показывающий пустой профиль.',
-        'SECURITY: Код удаления (wipe code) — подтверждение удержанием, защита от случайного удаления.',
-        'SECURITY: Auto-wipe после N неверных попыток (опционально).',
-        'UI: Экран «Как пользоваться» — простая инструкция по функциям и рискам.',
-        'FIX: Стабилизация поведения во время звонка: блокировка не мешает ответу/разговору.',
+        'SECURITY: PIN code (6 digits) - optional entry protection.',
+        'SECURITY: Duress code - second PIN that shows empty profile.',
+        'SECURITY: Wipe code - hold confirmation, protection from accidental deletion.',
+        'SECURITY: Auto-wipe after N failed attempts (optional).',
+        'UI: "How to Use" screen - simple guide on features and risks.',
+        'FIX: Call behavior stabilization: lock screen does not interfere with answering/talking.',
       ]
     },
     {
       'version': '1.0.0',
       'date': '09.12.2025',
       'changes': [
-        'RELEASE: Финальный релиз Orpheus 1.0.0!',
-        'NETWORK: Полная поддержка звонков в спящем режиме. Входящие проходят, даже если телефон заблокирован или приложение выгружено.',
-        'NEW: Экран "Системный Монитор". Графики стабильности сети, пинг и статус шифрования в реальном времени.',
-        'NEW: Новая навигация: Контакты, Система, Профиль.',
-        'CORE: Система ICE Buffering. Устранена проблема соединения при ответе на звонок из Push-уведомления.',
-        'UI: Обновленный дизайн профиля и QR-визитки.',
-        'UI: Фирменная иконка приложения и заставка с логотипом.',
-        'UI: Поле ввода сообщений теперь поддерживает многострочный текст.',
-        'UI: Анимация шифрования при отправке сообщений.',
-        'FIX: Исправлены ошибки дублирования звонков.',
-        'FIX: Улучшена стабильность WebSocket соединения.',
+        'RELEASE: Orpheus 1.0.0 Final Release!',
+        'NETWORK: Full call support in sleep mode. Incoming calls work even if phone is locked or app is terminated.',
+        'NEW: "System Monitor" screen. Network stability graphs, ping and encryption status in real-time.',
+        'NEW: New navigation: Contacts, System, Profile.',
+        'CORE: ICE Buffering system. Fixed connection issue when answering call from Push notification.',
+        'UI: Updated profile and QR card design.',
+        'UI: Custom app icon and splash screen with logo.',
+        'UI: Message input field now supports multiline text.',
+        'UI: Encryption animation when sending messages.',
+        'FIX: Fixed call duplication errors.',
+        'FIX: Improved WebSocket connection stability.',
       ]
     },
     {
       'version': '0.9.0-Beta',
       'date': '01.12.2025',
       'changes': [
-        'CALLS: Улучшена система сигналинга для WebRTC звонков через WebSocket.',
-        'CALLS: Реализована буферизация ICE кандидатов для входящих звонков.',
-        'CALLS: Добавлены системные сообщения о звонках в историю чата.',
-        'UI: Полностью переработанный экран звонка с анимациями и визуализацией аудио волн.',
-        'UI: Отображение длительности звонка в реальном времени.',
-        'DEBUG: Добавлен режим отладки с логами WebRTC и сигналинга в UI.',
+        'CALLS: Improved signaling system for WebRTC calls via WebSocket.',
+        'CALLS: Implemented ICE candidate buffering for incoming calls.',
+        'CALLS: Added system messages about calls to chat history.',
+        'UI: Completely redesigned call screen with animations and audio wave visualization.',
+        'UI: Real-time call duration display.',
+        'DEBUG: Added debug mode with WebRTC and signaling logs in UI.',
       ]
     },
     {
       'version': '0.8-Beta',
       'date': '25.11.2025',
       'changes': [
-        'CALLS: Полная стабилизация звонков (TURN 2.0).',
-        'CALLS: Теперь отображается Имя контакта при звонке, а не ключ.',
-        'NEW: Встроенная система обновлений приложения.',
-        'NEW: Сканер QR-кодов для быстрого обмена контактами.',
-        'FIX: Исправлены вылеты на Android 11+.',
+        'CALLS: Full call stabilization (TURN 2.0).',
+        'CALLS: Now shows contact name during call, not the key.',
+        'NEW: Built-in app update system.',
+        'NEW: QR code scanner for quick contact exchange.',
+        'FIX: Fixed crashes on Android 11+.',
       ]
     },
     {
       'version': '0.7-Alpha',
       'date': '21.11.2025',
       'changes': [
-        'DESIGN: Новый стиль "Dark Premium" (Черный/Серебро).',
-        'SECURITY: Запрет скриншотов и записи экрана.',
-        'SECURITY: Биометрическая защита (палец/лицо) для экспорта ключей.',
-        'NEW: Активация лицензии промокодом.',
-        'UX: Удобная визитка с ID и кнопкой "Поделиться".',
+        'DESIGN: New "Dark Premium" style (Black/Silver).',
+        'SECURITY: Screenshot and screen recording prevention.',
+        'SECURITY: Biometric protection (fingerprint/face) for key export.',
+        'NEW: License activation with promo code.',
+        'UX: Convenient ID card with "Share" button.',
       ]
     },
     {
       'version': '0.6-Alpha',
       'date': '19.11.2025',
       'changes': [
-        'NEW: Push-уведомления! Теперь вы узнаете о сообщениях, даже если приложение закрыто.',
-        'UI: Счетчики непрочитанных сообщений в списке контактов.',
-        'UI: Галочки статуса доставки в чате.',
-        'Fix: Улучшена стабильность соединения (авто-реконнект).',
+        'NEW: Push notifications! Now you will know about messages even if the app is closed.',
+        'UI: Unread message counters in contact list.',
+        'UI: Delivery status checkmarks in chat.',
+        'FIX: Improved connection stability (auto-reconnect).',
       ]
     },
     {
       'version': '0.5-Alpha',
       'date': 'Initial Release',
       'changes': [
-        'Релиз базовой версии.',
-        'Анонимные звонки (WebRTC) и чаты.',
-        'Шифрование X25519/ChaCha20.',
+        'Base version release.',
+        'Anonymous calls (WebRTC) and chats.',
+        'X25519/ChaCha20 encryption.',
       ]
     },
   ];

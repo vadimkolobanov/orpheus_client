@@ -54,7 +54,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   // Состояние звонка
   CallState _callState = CallState.Dialing;
-  String _displayName = "Аноним";
+  String _displayName = "Anonymous";
   String _debugStatus = "Init";
   String _durationText = "00:00";
   late final String _callId;
@@ -225,7 +225,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       
       setState(() {
         _callState = CallState.Reconnecting;
-        _debugStatus = "Потеря связи...";
+        _debugStatus = "Connection lost...";
       });
     }
   }
@@ -300,8 +300,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _lastIceRestartTime = now;
     
     if (_reconnectAttempts >= _maxReconnectAttempts) {
-      _addLog("❌ Превышено число попыток реконнекта");
-      _onError("Не удалось восстановить соединение");
+      _addLog("❌ Max reconnect attempts exceeded");
+      _onError("Failed to restore connection");
       return;
     }
 
@@ -309,7 +309,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _addLog("🔄 ICE Restart попытка $_reconnectAttempts/$_maxReconnectAttempts");
     
     setState(() {
-      _debugStatus = "Переподключение... ($_reconnectAttempts)";
+      _debugStatus = "Reconnecting... ($_reconnectAttempts)";
     });
 
     try {
@@ -403,7 +403,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       if (log.contains("Connected")) {
         if (_callState != CallState.Connected) _onConnected();
       } else if (log.contains("Failed")) {
-        if (!_isDisposed) _onError("Сбой (ICE)");
+        if (!_isDisposed) _onError("Failed (ICE)");
       }
 
       if (log.contains("REMOTE TRACK RECEIVED") || log.contains("Remote stream assigned")) {
@@ -549,15 +549,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     // Небольшая задержка чтобы WebSocket успел отправить сообщение
     await Future.delayed(const Duration(milliseconds: 100));
 
-    // Системные сообщения в чат
+    // System messages to chat (English for consistent DB storage)
     if (currentState == CallState.Connected) {
-      _saveCallStatusMessageLocally("Исходящий звонок", true);
-      _sendCallStatusMessageToContact("Входящий звонок");
+      _saveCallStatusMessageLocally("Outgoing call", true);
+      _sendCallStatusMessageToContact("Incoming call");
     } else if (currentState == CallState.Incoming) {
-      _saveCallStatusMessageLocally("Пропущен звонок", false);
+      _saveCallStatusMessageLocally("Missed call", false);
     } else if (currentState == CallState.Dialing) {
-      _saveCallStatusMessageLocally("Исходящий звонок", true);
-      _sendCallStatusMessageToContact("Пропущен звонок");
+      _saveCallStatusMessageLocally("Outgoing call", true);
+      _sendCallStatusMessageToContact("Missed call");
     }
 
     _safePop();
@@ -572,8 +572,8 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (mounted) setState(() => _callState = CallState.Rejected);
 
     if (wasConnected) {
-      _saveCallStatusMessageLocally("Входящий звонок", false);
-      _sendCallStatusMessageToContact("Исходящий звонок");
+      _saveCallStatusMessageLocally("Incoming call", false);
+      _sendCallStatusMessageToContact("Outgoing call");
       _messagesSent = true;
     }
 
@@ -675,7 +675,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       await DatabaseService.instance.addMessage(callMessage, widget.contactPublicKey);
       messageUpdateController.add(widget.contactPublicKey);
     } catch (e) {
-      DebugLogger.error('CALL', 'Ошибка сохранения локального сообщения: $e',
+      DebugLogger.error('CALL', 'Error saving local message: $e',
           context: _callContext());
     }
   }
@@ -685,7 +685,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       final payload = await cryptoService.encrypt(widget.contactPublicKey, messageText);
       websocketService.sendChatMessage(widget.contactPublicKey, payload);
     } catch (e) {
-      DebugLogger.error('CALL', 'Ошибка отправки сообщения собеседнику: $e',
+      DebugLogger.error('CALL', 'Error sending message to peer: $e',
           context: _callContext());
     }
   }
@@ -730,17 +730,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   String _getStatusText() {
     switch (_callState) {
       case CallState.Dialing:
-        return "Вызов...";
+        return "Calling...";
       case CallState.Incoming:
-        return "Входящий звонок";
+        return "Incoming call";
       case CallState.Connecting:
-        return "Соединение...";
+        return "Connecting...";
       case CallState.Reconnecting:
-        return "Переподключение...";
+        return "Reconnecting...";
       case CallState.Rejected:
-        return "Завершен";
+        return "Ended";
       case CallState.Failed:
-        return "Сбой";
+        return "Failed";
       default:
         return "";
     }
@@ -753,15 +753,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     IconData icon;
 
     if (_networkState == NetworkState.offline) {
-      message = "Нет сети";
+      message = "No network";
       color = Colors.red;
       icon = Icons.signal_wifi_off;
     } else if (_wsStatus == ConnectionStatus.Connecting) {
-      message = "Переподключение...";
+      message = "Reconnecting...";
       color = Colors.orange;
       icon = Icons.sync;
     } else if (_wsStatus == ConnectionStatus.Disconnected) {
-      message = "Соединение потеряно";
+      message = "Connection lost";
       color = Colors.red;
       icon = Icons.cloud_off;
     } else {
@@ -817,11 +817,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         );
 
         if (finalState == CallState.Connected) {
-          _saveCallStatusMessageLocally("Исходящий звонок", true);
-          _sendCallStatusMessageToContact("Входящий звонок");
+          _saveCallStatusMessageLocally("Outgoing call", true);
+          _sendCallStatusMessageToContact("Incoming call");
         } else if (finalState == CallState.Dialing) {
-          _saveCallStatusMessageLocally("Исходящий звонок", true);
-          _sendCallStatusMessageToContact("Пропущен звонок");
+          _saveCallStatusMessageLocally("Outgoing call", true);
+          _sendCallStatusMessageToContact("Missed call");
         }
       } else if (finalState == CallState.Incoming) {
         websocketService.sendSignalingMessage(
@@ -829,7 +829,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           'call-rejected',
           _attachCallId({}),
         );
-        _saveCallStatusMessageLocally("Пропущен звонок", false);
+        _saveCallStatusMessageLocally("Missed call", false);
       }
     }
 
@@ -962,7 +962,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        "Попытка $_reconnectAttempts из $_maxReconnectAttempts",
+                        "Attempt $_reconnectAttempts of $_maxReconnectAttempts",
                         style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
                       ),
                     ],

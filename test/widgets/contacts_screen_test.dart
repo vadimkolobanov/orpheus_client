@@ -93,8 +93,8 @@ void main() {
       // Проверяем наличие заголовка
       expect(find.text('Контакты'), findsOneWidget);
 
-      // Проверяем наличие кнопки добавления контакта (иконка "+")
-      expect(find.byIcon(Icons.add), findsOneWidget);
+      // Проверяем наличие кнопки добавления контакта в AppBar
+      expect(find.byIcon(Icons.person_add_outlined), findsOneWidget);
     });
 
     testWidgets('Отображает состояние загрузки', (WidgetTester tester) async {
@@ -130,8 +130,10 @@ void main() {
       });
       await tester.pump();
 
-      // Должно быть пустое состояние (БД пустая)
+      // Всегда есть Оракул Орфея в списке, а при пустых контактах — подсказка "Нет контактов"
       expect(find.text('Нет контактов'), findsOneWidget);
+      // Оракул Орфея должен быть всегда виден
+      expect(find.text('Оракул Орфея'), findsOneWidget);
     });
 
     testWidgets('Отображает список контактов', (WidgetTester tester) async {
@@ -166,8 +168,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      // Нажимаем на кнопку добавления контакта (плюс)
-      await tester.tap(find.byIcon(Icons.add));
+      // Нажимаем на кнопку добавления контакта в AppBar
+      await tester.tap(find.byIcon(Icons.person_add_outlined));
       await tester.pump(const Duration(milliseconds: 400));
 
       // Должен появиться диалог добавления контакта
@@ -184,8 +186,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      // Открываем диалог
-      await tester.tap(find.byIcon(Icons.add));
+      // Открываем диалог через кнопку в AppBar
+      await tester.tap(find.byIcon(Icons.person_add_outlined));
       await tester.pump(const Duration(milliseconds: 400));
 
       // Закрываем диалог

@@ -75,7 +75,6 @@ class IncomingMessageHandler {
     'payment-confirmed',
     'license-status',
     'pong',
-    'support-reply',
     'presence-state',
     'presence-update',
   };
@@ -89,6 +88,13 @@ class IncomingMessageHandler {
   Future<void> handleDecoded(Map<String, dynamic> messageData) async {
     final type = messageData['type'] as String?;
     final senderKey = messageData['sender_pubkey'] as String?;
+
+    if (type == 'support-reply') {
+      if (!_isAppInForeground()) {
+        await _notif.showMessageNotification(senderName: _supportSenderLabel);
+      }
+      return;
+    }
 
     // Пропускаем служебные сообщения и любые пакеты без sender_pubkey.
     if (type == null || senderKey == null || _ignoredTypes.contains(type)) return;
@@ -283,6 +289,8 @@ class IncomingMessageHandler {
     ];
     return callStatusMessages.contains(message);
   }
+
+  static const String _supportSenderLabel = 'Разработчик';
 
   /// Показать нативный CallKit UI для входящего звонка
   /// 

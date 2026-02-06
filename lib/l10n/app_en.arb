@@ -1309,5 +1309,38 @@
   "aiSuggestion2": "How does encryption work?",
   "@aiSuggestion2": {"description": "AI suggestion 2"},
   "aiSuggestion3": "What is the duress code?",
-  "@aiSuggestion3": {"description": "AI suggestion 3"}
+  "@aiSuggestion3": {"description": "AI suggestion 3"},
+
+  "notesVaultTitle": "Vault",
+  "@notesVaultTitle": {"description": "Notes vault title"},
+  "notesVaultDesc": "Personal notes and important messages",
+  "@notesVaultDesc": {"description": "Notes vault subtitle"},
+  "notesEmptyTitle": "Vault is empty",
+  "@notesEmptyTitle": {"description": "Empty notes title"},
+  "notesEmptyDesc": "Save thoughts and important messages here",
+  "@notesEmptyDesc": {"description": "Empty notes subtitle"},
+  "notesPlaceholder": "New note...",
+  "@notesPlaceholder": {"description": "Notes input placeholder"},
+  "notesAdd": "Save",
+  "@notesAdd": {"description": "Save note button"},
+  "notesAddFromChat": "Add to notes",
+  "@notesAddFromChat": {"description": "Add to notes action"},
+  "notesAdded": "Added to notes",
+  "@notesAdded": {"description": "Note added snackbar"},
+  "notesDeleteTitle": "Delete note?",
+  "@notesDeleteTitle": {"description": "Delete note title"},
+  "notesDeleteDesc": "The note will be deleted permanently.",
+  "@notesDeleteDesc": {"description": "Delete note description"},
+  "notesFromContact": "From chat with {name}",
+  "@notesFromContact": {
+    "description": "Note source from contact",
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "notesFromRoom": "From room {name}",
+  "@notesFromRoom": {
+    "description": "Note source from room",
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "notesFromOracle": "From Oracle chat",
+  "@notesFromOracle": {"description": "Note source from Oracle"}
 }

@@ -152,8 +152,8 @@ class AppInputDialog extends StatefulWidget {
     this.initialValue,
     this.maxLines = 1,
     this.prefixIcon,
-    this.primaryLabel = 'Готово',
-    this.secondaryLabel = 'Отмена',
+    this.primaryLabel = 'Done',
+    this.secondaryLabel = 'Cancel',
   });
 
   final IconData? icon;
@@ -178,8 +178,8 @@ class AppInputDialog extends StatefulWidget {
     String? initialValue,
     int maxLines = 1,
     IconData? prefixIcon,
-    String primaryLabel = 'Готово',
-    String secondaryLabel = 'Отмена',
+    String primaryLabel = 'Done',
+    String secondaryLabel = 'Cancel',
   }) {
     return showDialog<String>(
       context: context,

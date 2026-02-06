@@ -1401,4 +1401,47 @@ class L10nRu extends L10n {
 
   @override
   String get aiSuggestion3 => 'Что такое код принуждения?';
+
+  @override
+  String get notesVaultTitle => 'Сейф';
+
+  @override
+  String get notesVaultDesc => 'Личные заметки и важные сообщения';
+
+  @override
+  String get notesEmptyTitle => 'Сейф пуст';
+
+  @override
+  String get notesEmptyDesc => 'Сохраняйте мысли и важные сообщения здесь';
+
+  @override
+  String get notesPlaceholder => 'Новая заметка...';
+
+  @override
+  String get notesAdd => 'Сохранить';
+
+  @override
+  String get notesAddFromChat => 'Добавить в заметки';
+
+  @override
+  String get notesAdded => 'Добавлено в заметки';
+
+  @override
+  String get notesDeleteTitle => 'Удалить заметку?';
+
+  @override
+  String get notesDeleteDesc => 'Заметка будет удалена безвозвратно.';
+
+  @override
+  String notesFromContact(String name) {
+    return 'Из чата с $name';
+  }
+
+  @override
+  String notesFromRoom(String name) {
+    return 'Из комнаты $name';
+  }
+
+  @override
+  String get notesFromOracle => 'Из чата с Оракулом';
 }

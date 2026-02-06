@@ -128,7 +128,7 @@ class _StatusScreenState extends State<StatusScreen>
           .timeout(const Duration(seconds: 3));
       if (resp.statusCode != 200) throw Exception();
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final country = (data['country'] as String?)?.trim() ?? 'Не определено';
+      final country = (data['country'] as String?)?.trim() ?? 'Unknown';
       final code =
           ((data['countryCode'] as String?)?.trim() ?? '--').toUpperCase();
 
@@ -141,7 +141,7 @@ class _StatusScreenState extends State<StatusScreen>
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _country = 'Не определено';
+        _country = 'Unknown';
         _countryCode = '--';
       });
     }

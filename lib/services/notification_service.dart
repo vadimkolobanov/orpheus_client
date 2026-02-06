@@ -210,15 +210,15 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
       appName: 'Orpheus',
       handle: callerKey.toString().substring(0, 8),
       type: 0, // Audio call
-      textAccept: 'Ответить',
-      textDecline: 'Отклонить',
+      textAccept: 'Answer',
+      textDecline: 'Decline',
       missedCallNotification: NotificationParams(
         showNotification: true,
         isShowCallback: false,
-        subtitle: 'Пропущенный звонок',
-        callbackText: 'Перезвонить',
+        subtitle: 'Missed call',
+        callbackText: 'Call back',
       ),
-      duration: 45000, // 45 секунд рингтон
+      duration: 45000, // 45 seconds ringtone
       extra: <String, dynamic>{
         'callerKey': callerKey,
         'offerData': offerDataJson,
@@ -232,8 +232,8 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
         backgroundColor: '#0D0D0D',
         actionColor: '#6AD394',
         textColor: '#FFFFFF',
-        incomingCallNotificationChannelName: 'Входящие звонки',
-        missedCallNotificationChannelName: 'Пропущенные звонки',
+        incomingCallNotificationChannelName: 'Incoming calls',
+        missedCallNotificationChannelName: 'Missed calls',
         isShowCallID: false,
         isShowFullLockedScreen: true,
       ),
@@ -274,8 +274,8 @@ Future<void> _showFallbackLocalCallNotification(Map<String, dynamic> data) async
 
     const androidDetails = AndroidNotificationDetails(
       'incoming_calls_fallback',
-      'Входящие звонки (fallback)',
-      channelDescription: 'Fallback-уведомления, если CallKit не показался',
+      'Incoming calls (fallback)',
+      channelDescription: 'Fallback notifications if CallKit failed to show',
       importance: Importance.max,
       priority: Priority.max,
       fullScreenIntent: true,
@@ -286,8 +286,8 @@ Future<void> _showFallbackLocalCallNotification(Map<String, dynamic> data) async
 
     await plugin.show(
       9901,
-      'Входящий звонок',
-      'От: $callerName',
+      'Incoming call',
+      'From: $callerName',
       details,
       payload: json.encode(data),
     );
@@ -328,17 +328,17 @@ class NotificationService {
   // ID каналов уведомлений
   // Сервер указывает этот channel_id в AndroidNotification.channel_id
   static const String _incomingCallChannelId = 'orpheus_incoming_call';
-  // Legacy: старый канал клиента (оставляем, чтобы не ломать существующие настройки пользователей)
+  // Legacy: old client channel (keep to not break existing user settings)
   static const String _legacyCallChannelId = 'orpheus_calls';
-  static const String _callChannelName = 'Входящие звонки';
+  static const String _callChannelName = 'Incoming calls';
   static const String _messageChannelId = 'orpheus_messages';
-  static const String _messageChannelName = 'Сообщения';
+  static const String _messageChannelName = 'Messages';
   static const String _orpheusRoomId = 'orpheus';
 
-  /// Android small icon для уведомлений.
+  /// Android small icon for notifications.
   ///
-  /// Важно: НЕ используем `ic_launcher` (часто адаптивный) — он и даёт "белый квадрат".
-  /// Нужна монохромная иконка в `res/drawable`.
+  /// Important: DON'T use `ic_launcher` (often adaptive) — it causes "white square".
+  /// Need a monochrome icon in `res/drawable`.
   static const String _androidSmallIcon = 'ic_stat_orpheus';
 
   // Notification IDs
@@ -355,9 +355,9 @@ class NotificationService {
     if (!kIsWeb && Platform.isAndroid) {
       try {
         final status = await Permission.notification.request();
-        DebugLogger.info('NOTIF', 'Разрешение уведомлений Android: $status');
+        DebugLogger.info('NOTIF', 'Android notification permission: $status');
       } catch (e) {
-        DebugLogger.warn('NOTIF', 'Запрос разрешения уведомлений не удался: $e');
+        DebugLogger.warn('NOTIF', 'Notification permission request failed: $e');
       }
     }
 
@@ -370,24 +370,24 @@ class NotificationService {
       provisional: false,
     );
     print('📱 FCM Permission: ${settings.authorizationStatus}');
-    DebugLogger.info('FCM', 'Разрешение: ${settings.authorizationStatus}');
+    DebugLogger.info('FCM', 'Permission: ${settings.authorizationStatus}');
 
     // 3. Получение токена
     try {
       fcmToken = await _firebaseMessaging.getToken();
       print("📱 FCM Token: $fcmToken");
-      DebugLogger.success('FCM', 'Токен получен: ${fcmToken?.substring(0, 30)}...');
+      DebugLogger.success('FCM', 'Token received: ${fcmToken?.substring(0, 30)}...');
 
       // Подписка на обновление токена
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
         fcmToken = newToken;
         print("📱 FCM Token updated: $newToken");
-        DebugLogger.info('FCM', 'Токен обновлён: ${newToken.substring(0, 30)}...');
+        DebugLogger.info('FCM', 'Token updated: ${newToken.substring(0, 30)}...');
         onTokenUpdated?.call();
       });
     } catch (e) {
       print("📱 FCM Error: $e");
-      DebugLogger.error('FCM', 'Ошибка получения токена: $e');
+      DebugLogger.error('FCM', 'Token error: $e');
     }
 
     // 4. Обработка foreground сообщений
@@ -414,7 +414,7 @@ class NotificationService {
     await _localBackend!.createAndroidChannel(
       id: _incomingCallChannelId,
       name: _callChannelName,
-      description: 'Уведомления о входящих звонках',
+      description: 'Incoming call notifications',
       importance: Importance.max,
       ledColor: const Color(0xFF6AD394),
     );
@@ -423,7 +423,7 @@ class NotificationService {
     await _localBackend!.createAndroidChannel(
       id: _legacyCallChannelId,
       name: _callChannelName,
-      description: 'Уведомления о входящих звонках (legacy)',
+      description: 'Incoming call notifications (legacy)',
       importance: Importance.max,
       ledColor: const Color(0xFF6AD394),
     );
@@ -431,7 +431,7 @@ class NotificationService {
     await _localBackend!.createAndroidChannel(
       id: _messageChannelId,
       name: _messageChannelName,
-      description: 'Уведомления о новых сообщениях',
+      description: 'New message notifications',
       importance: Importance.high,
     );
 
@@ -466,7 +466,7 @@ class NotificationService {
     // - new_message: sender_name/sender_key
     //
     // Оставляем совместимость со старыми call/message.
-    final callerName = (data['caller_name'] ?? data['sender_name'] ?? 'Неизвестный').toString();
+    final callerName = (data['caller_name'] ?? data['sender_name'] ?? 'Unknown').toString();
     final senderName = (data['sender_name'] ??
             data['caller_name'] ??
             data['sender'] ??
@@ -483,7 +483,7 @@ class NotificationService {
       await showMessageNotification(senderName: senderName);
     } else if (type == 'room-message' || type == 'room_message') {
       final roomId = data['room_id']?.toString();
-      final roomName = (data['room_name'] ?? 'Чат').toString();
+      final roomName = (data['room_name'] ?? 'Chat').toString();
       final authorType = data['author_type']?.toString();
       if (roomId == _orpheusRoomId && authorType == 'orpheus') {
         final enabled =
@@ -558,7 +558,7 @@ class NotificationService {
         id: _callNotificationId,
         channelId: _incomingCallChannelId,
         channelName: _callChannelName,
-        title: 'Входящий звонок',
+        title: 'Incoming call',
         body: callerName,
         category: AndroidNotificationCategory.call,
         androidSmallIcon: _androidSmallIcon,
@@ -568,10 +568,10 @@ class NotificationService {
       );
 
       print("🔔 Call notification shown: $callerName");
-      DebugLogger.success('NOTIF', '🔔 Показано уведомление о звонке: $callerName');
+      DebugLogger.success('NOTIF', '🔔 Call notification shown: $callerName');
     } catch (e) {
       print("🔔 showCallNotification error: $e");
-      DebugLogger.error('NOTIF', 'showCallNotification ошибка: $e');
+      DebugLogger.error('NOTIF', 'showCallNotification error: $e');
     }
   }
 
@@ -602,7 +602,7 @@ class NotificationService {
         channelId: _messageChannelId,
         channelName: _messageChannelName,
         title: senderName,
-        body: 'Новое сообщение', // Не показываем содержимое для приватности
+        body: 'New message', // Don't show content for privacy
         category: AndroidNotificationCategory.message,
         androidSmallIcon: _androidSmallIcon,
         groupKey: 'orpheus_messages_group',
@@ -630,7 +630,7 @@ class NotificationService {
         channelId: _messageChannelId,
         channelName: _messageChannelName,
         title: roomName,
-        body: 'Новое сообщение в чате',
+        body: 'New message in chat',
         category: AndroidNotificationCategory.message,
         androidSmallIcon: _androidSmallIcon,
         groupKey: 'orpheus_messages_group',
@@ -644,7 +644,7 @@ class NotificationService {
     }
   }
 
-  /// Показать уведомление "Официальный ответ Орфея".
+  /// Show "Official Orpheus reply" notification.
   static Future<void> showOrpheusOfficialNotification() async {
     try {
       await _ensureLocalNotificationsInitialized();
@@ -653,8 +653,8 @@ class NotificationService {
         id: _messageNotificationId + 999,
         channelId: _messageChannelId,
         channelName: _messageChannelName,
-        title: 'Орфей',
-        body: 'Официальный ответ Орфея',
+        title: 'Orpheus',
+        body: 'Official Orpheus reply',
         category: AndroidNotificationCategory.message,
         androidSmallIcon: _androidSmallIcon,
         groupKey: 'orpheus_messages_group',
@@ -662,9 +662,9 @@ class NotificationService {
         fullScreenIntent: false,
       );
 
-      DebugLogger.success('NOTIF', '📩 Официальный ответ Орфея');
+      DebugLogger.success('NOTIF', '📩 Official Orpheus reply');
     } catch (e) {
-      DebugLogger.error('NOTIF', 'showOrpheusOfficialNotification ошибка: $e');
+      DebugLogger.error('NOTIF', 'showOrpheusOfficialNotification error: $e');
     }
   }
 
@@ -688,7 +688,7 @@ class NotificationService {
       channelId: _messageChannelId,
       channelName: _messageChannelName,
       title: 'Orpheus',
-      body: 'Тестовое уведомление работает! 🔔',
+      body: 'Test notification works! 🔔',
       category: AndroidNotificationCategory.message,
       androidSmallIcon: _androidSmallIcon,
       groupKey: null,

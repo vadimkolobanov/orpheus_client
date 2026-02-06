@@ -58,6 +58,9 @@ dependencies:
   # Авторизация
   local_auth: ^2.2.0
 
+  # Markdown для AI чата
+  flutter_markdown: ^0.7.4+3
+
   # Инструменты
   share_plus: ^10.0.0
   package_info_plus: ^8.0.0

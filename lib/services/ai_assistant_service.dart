@@ -79,21 +79,21 @@ class AiAssistantService {
         _messagesController.add(_messages);
         await _db.addAiMessage(assistantMessage, assistantLimit: assistantMemoryLimit);
         await _db.setAiParentMessageId(_parentMessageId);
-        DebugLogger.success('AI_ASSISTANT', 'Ответ получен');
+        DebugLogger.success('AI_ASSISTANT', 'Response received');
         return true;
       } else {
-        // Ошибка — добавляем сообщение об ошибке.
-        _messages.add(AiMessage.error(_error ?? 'Неизвестная ошибка'));
+        // Error - add error message.
+        _messages.add(AiMessage.error(_error ?? 'Unknown error'));
         _messagesController.add(_messages);
         await _db.addAiMessage(_messages.last, assistantLimit: assistantMemoryLimit);
         return false;
       }
     } catch (e) {
-      _error = 'Ошибка сети: $e';
+      _error = 'Network error: $e';
       _messages.add(AiMessage.error(_error!));
       _messagesController.add(_messages);
       await _db.addAiMessage(_messages.last, assistantLimit: assistantMemoryLimit);
-      DebugLogger.error('AI_ASSISTANT', 'Ошибка: $e');
+      DebugLogger.error('AI_ASSISTANT', 'Error: $e');
       return false;
     } finally {
       _setLoading(false);
@@ -140,36 +140,36 @@ class AiAssistantService {
         if (content != null && content.toString().isNotEmpty) {
           return content.toString();
         } else {
-          _error = 'AI вернул пустой ответ';
-          DebugLogger.warn('AI_ASSISTANT', 'Пустой ответ от AI');
+          _error = 'AI returned empty response';
+          DebugLogger.warn('AI_ASSISTANT', 'Empty response from AI');
           return null;
         }
       } else if (response.statusCode == 503) {
-        _error = 'AI сервис временно недоступен';
-        DebugLogger.error('AI_ASSISTANT', 'Сервис недоступен (503)');
+        _error = 'AI service temporarily unavailable';
+        DebugLogger.error('AI_ASSISTANT', 'Service unavailable (503)');
         return null;
       } else {
-        // Пытаемся извлечь детали ошибки.
+        // Try to extract error details.
         String errorDetail;
         try {
           final errData = json.decode(response.body) as Map<String, dynamic>;
           errorDetail = errData['detail']?.toString() ?? 
                         errData['message']?.toString() ??
-                        'Код ${response.statusCode}';
+                        'Code ${response.statusCode}';
         } catch (_) {
-          errorDetail = 'Код ${response.statusCode}';
+          errorDetail = 'Code ${response.statusCode}';
         }
-        _error = 'Ошибка AI: $errorDetail';
-        DebugLogger.error('AI_ASSISTANT', 'Ошибка: $errorDetail');
+        _error = 'AI error: $errorDetail';
+        DebugLogger.error('AI_ASSISTANT', 'Error: $errorDetail');
         return null;
       }
     } on TimeoutException {
-      _error = 'Превышено время ожидания ответа';
+      _error = 'Response timeout exceeded';
       DebugLogger.error('AI_ASSISTANT', 'Timeout');
       return null;
     } catch (e) {
-      _error = 'Ошибка соединения';
-      DebugLogger.error('AI_ASSISTANT', 'Ошибка соединения: $e');
+      _error = 'Connection error';
+      DebugLogger.error('AI_ASSISTANT', 'Connection error: $e');
       return null;
     }
   }
@@ -181,7 +181,7 @@ class AiAssistantService {
     _error = null;
     _messagesController.add(_messages);
     _db.clearAiChat();
-    DebugLogger.info('AI_ASSISTANT', 'Чат очищен');
+    DebugLogger.info('AI_ASSISTANT', 'Chat cleared');
   }
 
   void _setLoading(bool value) {

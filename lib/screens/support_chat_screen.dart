@@ -409,8 +409,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
                 ),
                 maxLines: 3,
                 minLines: 1,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _sendMessage(),
+                textInputAction: TextInputAction.newline,
               ),
             ),
             

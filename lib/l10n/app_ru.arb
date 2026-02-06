@@ -489,5 +489,19 @@
   "aiMemoryIndicator": "Память: {count} ответов ИИ",
   "aiSuggestion1": "Что нового в этой версии?",
   "aiSuggestion2": "Как работает шифрование?",
-  "aiSuggestion3": "Что такое код принуждения?"
+  "aiSuggestion3": "Что такое код принуждения?",
+
+  "notesVaultTitle": "Сейф",
+  "notesVaultDesc": "Личные заметки и важные сообщения",
+  "notesEmptyTitle": "Сейф пуст",
+  "notesEmptyDesc": "Сохраняйте мысли и важные сообщения здесь",
+  "notesPlaceholder": "Новая заметка...",
+  "notesAdd": "Сохранить",
+  "notesAddFromChat": "Добавить в заметки",
+  "notesAdded": "Добавлено в заметки",
+  "notesDeleteTitle": "Удалить заметку?",
+  "notesDeleteDesc": "Заметка будет удалена безвозвратно.",
+  "notesFromContact": "Из чата с {name}",
+  "notesFromRoom": "Из комнаты {name}",
+  "notesFromOracle": "Из чата с Оракулом"
 }

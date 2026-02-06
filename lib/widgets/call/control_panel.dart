@@ -28,8 +28,8 @@ class CallControlPanel extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _buildActionBtn(Icons.call_end, Colors.red, "ОТКЛОНИТЬ", onEndCall),
-            _buildActionBtn(Icons.call, Colors.green, "ОТВЕТИТЬ", onAcceptCall),
+            _buildActionBtn(Icons.call_end, Colors.red, "DECLINE", onEndCall),
+            _buildActionBtn(Icons.call, Colors.green, "ACCEPT", onAcceptCall),
           ],
         ),
       );
@@ -43,19 +43,19 @@ class CallControlPanel extends StatelessWidget {
             _buildControlBtn(
               icon: isMicMuted ? Icons.mic_off : Icons.mic,
               isActive: isMicMuted,
-              label: "Микрофон",
+              label: "Mute",
               onTap: onToggleMic,
             ),
             _buildControlBtn(
               icon: isSpeakerOn ? Icons.volume_up : Icons.volume_down,
               isActive: isSpeakerOn,
-              label: "Динамик",
+              label: "Speaker",
               onTap: onToggleSpeaker,
             ),
           ],
         ),
         const SizedBox(height: 40),
-        _buildActionBtn(Icons.call_end, Colors.redAccent, "ЗАВЕРШИТЬ", onEndCall),
+        _buildActionBtn(Icons.call_end, Colors.redAccent, "END CALL", onEndCall),
       ],
     );
   }
