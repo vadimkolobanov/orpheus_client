@@ -74,10 +74,10 @@ class AuthService {
       if (configJson != null) {
         final map = json.decode(configJson) as Map<String, dynamic>;
         _config = SecurityConfig.fromMap(map);
-        print("AUTH: Конфигурация загружена: $_config");
+        print("AUTH: Config loaded: $_config");
       } else {
         _config = SecurityConfig.empty;
-        print("AUTH: Конфигурация не найдена, используем пустую");
+        print("AUTH: Config not found, using empty");
       }
       
       // Если PIN не настроен — приложение автоматически разблокировано
@@ -85,7 +85,7 @@ class AuthService {
         _isUnlocked = true;
       }
     } catch (e) {
-      print("AUTH ERROR: Ошибка загрузки конфигурации: $e");
+      print("AUTH ERROR: Config load error: $e");
       _config = SecurityConfig.empty;
       _isUnlocked = true;
     }
@@ -119,7 +119,7 @@ class AuthService {
     
     await _saveConfig();
     _isUnlocked = true;
-    print("AUTH: PIN установлен (длина: $pinLength)");
+    print("AUTH: PIN set (length: $pinLength)");
   }
 
   /// Изменить PIN-код (требует текущий PIN)
@@ -156,7 +156,7 @@ class AuthService {
     
     await _saveConfig();
     _isUnlocked = true;
-    print("AUTH: PIN отключен");
+    print("AUTH: PIN disabled");
     return true;
   }
 
@@ -169,7 +169,7 @@ class AuthService {
 
     // Проверка блокировки
     if (_config.isLockedOut) {
-      print("AUTH: ⛔ Попытка входа во время блокировки (pinLength: ${_config.pinLength})");
+      print("AUTH: ⛔ Login attempt during lockout (pinLength: ${_config.pinLength})");
       return PinVerifyResult.lockedOut;
     }
 
@@ -179,7 +179,7 @@ class AuthService {
       _resetFailedAttempts();
       _isUnlocked = true;
       _isDuressMode = false;
-      print("AUTH: ✅ PIN верный (${_config.pinLength}-значный), разблокировано");
+      print("AUTH: ✅ PIN correct (${_config.pinLength}-digit), unlocked");
       return PinVerifyResult.success;
     }
 
@@ -189,7 +189,7 @@ class AuthService {
       final wipeHash = _hashPin(pin, _config.wipeCodeSalt!);
       if (wipeHash == _config.wipeCodeHash) {
         _resetFailedAttempts();
-        print("AUTH: 🗑️ Введён код удаления (${_config.pinLength}-значный) — требуется подтверждение");
+        print("AUTH: 🗑️ Wipe code entered (${_config.pinLength}-digit) — confirmation required");
         return PinVerifyResult.wipeCode;
       }
     }
@@ -201,7 +201,7 @@ class AuthService {
         _resetFailedAttempts();
         _isUnlocked = true;
         _isDuressMode = true;
-        print("AUTH: 🎭 Duress код введён (${_config.pinLength}-значный), режим пустоты активирован");
+        print("AUTH: 🎭 Duress code entered (${_config.pinLength}-digit), empty profile activated");
         return PinVerifyResult.duress;
       }
     }
@@ -211,7 +211,7 @@ class AuthService {
     
     // Проверка автоматического wipe
     if (_config.shouldAutoWipe) {
-      print("AUTH: ⚠️ Превышен лимит попыток (${_config.failedAttempts}/${_config.autoWipeAttempts}), требуется auto-wipe");
+      print("AUTH: ⚠️ Attempt limit exceeded (${_config.failedAttempts}/${_config.autoWipeAttempts}), auto-wipe required");
       return PinVerifyResult.autoWipe;
     }
 
@@ -234,7 +234,7 @@ class AuthService {
       lastFailedAttempt: _now(),
     );
     await _saveConfig();
-    print("AUTH: Неверный PIN, попытка ${_config.failedAttempts}");
+    print("AUTH: Wrong PIN, attempt ${_config.failedAttempts}");
   }
 
   // === УПРАВЛЕНИЕ DURESS CODE ===
@@ -262,7 +262,7 @@ class AuthService {
     );
     
     await _saveConfig();
-    print("AUTH: 🎭 Duress код установлен (${_config.pinLength}-значный)");
+    print("AUTH: 🎭 Duress code set (${_config.pinLength}-digit)");
     return true;
   }
 
@@ -280,7 +280,7 @@ class AuthService {
     
     await _saveConfig();
     _isDuressMode = false;
-    print("AUTH: Duress код отключен");
+    print("AUTH: Duress code disabled");
     return true;
   }
 
@@ -306,7 +306,7 @@ class AuthService {
     );
 
     await _saveConfig();
-    print("AUTH: 🗑️ Код удаления установлен (${_config.pinLength}-значный)");
+    print("AUTH: 🗑️ Wipe code set (${_config.pinLength}-digit)");
     return true;
   }
 
@@ -323,7 +323,7 @@ class AuthService {
     );
 
     await _saveConfig();
-    print("AUTH: Код удаления отключён");
+    print("AUTH: Wipe code disabled");
     return true;
   }
 
@@ -332,7 +332,7 @@ class AuthService {
   Future<void> setPanicGestureEnabled(bool enabled) async {
     _config = _config.copyWith(isPanicGestureEnabled: enabled);
     await _saveConfig();
-    print("AUTH: Panic gesture ${enabled ? 'включен' : 'выключен'}");
+    print("AUTH: Panic gesture ${enabled ? 'enabled' : 'disabled'}");
   }
 
   // === БЛОКИРОВКА ПО ТАЙМАУТУ НЕАКТИВНОСТИ ===
@@ -357,7 +357,7 @@ class AuthService {
   Future<void> setMessageRetention(MessageRetentionPolicy policy) async {
     _config = _config.copyWith(messageRetention: policy);
     await _saveConfig();
-    print("AUTH: Message retention установлен: ${policy.displayName}");
+    print("AUTH: Message retention set to: ${policy.displayName}");
   }
 
   /// Обновить время последней очистки сообщений
@@ -392,7 +392,7 @@ class AuthService {
     if (_config.requiresUnlock) {
       _isUnlocked = false;
       _isDuressMode = false;
-      print("AUTH: 🔒 Приложение заблокировано (требуется ${_config.pinLength}-значный PIN)");
+      print("AUTH: 🔒 App locked (requires ${_config.pinLength}-digit PIN)");
     }
   }
 
@@ -415,12 +415,12 @@ class AuthService {
       autoWipeAttempts: attempts,
     );
     await _saveConfig();
-    print("AUTH: Auto-wipe ${enabled ? 'включен ($attempts попыток)' : 'выключен'}");
+    print("AUTH: Auto-wipe ${enabled ? 'enabled ($attempts attempts)' : 'disabled'}");
   }
 
   /// Полный wipe — удаление всех данных
   Future<void> performWipe() async {
-    print("AUTH: ⚠️ ВЫПОЛНЯЕТСЯ ПОЛНЫЙ WIPE...");
+    print("AUTH: ⚠️ PERFORMING FULL WIPE...");
     
     try {
       // 1. Удаляем криптоключи
@@ -444,9 +444,9 @@ class AuthService {
       _isUnlocked = false;
       _isDuressMode = false;
       
-      print("AUTH: ✅ WIPE завершен");
+      print("AUTH: ✅ WIPE completed");
     } catch (e) {
-      print("AUTH ERROR: Ошибка wipe: $e");
+      print("AUTH ERROR: Wipe error: $e");
       rethrow;
     }
   }

@@ -46,7 +46,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
         final data = json.decode(messageJson) as Map<String, dynamic>;
         if (data['type'] == 'support-reply') {
           _service.handleIncomingReply(data);
-          DebugLogger.info('SUPPORT', 'Получен ответ через WebSocket');
+          DebugLogger.info('SUPPORT', 'Reply received via WebSocket');
         }
       } catch (_) {}
     });

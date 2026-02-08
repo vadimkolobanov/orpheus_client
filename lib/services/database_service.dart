@@ -524,7 +524,7 @@ class DatabaseService {
       print("DB: Удалено $deletedCount сообщений старше ${cutoff.toIso8601String()}");
       return deletedCount;
     } catch (e) {
-      print("DB ERROR: Ошибка удаления старых сообщений: $e");
+      print("DB ERROR: Error deleting old messages: $e");
       return 0;
     }
   }
@@ -544,7 +544,7 @@ class DatabaseService {
       );
       return Sqflite.firstIntValue(result) ?? 0;
     } catch (e) {
-      print("DB ERROR: Ошибка подсчёта старых сообщений: $e");
+      print("DB ERROR: Error counting old messages: $e");
       return 0;
     }
   }
@@ -562,9 +562,9 @@ class DatabaseService {
       await close();
       final path = await _dbPath();
       await deleteDatabase(path);
-      print("DB: База данных удалена");
+      print("DB: Database deleted");
     } catch (e) {
-      print("DB ERROR: Ошибка удаления базы данных: $e");
+      print("DB ERROR: Error deleting database: $e");
     }
   }
 

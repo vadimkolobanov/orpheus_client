@@ -57,9 +57,9 @@ class PendingCallStorage {
         await prefs.remove(_keyOfferData);
       }
       
-      DebugLogger.info('PENDING_CALL', '💾 Сохранено: $callerKey, autoAnswer=$autoAnswer');
+      DebugLogger.info('PENDING_CALL', '💾 Saved: $callerKey, autoAnswer=$autoAnswer');
     } catch (e) {
-      DebugLogger.error('PENDING_CALL', 'Ошибка сохранения: $e');
+      DebugLogger.error('PENDING_CALL', 'Save error: $e');
     }
   }
   
@@ -70,7 +70,7 @@ class PendingCallStorage {
       
       final callerKey = prefs.getString(_keyCallerKey);
       if (callerKey == null) {
-        DebugLogger.info('PENDING_CALL', '📭 Нет ожидающего звонка в хранилище');
+        DebugLogger.info('PENDING_CALL', '📭 No pending call in storage');
         return null;
       }
       
@@ -80,7 +80,7 @@ class PendingCallStorage {
       
       // Проверяем что звонок не устарел
       if (ageSeconds > maxAgeSeconds) {
-        DebugLogger.warn('PENDING_CALL', '⏰ Звонок устарел (${ageSeconds}s > ${maxAgeSeconds}s)');
+        DebugLogger.warn('PENDING_CALL', '⏰ Call expired (${ageSeconds}s > ${maxAgeSeconds}s)');
         await clear();
         return null;
       }
@@ -94,14 +94,14 @@ class PendingCallStorage {
         try {
           offerData = json.decode(offerDataStr) as Map<String, dynamic>;
         } catch (e) {
-          DebugLogger.warn('PENDING_CALL', 'Ошибка парсинга offerData: $e');
+          DebugLogger.warn('PENDING_CALL', 'offerData parse error: $e');
         }
       }
       
       // Очищаем сразу после загрузки
       await clear();
       
-      DebugLogger.info('PENDING_CALL', '📬 Загружено из хранилища: $callerKey, возраст=${ageSeconds}s');
+      DebugLogger.info('PENDING_CALL', '📬 Loaded from storage: $callerKey, age=${ageSeconds}s');
       
       return PendingCallData(
         callerKey: callerKey,
@@ -111,7 +111,7 @@ class PendingCallStorage {
         timestamp: DateTime.fromMillisecondsSinceEpoch(timestamp),
       );
     } catch (e) {
-      DebugLogger.error('PENDING_CALL', 'Ошибка загрузки: $e');
+      DebugLogger.error('PENDING_CALL', 'Load error: $e');
       return null;
     }
   }
@@ -125,9 +125,9 @@ class PendingCallStorage {
       await prefs.remove(_keyTimestamp);
       await prefs.remove(_keyAutoAnswer);
       await prefs.remove(_keyCallId);
-      DebugLogger.info('PENDING_CALL', '🗑️ Хранилище очищено');
+      DebugLogger.info('PENDING_CALL', '🗑️ Storage cleared');
     } catch (e) {
-      DebugLogger.error('PENDING_CALL', 'Ошибка очистки: $e');
+      DebugLogger.error('PENDING_CALL', 'Clear error: $e');
     }
   }
   

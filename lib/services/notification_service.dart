@@ -192,7 +192,7 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
         await FlutterCallkitIncoming.endAllCalls();
       }
     } catch (e) {
-      print("📞 CALLKIT: Ошибка проверки активных звонков: $e");
+      print("📞 CALLKIT: Error checking active calls: $e");
     }
     
     // Получаем SDP offer если есть

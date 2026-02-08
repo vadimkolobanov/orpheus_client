@@ -28,13 +28,13 @@ class ChatTimeRules {
     final yesterday = today.subtract(const Duration(days: 1));
     final messageDate = DateTime(timestamp.year, timestamp.month, timestamp.day);
 
-    if (messageDate == today) return 'Сегодня';
-    if (messageDate == yesterday) return 'Вчера';
+    if (messageDate == today) return 'Today';
+    if (messageDate == yesterday) return 'Yesterday';
 
     if (messageDate.year == now.year) {
-      return DateFormat('d MMMM', 'ru').format(timestamp);
+      return DateFormat('d MMMM', 'en').format(timestamp);
     }
-    return DateFormat('d MMMM yyyy', 'ru').format(timestamp);
+    return DateFormat('d MMMM yyyy', 'en').format(timestamp);
   }
 
   static String formatMessageTime(
@@ -55,13 +55,13 @@ class ChatTimeRules {
 
     String dateStr;
     if (messageDate == today) {
-      dateStr = 'Сегодня';
+      dateStr = 'Today';
     } else if (messageDate == yesterday) {
-      dateStr = 'Вчера';
+      dateStr = 'Yesterday';
     } else if (messageDate.year == now.year) {
-      dateStr = DateFormat('d MMMM', 'ru').format(timestamp);
+      dateStr = DateFormat('d MMMM', 'en').format(timestamp);
     } else {
-      dateStr = DateFormat('d MMMM yyyy', 'ru').format(timestamp);
+      dateStr = DateFormat('d MMMM yyyy', 'en').format(timestamp);
     }
 
     return '$dateStr, $timeStr';

@@ -62,7 +62,7 @@ class MessageCleanupService {
   
   /// Инициализация сервиса — вызывать после AuthService.init()
   Future<void> init() async {
-    DebugLogger.info('CLEANUP', 'MessageCleanupService инициализирован');
+    DebugLogger.info('CLEANUP', 'MessageCleanupService initialized');
     
     // Запустить первую проверку
     await performCleanupIfNeeded();
@@ -75,7 +75,7 @@ class MessageCleanupService {
   void dispose() {
     _periodicTimer?.cancel();
     _periodicTimer = null;
-    DebugLogger.info('CLEANUP', 'MessageCleanupService остановлен');
+    DebugLogger.info('CLEANUP', 'MessageCleanupService stopped');
   }
   
   /// Запустить периодический таймер
@@ -93,12 +93,12 @@ class MessageCleanupService {
   Future<CleanupResult> performCleanupIfNeeded() async {
     // Проверяем, нужна ли очистка
     if (!_auth.shouldRunMessageCleanup) {
-      return CleanupResult.skipped(reason: 'Очистка не требуется');
+      return CleanupResult.skipped(reason: 'Cleanup not needed');
     }
     
     // Предотвращаем параллельный запуск
     if (_isRunning) {
-      return CleanupResult.skipped(reason: 'Очистка уже выполняется');
+      return CleanupResult.skipped(reason: 'Cleanup already running');
     }
     
     return await performCleanup();
@@ -109,7 +109,7 @@ class MessageCleanupService {
   /// Используется при изменении политики retention.
   Future<CleanupResult> performCleanup() async {
     if (_isRunning) {
-      return CleanupResult.skipped(reason: 'Очистка уже выполняется');
+      return CleanupResult.skipped(reason: 'Cleanup already running');
     }
     
     _isRunning = true;
@@ -120,16 +120,16 @@ class MessageCleanupService {
       // Если политика "all" — нечего удалять
       if (policy == MessageRetentionPolicy.all) {
         await _auth.updateLastMessageCleanup(_now());
-        return CleanupResult.skipped(reason: 'Политика: хранить всё');
+        return CleanupResult.skipped(reason: 'Policy: keep all');
       }
       
       // Вычисляем cutoff время
       final cutoff = policy.getCutoffTime(_now());
       if (cutoff == null) {
-        return CleanupResult.skipped(reason: 'Не удалось вычислить cutoff');
+        return CleanupResult.skipped(reason: 'Failed to calculate cutoff');
       }
       
-      DebugLogger.info('CLEANUP', 'Запуск очистки. Политика: ${policy.displayName}, cutoff: ${cutoff.toIso8601String()}');
+      DebugLogger.info('CLEANUP', 'Starting cleanup. Policy: ${policy.displayName}, cutoff: ${cutoff.toIso8601String()}');
       
       // Выполняем удаление
       final deletedCount = await _db.deleteMessagesOlderThan(cutoff);
@@ -137,11 +137,11 @@ class MessageCleanupService {
       // Обновляем время последней очистки
       await _auth.updateLastMessageCleanup(_now());
       
-      DebugLogger.info('CLEANUP', 'Очистка завершена. Удалено сообщений: $deletedCount');
+      DebugLogger.info('CLEANUP', 'Cleanup complete. Deleted messages: $deletedCount');
       
       return CleanupResult.success(deletedCount: deletedCount);
     } catch (e) {
-      DebugLogger.error('CLEANUP', 'Ошибка очистки: $e');
+      DebugLogger.error('CLEANUP', 'Cleanup error: $e');
       return CleanupResult.error(message: e.toString());
     } finally {
       _isRunning = false;
@@ -173,7 +173,7 @@ class MessageCleanupService {
   /// 
   /// Немедленно выполняет очистку по новой политике.
   Future<CleanupResult> onRetentionPolicyChanged(MessageRetentionPolicy newPolicy) async {
-    DebugLogger.info('CLEANUP', 'Политика retention изменена на: ${newPolicy.displayName}');
+    DebugLogger.info('CLEANUP', 'Retention policy changed to: ${newPolicy.displayName}');
     return await performCleanup();
   }
 }

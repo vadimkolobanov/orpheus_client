@@ -216,7 +216,7 @@ class DeviceSettingsService {
             const SizedBox(width: 12),
             const Expanded(
               child: Text(
-                'Настройка уведомлений',
+                'Notification setup',
                 style: TextStyle(color: Colors.white, fontSize: 18),
               ),
             ),
@@ -228,12 +228,12 @@ class DeviceSettingsService {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Устройство: $displayName',
+                'Device: $displayName',
                 style: const TextStyle(color: Colors.grey, fontSize: 12),
               ),
               const SizedBox(height: 16),
               const Text(
-                'Для стабильной работы уведомлений о звонках и сообщениях, выполните следующие шаги:',
+                'For stable call and message notifications, please complete the following steps:',
                 style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 16),
@@ -241,10 +241,10 @@ class DeviceSettingsService {
               // Шаг 1: Батарея
               _buildSetupStep(
                 number: 1,
-                title: 'Отключить оптимизацию батареи',
+                title: 'Disable battery optimization',
                 description: batteryDisabled 
-                    ? 'Уже отключено ✓'
-                    : 'Разрешите Orpheus работать в фоне без ограничений',
+                    ? 'Already disabled ✓'
+                    : 'Allow Orpheus to run in background without restrictions',
                 isComplete: batteryDisabled,
                 onTap: batteryDisabled ? null : () async {
                   Navigator.pop(context);
@@ -257,8 +257,8 @@ class DeviceSettingsService {
                 const SizedBox(height: 12),
                 _buildSetupStep(
                   number: 2,
-                  title: 'Включить автозапуск',
-                  description: 'Разрешите приложению запускаться автоматически',
+                  title: 'Enable autostart',
+                  description: 'Allow the app to start automatically',
                   onTap: () async {
                     Navigator.pop(context);
                     await openAutoStartSettings();
@@ -270,8 +270,8 @@ class DeviceSettingsService {
               const SizedBox(height: 12),
               _buildSetupStep(
                 number: _isChineseOem(manufacturer) ? 3 : 2,
-                title: 'Проверить настройки уведомлений',
-                description: 'Убедитесь, что уведомления о звонках включены',
+                title: 'Check notification settings',
+                description: 'Make sure call notifications are enabled',
                 onTap: () async {
                   Navigator.pop(context);
                   await openNotificationSettings();
@@ -292,14 +292,14 @@ class DeviceSettingsService {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '⚠️ Для Xiaomi/MIUI также:',
+                        '⚠️ For Xiaomi/MIUI also:',
                         style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                       SizedBox(height: 8),
                       Text(
-                        '• Настройки → Приложения → Orpheus → Экономия батареи → "Без ограничений"\n'
-                        '• Безопасность → Autostart → включить Orpheus\n'
-                        '• Настройки → Приложения → Orpheus → Уведомления → включить все',
+                        '• Settings → Apps → Orpheus → Battery saver → "No restrictions"\n'
+                        '• Security → Autostart → enable Orpheus\n'
+                        '• Settings → Apps → Orpheus → Notifications → enable all',
                         style: TextStyle(color: Colors.white60, fontSize: 12),
                       ),
                     ],
@@ -321,13 +321,13 @@ class DeviceSettingsService {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '⚠️ Для Vivo также:',
+                        '⚠️ For Vivo also:',
                         style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                       SizedBox(height: 8),
                       Text(
-                        '• i Manager → Диспетчер приложений → Orpheus → Высокое энергопотребление\n'
-                        '• Настройки → Приложения → Orpheus → Autostart → включить',
+                        '• i Manager → App manager → Orpheus → High power consumption\n'
+                        '• Settings → Apps → Orpheus → Autostart → enable',
                         style: TextStyle(color: Colors.white60, fontSize: 12),
                       ),
                     ],
@@ -343,11 +343,11 @@ class DeviceSettingsService {
               await setSetupDialogDismissed(true);
               if (context.mounted) Navigator.pop(context);
             },
-            child: const Text('Не показывать', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            child: const Text("Don't show again", style: TextStyle(color: Colors.grey, fontSize: 12)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Позже', style: TextStyle(color: Colors.grey)),
+            child: const Text('Later', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -355,7 +355,7 @@ class DeviceSettingsService {
               foregroundColor: Colors.black,
             ),
             onPressed: () => Navigator.pop(context),
-            child: const Text('Готово'),
+            child: const Text('Done'),
           ),
         ],
       ),

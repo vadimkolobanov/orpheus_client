@@ -71,7 +71,7 @@ class WebSocketService {
   void _forceReconnect({String? reason}) {
     if (_currentPublicKey == null || _isDisconnectingIntentional) return;
     
-    DebugLogger.info('WS', '🔄 Принудительный реконнект: ${reason ?? "неизвестно"}');
+    DebugLogger.info('WS', '🔄 Forced reconnect: ${reason ?? "unknown"}');
     
     // Отменяем текущий таймер реконнекта
     _reconnectTimer?.cancel();
@@ -114,7 +114,7 @@ class WebSocketService {
     final uri = Uri.parse(AppConfig.webSocketUrl(_currentPublicKey!, host: currentHost));
     _statusController.add(ConnectionStatus.Connecting);
     print("WS: Попытка подключения к $uri...");
-    DebugLogger.info('WS', 'Попытка подключения к $uri');
+    DebugLogger.info('WS', 'Attempting to connect to $uri');
 
     try {
       WebSocket.connect(uri.toString()).then((ws) {
@@ -150,8 +150,8 @@ class WebSocketService {
             _handleDisconnect();
           },
           onError: (error) {
-            print("WS ERROR: Ошибка сокета: $error");
-            DebugLogger.error('WS', 'Ошибка сокета: $error');
+            print("WS ERROR: Socket error: $error");
+            DebugLogger.error('WS', 'Socket error: $error');
             _handleDisconnect();
           },
         );
@@ -242,7 +242,7 @@ class WebSocketService {
         try {
           _channel!.sink.add(json.encode({"type": "ping"}));
         } catch (e) {
-          print("WS: Ошибка отправки пинга: $e");
+          print("WS: Ping send error: $e");
         }
       }
     });

@@ -117,7 +117,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
               },
             ),
             const SizedBox(width: 12),
-            const Text("ИСТОРИЯ ОБНОВЛЕНИЙ"),
+            const Text("UPDATE HISTORY"),
           ],
         ),
       ),

@@ -24,7 +24,7 @@ void backgroundCallServiceOnStart(ServiceInstance service) async {
   service.on('updateNotification').listen((event) {
     if (event != null && service is AndroidServiceInstance) {
       final title = event['title'] as String? ?? 'Orpheus';
-      final content = event['content'] as String? ?? 'Звонок...';
+      final content = event['content'] as String? ?? 'Call...';
 
       service.setForegroundNotificationInfo(
         title: title,
@@ -72,7 +72,7 @@ class PluginBackgroundCallBackend implements BackgroundCallBackend {
     const channel = AndroidNotificationChannel(
       BackgroundCallService.channelId,
       BackgroundCallService.channelName,
-      description: 'Уведомление во время активного звонка',
+      description: 'Active call notification',
       importance: Importance.low, // Низкий приоритет - не звенит
       enableVibration: false,
       playSound: false,
@@ -99,7 +99,7 @@ class PluginBackgroundCallBackend implements BackgroundCallBackend {
         isForegroundMode: true,
         notificationChannelId: notificationChannelId,
         initialNotificationTitle: 'Orpheus',
-        initialNotificationContent: 'Звонок...',
+        initialNotificationContent: 'Call...',
         foregroundServiceNotificationId: notificationId,
         foregroundServiceTypes: [AndroidForegroundType.microphone],
       ),
@@ -128,7 +128,7 @@ class BackgroundCallService {
 
   /// ID канала для уведомления активного звонка
   static const String channelId = 'orpheus_active_call';
-  static const String channelName = 'Активный звонок';
+  static const String channelName = 'Active call';
   static const int _notificationId = 888;
 
   static BackgroundCallBackend _backend = PluginBackgroundCallBackend();
@@ -152,7 +152,7 @@ class BackgroundCallService {
       await _backend.createNotificationChannel(
         channelId: channelId,
         channelName: channelName,
-        description: 'Уведомление во время активного звонка',
+        description: 'Active call notification',
       );
 
       // Конфигурация сервиса
@@ -203,7 +203,7 @@ class BackgroundCallService {
     try {
       _backend.invoke('updateNotification', {
         'title': contactName,
-        'content': 'Звонок: $duration',
+        'content': 'Call: $duration',
       });
     } catch (e) {
       print("📞 ERROR: updateCallDuration failed: $e");

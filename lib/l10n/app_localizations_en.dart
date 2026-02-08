@@ -111,6 +111,28 @@ class L10nEn extends L10n {
   String get updateHistory => 'Update History';
 
   @override
+  String get updateAvailable => 'Update Available';
+
+  @override
+  String updateMessageRequired(String version) {
+    return 'New version $version is available.\nThis is a critical security update.';
+  }
+
+  @override
+  String updateMessageOptional(String version) {
+    return 'New version $version is available.\nWe recommend updating for stable operation.';
+  }
+
+  @override
+  String get updateLater => 'Later';
+
+  @override
+  String get updateDownload => 'Download';
+
+  @override
+  String get updateDownloading => 'Downloading Update';
+
+  @override
   String get exportAccount => 'Export Account';
 
   @override

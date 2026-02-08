@@ -50,7 +50,7 @@ class SupportChatService {
   /// Загрузить историю сообщений
   Future<void> loadMessages({int limit = 100}) async {
     if (_pubkey == null) {
-      _error = 'Аккаунт не инициализирован';
+      _error = 'Account not initialized';
       return;
     }
     
@@ -78,14 +78,14 @@ class SupportChatService {
         _unreadController.add(_unreadCount);
         
         _messagesController.add(_messages);
-        DebugLogger.info('SUPPORT', 'Загружено ${_messages.length} сообщений');
+        DebugLogger.info('SUPPORT', 'Loaded ${_messages.length} messages');
       } else {
-        _error = 'Ошибка загрузки: ${response.statusCode}';
-        DebugLogger.error('SUPPORT', 'Ошибка загрузки сообщений: ${response.statusCode}');
+        _error = 'Load error: ${response.statusCode}';
+        DebugLogger.error('SUPPORT', 'Load messages error: ${response.statusCode}');
       }
     } catch (e) {
-      _error = 'Ошибка подключения';
-      DebugLogger.error('SUPPORT', 'Ошибка: $e');
+      _error = 'Connection error';
+      DebugLogger.error('SUPPORT', 'Error: $e');
     } finally {
       _isLoading = false;
     }
@@ -119,14 +119,14 @@ class SupportChatService {
           _messagesController.add(_messages);
         }
         
-        DebugLogger.success('SUPPORT', 'Сообщение отправлено');
+        DebugLogger.success('SUPPORT', 'Message sent');
         return true;
       } else {
-        DebugLogger.error('SUPPORT', 'Ошибка отправки: ${response.statusCode}');
+        DebugLogger.error('SUPPORT', 'Send error: ${response.statusCode}');
         return false;
       }
     } catch (e) {
-      DebugLogger.error('SUPPORT', 'Ошибка отправки: $e');
+      DebugLogger.error('SUPPORT', 'Send error: $e');
       return false;
     }
   }
@@ -158,20 +158,20 @@ class SupportChatService {
         _messages.add(SupportMessage(
           id: DateTime.now().millisecondsSinceEpoch,
           direction: MessageDirection.user,
-          message: '📎 Debug-логи отправлены ($linesCount записей) • ${AppConfig.appVersion}',
+          message: '📎 Debug logs sent ($linesCount entries) • ${AppConfig.appVersion}',
           isRead: true,
           createdAt: DateTime.now(),
         ));
         _messagesController.add(_messages);
         
-        DebugLogger.success('SUPPORT', 'Логи отправлены: $linesCount записей');
+        DebugLogger.success('SUPPORT', 'Logs sent: $linesCount entries');
         return true;
       } else {
-        DebugLogger.error('SUPPORT', 'Ошибка отправки логов: ${response.statusCode}');
+        DebugLogger.error('SUPPORT', 'Logs send error: ${response.statusCode}');
         return false;
       }
     } catch (e) {
-      DebugLogger.error('SUPPORT', 'Ошибка отправки логов: $e');
+      DebugLogger.error('SUPPORT', 'Logs send error: $e');
       return false;
     }
   }
@@ -219,7 +219,7 @@ class SupportChatService {
       _unreadController.add(_unreadCount);
       _messagesController.add(_messages);
       
-      DebugLogger.info('SUPPORT', 'Получен ответ от поддержки');
+      DebugLogger.info('SUPPORT', 'Support reply received');
     }
   }
 

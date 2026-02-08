@@ -177,7 +177,7 @@ class SoundService {
       await _backend.playDialing();
     } catch (e) {
       // best-effort: звук не должен валить приложение
-      print("Ошибка playDialingSound: $e");
+      print("Error playDialingSound: $e");
     }
   }
 
@@ -186,7 +186,7 @@ class SoundService {
     try {
       await _backend.playIncomingRingtone();
     } catch (e) {
-      print("Ошибка playIncomingRingtone: $e");
+      print("Error playIncomingRingtone: $e");
     }
   }
 
@@ -195,7 +195,7 @@ class SoundService {
     try {
       await _backend.playConnected();
     } catch (e) {
-      print("Ошибка playConnectedSound: $e");
+      print("Error playConnectedSound: $e");
     }
   }
 
@@ -204,7 +204,7 @@ class SoundService {
     try {
       await _backend.playDisconnected();
     } catch (e) {
-      print("Ошибка playDisconnectedSound: $e");
+      print("Error playDisconnectedSound: $e");
     }
   }
 
@@ -213,7 +213,7 @@ class SoundService {
     try {
       await _backend.stopAll();
     } catch (e) {
-      print("Ошибка stopAllSounds: $e");
+      print("Error stopAllSounds: $e");
     }
   }
 

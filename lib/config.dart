@@ -1,6 +1,6 @@
 class AppConfig {
   // Final Release 1.0.0
-  static const String appVersion = "v1.1.2";
+  static const String appVersion = "v1.1.3";
 
   // === HOSTS (domain migration) ===
   // Legacy domain remains working for already released clients.

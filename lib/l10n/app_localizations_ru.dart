@@ -115,6 +115,28 @@ class L10nRu extends L10n {
   String get updateHistory => 'История обновлений';
 
   @override
+  String get updateAvailable => 'Доступно обновление';
+
+  @override
+  String updateMessageRequired(String version) {
+    return 'Доступна новая версия $version.\nЭто критическое обновление безопасности.';
+  }
+
+  @override
+  String updateMessageOptional(String version) {
+    return 'Доступна новая версия $version.\nМы рекомендуем обновиться для стабильной работы.';
+  }
+
+  @override
+  String get updateLater => 'Позже';
+
+  @override
+  String get updateDownload => 'Скачать';
+
+  @override
+  String get updateDownloading => 'Скачивание обновления';
+
+  @override
   String get exportAccount => 'Экспорт аккаунта';
 
   @override

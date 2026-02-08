@@ -247,7 +247,7 @@ class IncomingMessageHandler {
         DebugLogger.info('CALL', 'CallKit UI скрыт (hang-up/rejected)',
             context: {'call_id': callId, 'peer_pubkey': senderKey});
       } catch (e) {
-        DebugLogger.warn('CALL', 'Ошибка скрытия CallKit: $e',
+        DebugLogger.warn('CALL', 'Error hiding CallKit: $e',
             context: {'call_id': callId, 'peer_pubkey': senderKey});
       }
       return;
@@ -283,6 +283,10 @@ class IncomingMessageHandler {
 
   static bool _isCallStatusMessage(String message) {
     const callStatusMessages = [
+      'Outgoing call',
+      'Incoming call',
+      'Missed call',
+      // Legacy Russian (backward compatibility with older clients)
       'Исходящий звонок',
       'Входящий звонок',
       'Пропущен звонок',
@@ -290,7 +294,7 @@ class IncomingMessageHandler {
     return callStatusMessages.contains(message);
   }
 
-  static const String _supportSenderLabel = 'Разработчик';
+  static const String _supportSenderLabel = 'Developer';
 
   /// Показать нативный CallKit UI для входящего звонка
   /// 
@@ -334,7 +338,7 @@ class IncomingMessageHandler {
         await FlutterCallkitIncoming.endAllCalls();
       }
     } catch (e) {
-      DebugLogger.warn('CALL', 'Ошибка проверки активных звонков: $e',
+      DebugLogger.warn('CALL', 'Error checking active calls: $e',
           context: {'call_id': callId, 'peer_pubkey': callerKey});
     }
     
@@ -345,13 +349,13 @@ class IncomingMessageHandler {
       handle: callerKey.substring(0, 8), // Короткий ID для отображения
       type: 0, // Audio call
       duration: 45000, // 45 секунд рингтон (больше времени на ответ)
-      textAccept: 'Ответить',
-      textDecline: 'Отклонить',
+      textAccept: 'Answer',
+      textDecline: 'Decline',
       missedCallNotification: const NotificationParams(
         showNotification: true,
         isShowCallback: false,
-        subtitle: 'Пропущенный звонок',
-        callbackText: 'Перезвонить',
+        subtitle: 'Missed call',
+        callbackText: 'Call back',
       ),
       extra: <String, dynamic>{
         'callerKey': callerKey,
@@ -368,8 +372,8 @@ class IncomingMessageHandler {
         isShowFullLockedScreen: true,
         // КРИТИЧНО для пробуждения устройства:
         isImportant: true,
-        incomingCallNotificationChannelName: 'Входящие звонки',
-        missedCallNotificationChannelName: 'Пропущенные звонки',
+        incomingCallNotificationChannelName: 'Incoming calls',
+        missedCallNotificationChannelName: 'Missed calls',
       ),
     );
     

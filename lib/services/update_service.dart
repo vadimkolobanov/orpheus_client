@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:orpheus_project/config.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
+import 'package:orpheus_project/services/apk_download_service.dart';
 
 class UpdateService {
   static bool _isUpdateDialogShown = false;
@@ -120,16 +122,18 @@ class UpdateService {
     // Формируем полную ссылку
     String fullUrl = resolveDownloadUrl(urlPath);
 
+    // Получаем локализацию
+    final l10n = L10n.of(context);
+
     showDialog(
       context: context,
       barrierDismissible: !required, // Блокируем закрытие, если обновление обязательно
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.grey)),
-        title: const Text("ДОСТУПНО ОБНОВЛЕНИЕ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        title: Text(l10n.updateAvailable, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         content: Text(
-          "Вышла новая версия $version.\n"
-              "${required ? 'Это критическое обновление безопасности.' : 'Рекомендуем обновить приложение для стабильной работы.'}",
+          required ? l10n.updateMessageRequired(version) : l10n.updateMessageOptional(version),
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -139,22 +143,145 @@ class UpdateService {
                 Navigator.pop(context);
                 _isUpdateDialogShown = false;
               },
-              child: const Text("ПОЗЖЕ", style: TextStyle(color: Colors.grey)),
+              child: Text(l10n.updateLater, style: const TextStyle(color: Colors.grey)),
             ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB0BEC5)),
-            onPressed: () {
-              _launchBrowser(fullUrl);
-              if (!required) {
-                Navigator.pop(context);
-                _isUpdateDialogShown = false;
-              }
+            onPressed: () async {
+              // Try to download and install APK in-app first
+              // If it fails, fallback to browser
+              await _downloadAndInstallApk(context, fullUrl, required);
             },
-            child: const Text("СКАЧАТЬ", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            child: Text(l10n.updateDownload, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
     );
+  }
+
+  /// Download and install APK in-app with fallback to browser
+  static Future<void> _downloadAndInstallApk(BuildContext context, String url, bool required) async {
+    print('UPDATE: Attempting in-app APK download from $url');
+
+    try {
+      // Check if we can install APK in-app
+      final canInstallInApp = await ApkDownloadService.canInstallApkInApp();
+
+      if (!canInstallInApp) {
+        print('UPDATE: Device does not support in-app APK installation, using browser');
+        await _launchBrowser(url);
+        if (!required && context.mounted) {
+          Navigator.pop(context);
+          _isUpdateDialogShown = false;
+        }
+        return;
+      }
+
+      // Show progress dialog
+      if (!context.mounted) return;
+
+      final progressNotifier = ValueNotifier<double>(0.0);
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => ValueListenableBuilder<double>(
+          valueListenable: progressNotifier,
+          builder: (context, progress, child) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E1E1E),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: Colors.grey),
+              ),
+              title: Text(
+                L10n.of(context).updateDownloading,
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 16),
+                  LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: Colors.grey[800],
+                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFB0BEC5)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '${(progress * 100).toStringAsFixed(1)}%',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      );
+
+      // Download APK
+      final result = await ApkDownloadService.downloadApk(
+        url,
+        onProgress: (progress) {
+          progressNotifier.value = progress;
+        },
+      );
+
+      // Dispose notifier
+      progressNotifier.dispose();
+
+      // Close progress dialog
+      if (context.mounted) {
+        Navigator.pop(context); // Close progress dialog
+      }
+
+      if (!result.success) {
+        print('UPDATE: Download failed: ${result.error}, falling back to browser');
+        await _launchBrowser(url);
+        if (!required && context.mounted) {
+          Navigator.pop(context); // Close update dialog
+          _isUpdateDialogShown = false;
+        }
+        return;
+      }
+
+      print('UPDATE: Download successful, attempting to install');
+
+      // Install APK
+      final installed = await ApkDownloadService.installApk(result.filePath!);
+
+      if (!installed) {
+        print('UPDATE: Installation failed, falling back to browser');
+        await _launchBrowser(url);
+        if (!required && context.mounted) {
+          Navigator.pop(context); // Close update dialog
+          _isUpdateDialogShown = false;
+        }
+        return;
+      }
+
+      print('UPDATE: APK installation initiated successfully');
+
+      // Close update dialog after successful installation start
+      if (!required && context.mounted) {
+        Navigator.pop(context);
+        _isUpdateDialogShown = false;
+      }
+
+      // Clean up old APKs in background
+      ApkDownloadService.cleanupOldApks();
+
+    } catch (e, stackTrace) {
+      print('UPDATE: Unexpected error during download: $e');
+      print('UPDATE: Stack trace: $stackTrace');
+
+      // Fallback to browser on any error
+      await _launchBrowser(url);
+      if (!required && context.mounted) {
+        Navigator.pop(context);
+        _isUpdateDialogShown = false;
+      }
+    }
   }
 
   static Future<void> _launchBrowser(String urlString) async {

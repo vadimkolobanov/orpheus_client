@@ -259,6 +259,42 @@ abstract class L10n {
   /// **'Update History'**
   String get updateHistory;
 
+  /// Update dialog title
+  ///
+  /// In en, this message translates to:
+  /// **'Update Available'**
+  String get updateAvailable;
+
+  /// Update dialog message for required updates
+  ///
+  /// In en, this message translates to:
+  /// **'New version {version} is available.\nThis is a critical security update.'**
+  String updateMessageRequired(String version);
+
+  /// Update dialog message for optional updates
+  ///
+  /// In en, this message translates to:
+  /// **'New version {version} is available.\nWe recommend updating for stable operation.'**
+  String updateMessageOptional(String version);
+
+  /// Update dialog "later" button
+  ///
+  /// In en, this message translates to:
+  /// **'Later'**
+  String get updateLater;
+
+  /// Update dialog "download" button
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get updateDownload;
+
+  /// Update downloading progress dialog title
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading Update'**
+  String get updateDownloading;
+
   /// Export menu item
   ///
   /// In en, this message translates to:

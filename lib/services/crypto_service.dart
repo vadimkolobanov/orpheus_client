@@ -46,7 +46,7 @@ class CryptoService {
         _registrationDate = DateTime.tryParse(registrationDateStr);
       }
       
-      print("Ключи загружены.");
+      print("Keys loaded.");
       return true;
     }
     return false;
@@ -65,7 +65,7 @@ class CryptoService {
     );
 
     await _saveKeys(privateKeyData.bytes, _publicKey!.bytes);
-    print("Новые ключи сгенерированы.");
+    print("New keys generated.");
   }
 
   Future<void> importPrivateKey(String privateKeyB64) async {
@@ -77,14 +77,14 @@ class CryptoService {
       _publicKey = await _keyPair!.extractPublicKey();
 
       await _saveKeys(privateKeyData.bytes, _publicKey!.bytes);
-      print("Ключи успешно импортированы.");
+      print("Keys imported successfully.");
     } catch (e) {
-      throw Exception("Неверный формат ключа");
+      throw Exception("Invalid key format");
     }
   }
 
   Future<String> getPrivateKeyBase64() async {
-    if (_keyPair == null) throw Exception("Нет ключей");
+    if (_keyPair == null) throw Exception("No keys available");
     final data = await _keyPair!.extract();
     return base64.encode(data.bytes);
   }
@@ -104,13 +104,13 @@ class CryptoService {
     _publicKey = null;
     _registrationDate = null;
     
-    print("Аккаунт удалён.");
+    print("Account deleted.");
   }
 
   // --- ШИФРОВАНИЕ (В ИЗОЛЯТАХ) ---
 
   Future<String> encrypt(String recipientPublicKeyBase64, String message) async {
-    if (_keyPair == null) throw Exception("Ключи не инициализированы!");
+    if (_keyPair == null) throw Exception("Keys not initialized!");
 
     // Извлекаем сырые байты, чтобы передать их в изолят
     final keyData = await _keyPair!.extract();
@@ -127,7 +127,7 @@ class CryptoService {
   }
 
   Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload) async {
-    if (_keyPair == null) throw Exception("Ключи не инициализированы!");
+    if (_keyPair == null) throw Exception("Keys not initialized!");
 
     final keyData = await _keyPair!.extract();
     final myPrivateKeyBytes = keyData.bytes;

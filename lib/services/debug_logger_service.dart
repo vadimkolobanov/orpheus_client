@@ -97,8 +97,8 @@ class DebugLogger {
   static String exportToText() {
     final buffer = StringBuffer();
     buffer.writeln('=== ORPHEUS DEBUG LOGS ===');
-    buffer.writeln('Экспорт: ${DateTime.now().toIso8601String()}');
-    buffer.writeln('Всего записей: ${_logs.length}');
+    buffer.writeln('Export: ${DateTime.now().toIso8601String()}');
+    buffer.writeln('Total entries: ${_logs.length}');
     buffer.writeln('');
     
     for (final entry in _logs) {
