@@ -31,7 +31,8 @@
   - `docs/` (если меняется “как работает/как пользоваться”)
 
 ## Коммиты
-Формат и автоматизация: `docs/COMMIT_PROCESS.md`.
+Формат: Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).
+Коммиты на английском языке.
 
 
 

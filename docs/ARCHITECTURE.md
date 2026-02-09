@@ -23,6 +23,12 @@
 - **Обновления** (check-update + fallback по хостам): `lib/services/update_service.dart`
 - **Лицензия/промо‑активация**: `lib/license_screen.dart`
 - **Поддержка (чат)**: `lib/services/support_chat_service.dart`
+- **Oracle of Orpheus (AI)**: `lib/services/ai_assistant_service.dart`, UI: `lib/screens/ai_assistant_chat_screen.dart`
+- **Notes Vault (заметки)**: `lib/screens/notes_vault_screen.dart`, модель: `lib/models/note_model.dart`
+- **Rooms (групповые чаты)**: `lib/services/rooms_service.dart`
+- **Desktop Link (QR‑pairing)**: `lib/services/desktop_link_service.dart`, сервер: `lib/services/desktop_link_server.dart`
+- **Очистка сообщений**: `lib/services/message_cleanup_service.dart`
+- **Настройки уведомлений**: `lib/services/notification_prefs_service.dart`
 
 ## Структура каталогов
 - `lib/` — исходный код приложения
@@ -123,8 +129,41 @@ ICE кандидаты:
 - Duress mode влияет на выдачу данных из `DatabaseService` (контакты/сообщения/статистика возвращаются пустыми), при этом входящие сообщения **сохраняются**, чтобы не терять данные.
 - Panic wipe реализован как “3 события ухода в фон” (ограничение Flutter; по умолчанию выключено).
 
+### 7) Oracle of Orpheus (AI‑ассистент)
+- **Сервис**: `lib/services/ai_assistant_service.dart`
+- **UI**: `lib/screens/ai_assistant_chat_screen.dart`
+- **Эндпоинт**: `POST /api/public/ai/call` (публичный, с заголовком `X-Pubkey`)
+- **Память**: до 20 последних сообщений хранятся в SQLite и передаются серверу через `parent_message_id` для контекста
+- **Функции UI**: приветственный экран с suggestion-кнопками, Markdown‑рендеринг ответов, индикатор памяти, очистка чата/памяти, сохранение ответов в Notes Vault (long-press)
+- **Позиция**: Oracle всегда первый в списке контактов, статус "Always online"
+
+### 8) Notes Vault (зашифрованные заметки)
+- **UI**: `lib/screens/notes_vault_screen.dart`
+- **Модель**: `lib/models/note_model.dart`
+- **Хранение**: SQLite через `DatabaseService` (таблица `notes`)
+- **Tracking источника**: каждая заметка имеет `sourceType` (`manual`, `contact`, `room`, `oracle`) и `sourceLabel`
+- **Операции**: создание, чтение (DESC по дате), удаление (long-press + подтверждение); редактирование не поддерживается
+- **Duress mode**: возвращает пустой список заметок
+
+### 9) Rooms (групповые чаты)
+- **Сервис**: `lib/services/rooms_service.dart`
+- **Архитектура**: чистый HTTP‑клиент без локального хранения (stateless)
+- **API**: `GET /api/rooms`, `POST /api/rooms`, `POST /api/rooms/join`, `GET/POST /api/rooms/{id}/messages`, `GET/POST /api/rooms/{id}/prefs` и др.
+- **Инвайт**: присоединение по invite‑коду, ротация кода через `rotate-invite`
+- **Panic clear**: безвозвратное удаление всей истории комнаты
+- **Orpheus Room**: официальная комната (скрыта до релиза); `asOrpheus` флаг для официальных сообщений
+
+### 10) Desktop Link (QR‑сопряжение, в разработке)
+- **Сервисы**: `lib/services/desktop_link_service.dart`, `lib/services/desktop_link_server.dart`
+- **Протокол**: мобильное устройство сканирует QR от десктопа → подтверждает с OTP и session token → запускает локальный WebSocket-сервер → десктоп подключается по LAN
+- **Безопасность**: QR с `expires`, OTP (4 цифры), session token (32 random bytes), хранение сессии в `FlutterSecureStorage`
+
+### 11) Автоблокировка и очистка сообщений
+- **Автоблокировка по неактивности**: `AuthService` отслеживает время последней активности; не блокируется во время активного звонка (`CallStateService`)
+- **Очистка сообщений**: `MessageCleanupService` удаляет старые сообщения по политике (retention policy); триггеры: запуск, каждые 2 часа, смена политики; не работает в duress mode
+
 ## Где фиксировать решения и контракты
 - Архитектурные решения: `docs/DECISIONS/`
-- Контракты поведения: тесты (см. `docs/testing/README.md` и `docs/TESTING_GAPS.md`)
+- Контракты поведения: тесты (см. `docs/testing/README.md`)
 
 

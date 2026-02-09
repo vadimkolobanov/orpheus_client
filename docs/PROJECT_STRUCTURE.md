@@ -28,11 +28,13 @@
 - **`lib/updates_screen.dart`**: экран обновлений/информации об обновлениях (UI).
 - **`lib/license_screen.dart`**: активация лицензии/промокода и ожидание подтверждения по WS.
 
-### 2.3 `lib/screens/` — вспомогательные и “системные” экраны
+### 2.3 `lib/screens/` — вспомогательные и "системные" экраны
 - **`lib/screens/home_screen.dart`**: основной контейнер/навигация между ключевыми разделами.
+- **`lib/screens/ai_assistant_chat_screen.dart`**: UI чата с Oracle of Orpheus (AI ассистент): Markdown‑рендеринг, suggestion-кнопки, сохранение в Notes Vault, индикатор памяти.
+- **`lib/screens/notes_vault_screen.dart`**: UI зашифрованных заметок (Notes Vault): CRUD, tracking источника, сортировка по дате.
 - **`lib/screens/status_screen.dart`**: системный монитор/статусы (сеть/WS/диагностика).
 - **`lib/screens/settings_screen.dart`**: настройки приложения и навигация в разделы (безопасность, поддержка и т.п.).
-- **`lib/screens/security_settings_screen.dart`**: UI управления PIN/duress/wipe/auto‑wipe/panic gesture.
+- **`lib/screens/security_settings_screen.dart`**: UI управления PIN/duress/wipe/auto‑wipe/panic gesture/auto‑lock.
 - **`lib/screens/lock_screen.dart`**: экран блокировки (PIN/duress/wipe code сценарии).
 - **`lib/screens/pin_setup_screen.dart`**: настройка/смена PIN.
 - **`lib/screens/support_chat_screen.dart`**: UI чата поддержки (клиент ↔ админ/разработчик).
@@ -64,6 +66,24 @@
 - **`lib/services/background_call_service.dart`**: foreground service на время звонка (Android), best‑effort.
 - **`lib/services/call_session_controller.dart`**: вынесенная из UI контрактная логика жизненного цикла звонка (если используется в текущем UI/тестах).
 
+#### AI, заметки и комнаты
+- **`lib/services/ai_assistant_service.dart`**: Oracle of Orpheus AI ассистент; HTTP API `/api/public/ai/call`; память до 20 сообщений в SQLite; контекст через `parent_message_id`.
+- **`lib/services/rooms_service.dart`**: групповые чаты (Rooms); HTTP‑клиент без локального хранения; создание/присоединение/сообщения/настройки/panic clear.
+- **`lib/services/notification_prefs_service.dart`**: локальные настройки уведомлений (Orpheus Official toggle) через SharedPreferences.
+- **`lib/services/message_cleanup_service.dart`**: автоматическая очистка старых сообщений по политике (retention policy); триггеры: запуск, таймер, смена политики.
+
+#### Desktop Link (в разработке)
+- **`lib/services/desktop_link_service.dart`**: QR‑pairing с десктопом; валидация QR, генерация OTP/session token, HTTP confirm, хранение сессии в secure storage.
+- **`lib/services/desktop_link_server.dart`**: локальный WebSocket‑сервер для подключения десктопа по LAN; привязка к IPv4, автоопределение IP.
+
+#### Звонки (дополнительно)
+- **`lib/services/call_native_ui_service.dart`**: мост Flutter ↔ Android для управления экраном при звонке (show when locked, keep awake); best‑effort.
+- **`lib/services/call_id_storage.dart`**: хранение идентификаторов звонков.
+- **`lib/services/pending_call_storage.dart`**: хранение отложенных звонков.
+
+#### Обновления (дополнительно)
+- **`lib/services/apk_download_service.dart`**: скачивание и установка APK обновлений с прогрессом; валидация размера файла; установка через `OpenFilex`.
+
 #### Уведомления, релизы, поддержка
 - **`lib/services/notification_service.dart`**: FCM init/token, обработка background сообщений, локальные уведомления (privacy‑safe), каналы.
 - **`lib/services/update_service.dart`**: проверка обновлений `/api/check-update` с fallback по хостам; открытие download URL.
@@ -82,6 +102,7 @@
 - **`lib/models/chat_message_model.dart`**: модель сообщения + статусы доставки/прочтения.
 - **`lib/models/security_config.dart`**: конфигурация безопасности (PIN/duress/wipe, lockout ladder, auto‑wipe).
 - **`lib/models/support_message.dart`**: модель сообщения поддержки (user/admin, read/unread).
+- **`lib/models/note_model.dart`**: модель заметки Notes Vault (text, sourceType, sourceId, sourceLabel, createdAt).
 
 ### 2.6 UI‑слой: `lib/theme/` и `lib/widgets/`
 - **`lib/theme/app_theme.dart`**: тема/цвета/стили.

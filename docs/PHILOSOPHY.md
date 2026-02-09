@@ -29,7 +29,7 @@ Orpheus — приватная коммуникация “по умолчани
 ## Где “истина” в проекте
 - **Поведение клиента**: код + тесты (`test/`), см. `docs/testing/README.md`.
 - **Ключевые решения**: ADR (`docs/DECISIONS/`).
-- **Публичные release notes**: `OPHEUS_ADMIN` → «Версии» (`app_versions`), см. `docs/RELEASES.md`.
+- **Публичные release notes**: сайт [orpheus.click/changelog](https://orpheus.click/changelog) и `docs/ai_kb/11-release-history.md`.
 
 
 

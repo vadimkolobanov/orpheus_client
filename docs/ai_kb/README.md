@@ -17,13 +17,14 @@
 - `07-support-and-bug-report.md`
 - `08-security-modes.md`
 - `09-system-screen.md`
+- `10-rooms.md`
+- `11-release-history.md`
 
 ## Что НЕ загружать (важно)
 Эти документы полезны разработке, но **не должны** попадать в базу знаний для пользователей:
 - `docs/SECURITY_REVIEW.md` — содержит внутренние уязвимости/приоритеты (риск злоупотреблений).
 - `docs/FUNCTIONAL_PRINCIPLES.md`, `docs/ARCHITECTURE.md`, `docs/PROJECT_STRUCTURE.md`, `docs/DECISIONS/*` — технические детали, внутренние контракты, эндпоинты.
-- `docs/DOMAIN_MIGRATION_orpheus.click.md` — инфраструктурные планы/домены/пути миграции.
-- `docs/testing/*`, `docs/TESTING_GAPS.md`, `docs/COMMIT_PROCESS.md`, `docs/DEVELOPMENT_GUIDE.md` — внутренние процессы.
+- `docs/testing/*`, `docs/DEVELOPMENT_GUIDE.md` — внутренние процессы.
 
 ## Правила обновления (чтобы база знаний не “врала”)
 - Любые изменения публичного поведения/UX → обновляйте соответствующий файл в `docs/ai_kb/`.
