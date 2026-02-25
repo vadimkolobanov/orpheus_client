@@ -584,6 +584,11 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
               ),
               const SizedBox(height: AppSpacing.lg),
               ListTile(
+                leading: const Icon(Icons.copy, color: AppColors.action),
+                title: Text(l10n.copy),
+                onTap: () => Navigator.pop(context, 'copy'),
+              ),
+              ListTile(
                 leading: const Icon(Icons.bookmark_add, color: AppColors.action),
                 title: Text(l10n.notesAddFromChat),
                 onTap: () => Navigator.pop(context, 'save'),
@@ -593,6 +598,14 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
         ),
       ),
     );
+    if (action == 'copy') {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.copied)),
+      );
+      return;
+    }
     if (action != 'save') return;
     await DatabaseService.instance.addNote(
       text: text,

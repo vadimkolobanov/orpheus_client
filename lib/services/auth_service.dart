@@ -3,6 +3,7 @@
 
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:crypto/crypto.dart';
 import 'package:orpheus_project/models/security_config.dart';
@@ -35,6 +36,10 @@ class FlutterAuthSecureStorage implements AuthSecureStorage {
 
 class AuthService {
   static final AuthService instance = AuthService._();
+
+  /// Callback for notifying _AppState that wipe completed.
+  /// Set by _AppState.initState() to reset navigation state.
+  static VoidCallback? onWipeCompleted;
 
   /// Создать отдельный экземпляр (в тестах), чтобы не трогать singleton и не зависеть от плагинов.
   static AuthService createForTesting({
@@ -443,7 +448,10 @@ class AuthService {
       _config = SecurityConfig.empty;
       _isUnlocked = false;
       _isDuressMode = false;
-      
+
+      // 6. Notify _AppState to reset navigation
+      onWipeCompleted?.call();
+
       print("AUTH: ✅ WIPE completed");
     } catch (e) {
       print("AUTH ERROR: Wipe error: $e");

@@ -255,6 +255,7 @@ class _AiAssistantChatScreenState extends State<AiAssistantChatScreen>
       l10n.aiSuggestion1,
       l10n.aiSuggestion2,
       l10n.aiSuggestion3,
+      l10n.aiSuggestion4,
     ];
 
     return Wrap(

@@ -168,11 +168,6 @@ Future<void> _initializeApp() async {
 
   // 6. Panic Wipe Service (тройное нажатие кнопки питания)
   panicWipeService.init();
-  panicWipeService.onPanicWipe = () async {
-    DebugLogger.warn('APP', '⚠️ PANIC WIPE EXECUTED');
-    // После wipe перезапускаем приложение
-    _hasKeys = false;
-  };
 
   // 7. Network Monitor Service (мониторинг сети для реконнекта)
   DebugLogger.info('APP', 'Инициализация NetworkMonitorService.');
@@ -888,12 +883,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // Подписываемся на изменения локали
     LocaleService.instance.addListener(_onLocaleChanged);
     
-    // Подписываемся на panic wipe
-    panicWipeService.onPanicWipe = () async {
-      DebugLogger.warn('APP', '⚠️ PANIC WIPE - restarting app');
+    // Central wipe handler — called from ALL wipe paths
+    // (delete account, wipe code, auto-wipe, panic wipe)
+    AuthService.onWipeCompleted = () {
       if (mounted) {
         setState(() {
           _keysExist = false;
+          _isLocked = false;
+          _isLicensed = false;
+          _isCheckCompleted = false;
         });
       }
     };
@@ -973,11 +971,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     };
     DebugLogger.warn('APP', '⚠️ $label: выполняется полный WIPE');
     await authService.performWipe();
-    if (!mounted) return;
-    setState(() {
-      _keysExist = false;
-      _isLocked = false;
-    });
+    // State reset is handled by AuthService.onWipeCompleted callback
   }
 
   void _onLocaleChanged() {

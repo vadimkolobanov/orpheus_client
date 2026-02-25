@@ -203,7 +203,7 @@ class BackgroundCallService {
     try {
       _backend.invoke('updateNotification', {
         'title': contactName,
-        'content': 'Call: $duration',
+        'content': 'Звонок: $duration',
       });
     } catch (e) {
       print("📞 ERROR: updateCallDuration failed: $e");

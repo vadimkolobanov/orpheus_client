@@ -120,7 +120,7 @@ class MessageCleanupService {
       // Если политика "all" — нечего удалять
       if (policy == MessageRetentionPolicy.all) {
         await _auth.updateLastMessageCleanup(_now());
-        return CleanupResult.skipped(reason: 'Policy: keep all');
+        return CleanupResult.skipped(reason: 'Политика: хранить всё');
       }
       
       // Вычисляем cutoff время

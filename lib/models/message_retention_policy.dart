@@ -47,27 +47,27 @@ extension MessageRetentionPolicyExtension on MessageRetentionPolicy {
   String get displayName {
     switch (this) {
       case MessageRetentionPolicy.all:
-        return 'Keep forever';
+        return 'Хранить всегда';
       case MessageRetentionPolicy.day:
-        return 'Keep 24 hours';
+        return 'Хранить 24 часа';
       case MessageRetentionPolicy.week:
-        return 'Keep 7 days';
+        return 'Хранить 7 дней';
       case MessageRetentionPolicy.month:
-        return 'Keep 30 days';
+        return 'Хранить 30 дней';
     }
   }
-  
+
   /// Short description for UI
   String get subtitle {
     switch (this) {
       case MessageRetentionPolicy.all:
-        return 'Messages are not deleted automatically';
+        return 'Сообщения не удаляются автоматически';
       case MessageRetentionPolicy.day:
-        return 'Messages older than a day are deleted';
+        return 'Сообщения старше суток удаляются';
       case MessageRetentionPolicy.week:
-        return 'Messages older than a week are deleted';
+        return 'Сообщения старше недели удаляются';
       case MessageRetentionPolicy.month:
-        return 'Messages older than a month are deleted';
+        return 'Сообщения старше месяца удаляются';
     }
   }
   

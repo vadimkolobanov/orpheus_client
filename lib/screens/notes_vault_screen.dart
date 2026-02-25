@@ -38,22 +38,66 @@ class _NotesVaultScreenState extends State<NotesVaultScreen> {
     _scrollToTop();
   }
 
-  Future<void> _confirmDelete(NoteEntry note) async {
-    if (note.id == null) return;
+  Future<void> _showNoteActions(NoteEntry note) async {
     final l10n = L10n.of(context);
-    final ok = await AppDialog.show(
+    final action = await showModalBottomSheet<String>(
       context: context,
-      icon: Icons.delete_outline,
-      title: l10n.notesDeleteTitle,
-      content: l10n.notesDeleteDesc,
-      primaryLabel: l10n.delete,
-      secondaryLabel: l10n.cancel,
-      isDanger: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textTertiary.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              ListTile(
+                leading: const Icon(Icons.copy, color: AppColors.action),
+                title: Text(l10n.copy),
+                onTap: () => Navigator.pop(context, 'copy'),
+              ),
+              ListTile(
+                leading: Icon(Icons.delete_outline, color: AppColors.danger),
+                title: Text(l10n.delete, style: TextStyle(color: AppColors.danger)),
+                onTap: () => Navigator.pop(context, 'delete'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
-    if (!ok) return;
-    await DatabaseService.instance.deleteNote(note.id!);
     if (!mounted) return;
-    setState(() {});
+    if (action == 'copy') {
+      await Clipboard.setData(ClipboardData(text: note.text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.copied)),
+      );
+    } else if (action == 'delete' && note.id != null) {
+      final ok = await AppDialog.show(
+        context: context,
+        icon: Icons.delete_outline,
+        title: l10n.notesDeleteTitle,
+        content: l10n.notesDeleteDesc,
+        primaryLabel: l10n.delete,
+        secondaryLabel: l10n.cancel,
+        isDanger: true,
+      );
+      if (!ok) return;
+      await DatabaseService.instance.deleteNote(note.id!);
+      if (!mounted) return;
+      setState(() {});
+    }
   }
 
   void _scrollToTop() {
@@ -105,7 +149,7 @@ class _NotesVaultScreenState extends State<NotesVaultScreen> {
                     final note = notes[index];
                     return _NoteCard(
                       note: note,
-                      onLongPress: () => _confirmDelete(note),
+                      onLongPress: () => _showNoteActions(note),
                     );
                   },
                 );
