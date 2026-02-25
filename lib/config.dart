@@ -52,7 +52,7 @@ class AppConfig {
       'version': '1.1.4',
       'date': '25.02.2026',
       'changes': [
-        'SECURITY: Removed legacy domain that exposed developer identity.',
+        'SECURITY: Hardened network configuration, removed redundant endpoints.',
         'FIX: Account export now falls back to app PIN when biometrics unavailable.',
         'NEW: Multi-select messages for batch delete (long-press or menu).',
         'FIX: Call messages can now be selected and deleted.',
