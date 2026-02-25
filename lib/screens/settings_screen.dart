@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:orpheus_project/config.dart';
+import 'package:orpheus_project/models/security_config.dart';
 import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/screens/debug_logs_screen.dart';
@@ -128,28 +129,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _exportAccount() async {
     final l10n = L10n.of(context);
-    final LocalAuthentication auth = LocalAuthentication();
-    final bool canAuth =
-        await auth.canCheckBiometrics || await auth.isDeviceSupported();
 
-    if (!canAuth) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.biometryUnavailable)),
+    // Try system authentication (biometric + device credentials)
+    bool authenticated = false;
+    bool systemAuthAvailable = false;
+    try {
+      final LocalAuthentication auth = LocalAuthentication();
+      systemAuthAvailable =
+          await auth.canCheckBiometrics || await auth.isDeviceSupported();
+
+      if (systemAuthAvailable) {
+        authenticated = await auth.authenticate(
+          localizedReason: l10n.confirmIdentity,
+          options: const AuthenticationOptions(
+              stickyAuth: true, biometricOnly: false),
         );
+        // User explicitly cancelled — don't fall through to PIN
+        if (!authenticated) return;
       }
-      return;
+    } catch (e) {
+      debugPrint('System auth failed, falling back to app PIN: $e');
     }
 
+    // Fallback: verify with app PIN when system auth unavailable or threw
+    if (!authenticated && mounted) {
+      authenticated = await _verifyWithAppPin(l10n);
+    }
+
+    if (!authenticated || !mounted) return;
+
     try {
-      final bool didAuthenticate = await auth.authenticate(
-        localizedReason: l10n.confirmIdentity,
-        options:
-            const AuthenticationOptions(stickyAuth: true, biometricOnly: false),
-      );
-
-      if (!didAuthenticate) return;
-
       final privateKey = await cryptoService.getPrivateKeyBase64();
       if (!mounted) return;
 
@@ -157,13 +166,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
         context: context,
         builder: (context) => _ExportKeyDialog(privateKey: privateKey),
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Export key error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(l10n.authError)),
         );
       }
     }
+  }
+
+  Future<bool> _verifyWithAppPin(L10n l10n) async {
+    if (!authService.config.isPinEnabled) {
+      // No app PIN set — user already authenticated via lock screen
+      return true;
+    }
+
+    final pin = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _PinVerifyDialog(
+        title: l10n.confirmIdentity,
+        pinLength: authService.config.pinLength,
+      ),
+    );
+
+    if (pin == null || !mounted) return false;
+
+    final result = authService.verifyPin(pin);
+    if (result == PinVerifyResult.success) return true;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.wrongPin)),
+      );
+    }
+    return false;
   }
 
   Future<void> _copyToClipboard(String text) async {
@@ -181,7 +219,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _showDeleteAccountDialog() async {
-    final l10n = L10n.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => const _DeleteAccountDialog(),
@@ -190,12 +227,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed != true) return;
 
     await authService.performWipe();
-
+    // State reset (_keysExist=false) is handled by AuthService.onWipeCompleted.
+    // Just pop to root — _buildHome() now returns WelcomeScreen.
     if (!mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(l10n.accountDeleted)),
-    );
   }
 
   @override
@@ -711,6 +746,59 @@ class _ExportKeyDialog extends StatelessWidget {
                 .showSnackBar(SnackBar(content: Text(l10n.keyCopied)));
           },
           child: Text(l10n.copy),
+        ),
+      ],
+    );
+  }
+}
+
+class _PinVerifyDialog extends StatefulWidget {
+  const _PinVerifyDialog({required this.title, required this.pinLength});
+  final String title;
+  final int pinLength;
+
+  @override
+  State<_PinVerifyDialog> createState() => _PinVerifyDialogState();
+}
+
+class _PinVerifyDialogState extends State<_PinVerifyDialog> {
+  final _controller = TextEditingController();
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        obscureText: _obscure,
+        keyboardType: TextInputType.number,
+        maxLength: widget.pinLength,
+        decoration: InputDecoration(
+          hintText: l10n.enterPin,
+          suffixIcon: IconButton(
+            icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+            onPressed: () => setState(() => _obscure = !_obscure),
+          ),
+        ),
+        onChanged: (value) {
+          if (value.length == widget.pinLength) {
+            Navigator.pop(context, value);
+          }
+        },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(l10n.cancel),
         ),
       ],
     );
