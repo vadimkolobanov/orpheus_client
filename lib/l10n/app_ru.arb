@@ -31,6 +31,31 @@
   "howToUse": "Как пользоваться",
   "howToUseDesc": "Краткая инструкция",
   "updateHistory": "История обновлений",
+
+  "updateAvailable": "Доступно обновление",
+  "@updateAvailable": {"description": "Update dialog title"},
+
+  "updateMessageRequired": "Доступна новая версия {version}.\nЭто критическое обновление безопасности.",
+  "@updateMessageRequired": {
+    "description": "Update dialog message for required updates",
+    "placeholders": {"version": {"type": "String"}}
+  },
+
+  "updateMessageOptional": "Доступна новая версия {version}.\nМы рекомендуем обновиться для стабильной работы.",
+  "@updateMessageOptional": {
+    "description": "Update dialog message for optional updates",
+    "placeholders": {"version": {"type": "String"}}
+  },
+
+  "updateLater": "Позже",
+  "@updateLater": {"description": "Update dialog later button"},
+
+  "updateDownload": "Скачать",
+  "@updateDownload": {"description": "Update dialog download button"},
+
+  "updateDownloading": "Скачивание обновления",
+  "@updateDownloading": {"description": "Update downloading progress dialog title"},
+
   "exportAccount": "Экспорт аккаунта",
   "exportAccountDesc": "Показать приватный ключ",
   "notificationSettings": "Настройка уведомлений",
@@ -48,11 +73,15 @@
   "deleteAccountWarning": "Это действие удалит ключи, контакты и историю сообщений без возможности восстановления.",
   "deleteAccountConfirm": "Я понимаю, что это необратимо",
   "delete": "Удалить",
-  
+  "nSelected": "{count} выбрано",
+  "deleteSelectedConfirm": "Удалить {count} сообщений?",
+  "selectMessages": "Выбрать",
+
   "privateKey": "Приватный ключ",
   "privateKeyWarning": "Никому не показывайте этот ключ. Владение им даёт полный доступ к вашему аккаунту.",
   "close": "Закрыть",
   "copy": "Копировать",
+  "copied": "Скопировано",
   "keyCopied": "Ключ скопирован",
   
   "biometryUnavailable": "Биометрия недоступна. Настройте безопасность устройства.",
@@ -490,6 +519,7 @@
   "aiSuggestion1": "Что нового в этой версии?",
   "aiSuggestion2": "Как работает шифрование?",
   "aiSuggestion3": "Что такое код принуждения?",
+  "aiSuggestion4": "Что такое Оракул Орфея?",
 
   "notesVaultTitle": "Сейф",
   "notesVaultDesc": "Личные заметки и важные сообщения",

@@ -185,6 +185,19 @@ class L10nEn extends L10n {
   String get delete => 'Delete';
 
   @override
+  String nSelected(int count) {
+    return '$count selected';
+  }
+
+  @override
+  String deleteSelectedConfirm(int count) {
+    return 'Delete $count messages?';
+  }
+
+  @override
+  String get selectMessages => 'Select';
+
+  @override
   String get privateKey => 'Private Key';
 
   @override
@@ -196,6 +209,9 @@ class L10nEn extends L10n {
 
   @override
   String get copy => 'Copy';
+
+  @override
+  String get copied => 'Copied';
 
   @override
   String get keyCopied => 'Key copied';
@@ -1411,6 +1427,9 @@ class L10nEn extends L10n {
 
   @override
   String get aiSuggestion3 => 'What is the duress code?';
+
+  @override
+  String get aiSuggestion4 => 'What is the Oracle of Orpheus?';
 
   @override
   String get notesVaultTitle => 'Vault';

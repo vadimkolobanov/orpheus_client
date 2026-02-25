@@ -277,13 +277,13 @@ abstract class L10n {
   /// **'New version {version} is available.\nWe recommend updating for stable operation.'**
   String updateMessageOptional(String version);
 
-  /// Update dialog "later" button
+  /// Update dialog later button
   ///
   /// In en, this message translates to:
   /// **'Later'**
   String get updateLater;
 
-  /// Update dialog "download" button
+  /// Update dialog download button
   ///
   /// In en, this message translates to:
   /// **'Download'**
@@ -391,6 +391,24 @@ abstract class L10n {
   /// **'Delete'**
   String get delete;
 
+  /// Number of selected messages
+  ///
+  /// In en, this message translates to:
+  /// **'{count} selected'**
+  String nSelected(int count);
+
+  /// Confirm deletion of selected messages
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {count} messages?'**
+  String deleteSelectedConfirm(int count);
+
+  /// Select messages action
+  ///
+  /// In en, this message translates to:
+  /// **'Select'**
+  String get selectMessages;
+
   /// Private key dialog title
   ///
   /// In en, this message translates to:
@@ -414,6 +432,12 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'Copy'**
   String get copy;
+
+  /// Text copied to clipboard snackbar
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get copied;
 
   /// Key copied snackbar
   ///
@@ -2676,6 +2700,12 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'What is the duress code?'**
   String get aiSuggestion3;
+
+  /// AI suggestion 4
+  ///
+  /// In en, this message translates to:
+  /// **'What is the Oracle of Orpheus?'**
+  String get aiSuggestion4;
 
   /// Notes vault title
   ///

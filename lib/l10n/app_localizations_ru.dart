@@ -189,6 +189,19 @@ class L10nRu extends L10n {
   String get delete => 'Удалить';
 
   @override
+  String nSelected(int count) {
+    return '$count выбрано';
+  }
+
+  @override
+  String deleteSelectedConfirm(int count) {
+    return 'Удалить $count сообщений?';
+  }
+
+  @override
+  String get selectMessages => 'Выбрать';
+
+  @override
   String get privateKey => 'Приватный ключ';
 
   @override
@@ -200,6 +213,9 @@ class L10nRu extends L10n {
 
   @override
   String get copy => 'Копировать';
+
+  @override
+  String get copied => 'Скопировано';
 
   @override
   String get keyCopied => 'Ключ скопирован';
@@ -1423,6 +1439,9 @@ class L10nRu extends L10n {
 
   @override
   String get aiSuggestion3 => 'Что такое код принуждения?';
+
+  @override
+  String get aiSuggestion4 => 'Что такое Оракул Орфея?';
 
   @override
   String get notesVaultTitle => 'Сейф';

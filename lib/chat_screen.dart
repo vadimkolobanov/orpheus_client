@@ -41,6 +41,10 @@ class _ChatScreenState extends State<ChatScreen>
   // Для отслеживания уже показанных сообщений (анимация появления только один раз)
   final Set<int> _animatedMessageIds = <int>{};
 
+  // Multi-select mode
+  final Set<int> _selectedTimestamps = <int>{};
+  bool get _isSelectionMode => _selectedTimestamps.isNotEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -128,6 +132,79 @@ class _ChatScreenState extends State<ChatScreen>
     if (mounted) setState(() => _isEncrypting = false);
   }
 
+  // --- Selection mode ---
+
+  void _toggleSelection(int timestamp) {
+    setState(() {
+      if (_selectedTimestamps.contains(timestamp)) {
+        _selectedTimestamps.remove(timestamp);
+      } else {
+        _selectedTimestamps.add(timestamp);
+      }
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() => _selectedTimestamps.clear());
+  }
+
+  AppBar _buildSelectionAppBar(L10n l10n) {
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.close),
+        onPressed: _exitSelectionMode,
+      ),
+      title: Text(l10n.nSelected(_selectedTimestamps.length)),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.delete_outline),
+          tooltip: l10n.delete,
+          onPressed: _deleteSelectedMessages,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _deleteSelectedMessages() async {
+    final l10n = L10n.of(context);
+    final count = _selectedTimestamps.length;
+    final ok = await AppDialog.show(
+      context: context,
+      icon: Icons.delete_outline,
+      title: l10n.deleteSelectedConfirm(count),
+      primaryLabel: l10n.delete,
+      secondaryLabel: l10n.cancel,
+      isDanger: true,
+    );
+    if (!ok) return;
+
+    await DatabaseService.instance.deleteMessagesByTimestamps(
+      widget.contact.publicKey,
+      _selectedTimestamps.toList(),
+    );
+    _selectedTimestamps.clear();
+    await _loadChatHistory();
+  }
+
+  Future<void> _deleteSingleMessage(ChatMessage message) async {
+    final l10n = L10n.of(context);
+    final ok = await AppDialog.show(
+      context: context,
+      icon: Icons.delete_outline,
+      title: l10n.deleteSelectedConfirm(1),
+      primaryLabel: l10n.delete,
+      secondaryLabel: l10n.cancel,
+      isDanger: true,
+    );
+    if (!ok) return;
+
+    await DatabaseService.instance.deleteMessagesByTimestamps(
+      widget.contact.publicKey,
+      [message.timestamp.millisecondsSinceEpoch],
+    );
+    await _loadChatHistory();
+  }
+
   Future<void> _confirmClearHistory() async {
     final l10n = L10n.of(context);
     final ok = await AppDialog.show(
@@ -149,9 +226,14 @@ class _ChatScreenState extends State<ChatScreen>
   Widget build(BuildContext context) {
     final l10n = L10n.of(context);
     
-    return AppScaffold(
+    return PopScope(
+      canPop: !_isSelectionMode,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _exitSelectionMode();
+      },
+      child: AppScaffold(
       safeArea: false,
-      appBar: AppBar(
+      appBar: _isSelectionMode ? _buildSelectionAppBar(l10n) : AppBar(
         titleSpacing: 0,
         title: StreamBuilder<Map<String, bool>>(
           stream: presenceService.stream,
@@ -229,9 +311,10 @@ class _ChatScreenState extends State<ChatScreen>
           Expanded(
             child: _chatHistory.isEmpty ? _EmptyChat() : _buildMessagesList(),
           ),
-          _buildInputBar(),
+          if (!_isSelectionMode) _buildInputBar(),
         ],
       ),
+    ),
     );
   }
 
@@ -279,16 +362,17 @@ class _ChatScreenState extends State<ChatScreen>
 
     final callUi = _callStatusUiFor(message, l10n);
     if (callUi != null) {
+      final isSelected = _selectedTimestamps.contains(messageId);
       final callWidget = _CallStatusPill(
         ui: callUi,
         timeStr: timeStr,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) =>
-                CallScreen(contactPublicKey: widget.contact.publicKey),
-          ),
-        ),
+        isSelected: _isSelectionMode ? isSelected : null,
+        onTap: _isSelectionMode
+            ? () => _toggleSelection(messageId)
+            : null,
+        onLongPress: _isSelectionMode
+            ? () => _toggleSelection(messageId)
+            : () => _showMessageActions(message),
       );
 
       if (!shouldAnimate) return callWidget;
@@ -365,9 +449,41 @@ class _ChatScreenState extends State<ChatScreen>
       ),
     );
 
+    final isSelected = _selectedTimestamps.contains(messageId);
+
     final bubbleWithActions = GestureDetector(
-      onLongPress: () => _showSaveNoteSheet(message.text),
-      child: bubble,
+      onTap: _isSelectionMode ? () => _toggleSelection(messageId) : null,
+      onLongPress: _isSelectionMode
+          ? () => _toggleSelection(messageId)
+          : () => _showMessageActions(message),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.action.withOpacity(0.10)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_isSelectionMode)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Icon(
+                  isSelected
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                  size: 22,
+                  color: isSelected
+                      ? AppColors.action
+                      : AppColors.textTertiary,
+                ),
+              ),
+            Expanded(child: bubble),
+          ],
+        ),
+      ),
     );
 
     if (!shouldAnimate) return bubbleWithActions;
@@ -385,8 +501,9 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Future<void> _showSaveNoteSheet(String text) async {
+  Future<void> _showMessageActions(ChatMessage message) async {
     final l10n = L10n.of(context);
+    final text = message.text;
     if (text.trim().isEmpty) return;
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -410,26 +527,59 @@ class _ChatScreenState extends State<ChatScreen>
               ),
               const SizedBox(height: AppSpacing.lg),
               ListTile(
+                leading: const Icon(Icons.copy, color: AppColors.action),
+                title: Text(l10n.copy),
+                onTap: () => Navigator.pop(context, 'copy'),
+              ),
+              ListTile(
                 leading: const Icon(Icons.bookmark_add, color: AppColors.action),
                 title: Text(l10n.notesAddFromChat),
                 onTap: () => Navigator.pop(context, 'save'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: AppColors.danger),
+                title: Text(l10n.delete),
+                onTap: () => Navigator.pop(context, 'delete'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.checklist, color: AppColors.action),
+                title: Text(l10n.selectMessages),
+                onTap: () => Navigator.pop(context, 'select'),
               ),
             ],
           ),
         ),
       ),
     );
-    if (action != 'save') return;
-    await DatabaseService.instance.addNote(
-      text: text,
-      sourceType: NoteSourceType.contact.name,
-      sourceId: widget.contact.publicKey,
-      sourceLabel: widget.contact.name,
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(l10n.notesAdded)),
-    );
+    if (action == 'copy') {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.copied)),
+      );
+      return;
+    }
+    if (action == 'save') {
+      await DatabaseService.instance.addNote(
+        text: text,
+        sourceType: NoteSourceType.contact.name,
+        sourceId: widget.contact.publicKey,
+        sourceLabel: widget.contact.name,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.notesAdded)),
+      );
+      return;
+    }
+    if (action == 'delete') {
+      await _deleteSingleMessage(message);
+      return;
+    }
+    if (action == 'select') {
+      _toggleSelection(message.timestamp.millisecondsSinceEpoch);
+      return;
+    }
   }
 
   Widget _buildInputBar() {
@@ -662,72 +812,66 @@ class _CallStatusPill extends StatelessWidget {
   const _CallStatusPill({
     required this.ui,
     required this.timeStr,
-    required this.onTap,
+    this.isSelected,
+    this.onTap,
+    this.onLongPress,
   });
 
   final _CallStatusUi ui;
   final String timeStr;
-  final VoidCallback onTap;
+  final bool? isSelected; // null = not in selection mode
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.86),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
+        child: GestureDetector(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: isSelected == true
+                  ? AppColors.action.withOpacity(0.10)
+                  : AppColors.surface,
               borderRadius: AppRadii.md,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: AppRadii.md,
-                  border: Border.all(color: ui.accent.withOpacity(0.30)),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: ui.accent.withOpacity(0.12),
-                        borderRadius: AppRadii.sm,
-                        border: Border.all(color: ui.accent.withOpacity(0.22)),
-                      ),
-                      child: Icon(ui.icon, color: ui.accent, size: 18),
+              border: Border.all(color: ui.accent.withOpacity(0.25)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isSelected != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Icon(
+                      isSelected!
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: isSelected!
+                          ? AppColors.action
+                          : AppColors.textTertiary,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(ui.title,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyLarge
-                                  ?.copyWith(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 2),
-                          Text(ui.subtitle,
-                              style: Theme.of(context).textTheme.bodyMedium),
-                        ],
+                  ),
+                Icon(ui.icon, color: ui.accent, size: 16),
+                const SizedBox(width: 8),
+                Text(
+                  '${ui.title} \u00B7 ${ui.subtitle}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary,
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(timeStr,
-                        style: Theme.of(context)
-                            .textTheme
-                            .labelSmall
-                            ?.copyWith(color: AppColors.textTertiary)),
-                  ],
                 ),
-              ),
+                const SizedBox(width: 8),
+                Text(timeStr,
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: AppColors.textTertiary)),
+              ],
             ),
           ),
         ),

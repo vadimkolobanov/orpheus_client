@@ -1,5 +1,6 @@
 // lib/services/database_service.dart
 
+import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:orpheus_project/models/contact_model.dart';
@@ -11,6 +12,7 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
   static Database? _database;
   static const String _dbFileName = 'orpheus.db';
+  bool _isWiping = false;
   DatabaseService._init();
 
   /// Проверка: находимся ли мы в duress mode (показываем пустой профиль)
@@ -22,6 +24,7 @@ class DatabaseService {
   }
 
   Future<Database> get database async {
+    if (_isWiping) throw StateError('Database is being wiped');
     if (_database != null) return _database!;
     _database = await _initDB(_dbFileName);
     return _database!;
@@ -502,6 +505,17 @@ class DatabaseService {
     await db.delete('messages', where: 'contactPublicKey = ?', whereArgs: [contactKey]);
   }
 
+  Future<int> deleteMessagesByTimestamps(String contactKey, List<int> timestamps) async {
+    if (_isDuressMode || timestamps.isEmpty) return 0;
+    final db = await instance.database;
+    final placeholders = List.filled(timestamps.length, '?').join(',');
+    return await db.delete(
+      'messages',
+      where: 'contactPublicKey = ? AND timestamp IN ($placeholders)',
+      whereArgs: [contactKey, ...timestamps],
+    );
+  }
+
   /// Удалить все сообщения старше указанной даты.
   /// 
   /// Используется для автоматической очистки сообщений по политике retention.
@@ -557,14 +571,43 @@ class DatabaseService {
   }
 
   /// Полное удаление локальной БД (для wipe).
+  /// Блокирует повторное открытие БД до завершения удаления.
   Future<void> deleteDatabaseFile() async {
+    _isWiping = true;
     try {
+      // 1. Close open connection
       await close();
+
       final path = await _dbPath();
-      await deleteDatabase(path);
-      print("DB: Database deleted");
+
+      // 2. Try sqflite deleteDatabase
+      try {
+        await deleteDatabase(path);
+      } catch (_) {}
+
+      // 3. Force delete file if still exists
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+
+      // 4. Also delete journal/wal files
+      for (final suffix in ['-journal', '-wal', '-shm']) {
+        final f = File('$path$suffix');
+        if (await f.exists()) await f.delete();
+      }
+
+      // 5. Verify deletion
+      if (await File(path).exists()) {
+        print("DB ERROR: Database file still exists after deletion!");
+      } else {
+        print("DB: Database deleted and verified");
+      }
     } catch (e) {
       print("DB ERROR: Error deleting database: $e");
+      rethrow;
+    } finally {
+      _isWiping = false;
     }
   }
 

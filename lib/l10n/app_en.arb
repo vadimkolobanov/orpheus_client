@@ -96,7 +96,31 @@
   
   "updateHistory": "Update History",
   "@updateHistory": {"description": "Updates menu item"},
-  
+
+  "updateAvailable": "Update Available",
+  "@updateAvailable": {"description": "Update dialog title"},
+
+  "updateMessageRequired": "New version {version} is available.\nThis is a critical security update.",
+  "@updateMessageRequired": {
+    "description": "Update dialog message for required updates",
+    "placeholders": {"version": {"type": "String"}}
+  },
+
+  "updateMessageOptional": "New version {version} is available.\nWe recommend updating for stable operation.",
+  "@updateMessageOptional": {
+    "description": "Update dialog message for optional updates",
+    "placeholders": {"version": {"type": "String"}}
+  },
+
+  "updateLater": "Later",
+  "@updateLater": {"description": "Update dialog later button"},
+
+  "updateDownload": "Download",
+  "@updateDownload": {"description": "Update dialog download button"},
+
+  "updateDownloading": "Downloading Update",
+  "@updateDownloading": {"description": "Update downloading progress dialog title"},
+
   "exportAccount": "Export Account",
   "@exportAccount": {"description": "Export menu item"},
   
@@ -149,7 +173,26 @@
   
   "delete": "Delete",
   "@delete": {"description": "Delete button"},
-  
+
+  "nSelected": "{count} selected",
+  "@nSelected": {
+    "description": "Number of selected messages",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+
+  "deleteSelectedConfirm": "Delete {count} messages?",
+  "@deleteSelectedConfirm": {
+    "description": "Confirm deletion of selected messages",
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+
+  "selectMessages": "Select",
+  "@selectMessages": {"description": "Select messages action"},
+
   "privateKey": "Private Key",
   "@privateKey": {"description": "Private key dialog title"},
   
@@ -161,7 +204,10 @@
   
   "copy": "Copy",
   "@copy": {"description": "Copy button"},
-  
+
+  "copied": "Copied",
+  "@copied": {"description": "Text copied to clipboard snackbar"},
+
   "keyCopied": "Key copied",
   "@keyCopied": {"description": "Key copied snackbar"},
   
@@ -1310,6 +1356,8 @@
   "@aiSuggestion2": {"description": "AI suggestion 2"},
   "aiSuggestion3": "What is the duress code?",
   "@aiSuggestion3": {"description": "AI suggestion 3"},
+  "aiSuggestion4": "What is the Oracle of Orpheus?",
+  "@aiSuggestion4": {"description": "AI suggestion 4"},
 
   "notesVaultTitle": "Vault",
   "@notesVaultTitle": {"description": "Notes vault title"},

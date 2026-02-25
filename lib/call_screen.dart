@@ -565,6 +565,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   void _onRemoteHangup() {
     if (_isDisposed || _messagesSent) return;
+    _messagesSent = true;
     SoundService.instance.stopAllSounds();
     SoundService.instance.playDisconnectedSound();
 
@@ -574,8 +575,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     if (wasConnected) {
       _saveCallStatusMessageLocally("Incoming call", false);
       _sendCallStatusMessageToContact("Outgoing call");
-      _messagesSent = true;
     }
+    // Non-connected calls: remote hung up / rejected — no local message needed,
+    // the remote side already saved and sent their status message to us.
 
     Future.delayed(const Duration(seconds: 1), _safePop);
   }
