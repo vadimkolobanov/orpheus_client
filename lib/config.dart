@@ -2,23 +2,14 @@ class AppConfig {
   // Final Release 1.0.0
   static const String appVersion = "v1.1.3";
 
-  // === HOSTS (domain migration) ===
-  // Legacy domain remains working for already released clients.
-  static const String legacyHost = 'vadimkolobanov-orpheus-d95e.twc1.net';
-
-  // New API/connection domain (migration target).
+  // === HOST ===
   static const String primaryApiHost = 'api.orpheus.click';
 
-  /// Priority list of API/WS hosts.
-  /// Important: new domain first, then old (fallback).
+  /// API host list (single entry; legacy twc1 domain removed for privacy).
   static const List<String> apiHosts = [
     primaryApiHost,
-    legacyHost,
   ];
 
-  /// For compatibility with old code/tests.
-  /// In new releases this will be `api.orpheus.click`,
-  /// and on problems services will fallback to `legacyHost`.
   static const String serverIp = primaryApiHost;
   // static const String serverIp = '10.0.2.2:8000'; // For local tests
 
@@ -53,7 +44,7 @@ class AppConfig {
   // - User-facing "What's New" / changelog should NOT be maintained in the client.
   // - Single source of truth for release notes: admin panel ORPHEUS_ADMIN -> "Versions" section.
   // - Currently client loads release notes from public admin API:
-  //   https://orpheus.click/api/public/releases
+  //   https://api.orpheus.click/api/public/releases (with fallback to legacy host)
   // - This list is kept as fallback (offline-safe) and may be removed later.
   // - DO NOT add new entries here.
   static const List<Map<String, dynamic>> changelogData = [

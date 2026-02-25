@@ -39,10 +39,8 @@ class ReleaseNote {
 }
 
 class ReleaseNotesService {
-  /// Публичный сайт (orpheus.click) обслуживает public API админки.
-  /// В проде это должен быть домен сайта.
   static const List<String> _baseUrls = [
-    'https://orpheus.click',
+    'https://api.orpheus.click',
   ];
 
   ReleaseNotesService({http.Client? httpClient}) : _http = httpClient ?? http.Client();
