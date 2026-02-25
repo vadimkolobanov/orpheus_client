@@ -61,7 +61,7 @@ class AppConfig {
         'UI: Compact inline call status pills.',
         'PRIVACY: Region data is local-only, never transmitted to servers.',
         'CORE: Centralized wipe handler for all wipe paths.',
-        'L10N: Desktop Link screen fully localized (EN + RU).',
+        'L10N: Improved interface localization (EN + RU).',
       ]
     },
     {
