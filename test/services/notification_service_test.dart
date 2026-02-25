@@ -53,6 +53,7 @@ class _FakeLocalBackend implements NotificationLocalBackend {
     required bool fullScreenIntent,
     required bool ongoing,
     String? groupKey,
+    String? payload,
   }) async {
     if (throwOnShow != null) throw throwOnShow!;
     shown.add((

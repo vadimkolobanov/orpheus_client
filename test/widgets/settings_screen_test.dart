@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/screens/settings_screen.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -83,7 +84,12 @@ void main() {
 
     testWidgets('Smoke: открывается и показывает основные пункты меню', (tester) async {
       await tester.runAsync(() async {
-        await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+        await tester.pumpWidget(const MaterialApp(
+              localizationsDelegates: L10n.localizationsDelegates,
+              supportedLocales: L10n.supportedLocales,
+              locale: Locale('ru'),
+              home: SettingsScreen(),
+            ));
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 350));
       });
@@ -98,7 +104,12 @@ void main() {
 
     testWidgets('Тап по "Безопасность" открывает SecuritySettingsScreen', (tester) async {
       await tester.runAsync(() async {
-        await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+        await tester.pumpWidget(const MaterialApp(
+              localizationsDelegates: L10n.localizationsDelegates,
+              supportedLocales: L10n.supportedLocales,
+              locale: Locale('ru'),
+              home: SettingsScreen(),
+            ));
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 350));
       });
@@ -112,7 +123,12 @@ void main() {
 
     testWidgets('Секретные 5 тапов по заголовку открывают DebugLogsScreen', (tester) async {
       await tester.runAsync(() async {
-        await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+        await tester.pumpWidget(const MaterialApp(
+              localizationsDelegates: L10n.localizationsDelegates,
+              supportedLocales: L10n.supportedLocales,
+              locale: Locale('ru'),
+              home: SettingsScreen(),
+            ));
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 350));
       });

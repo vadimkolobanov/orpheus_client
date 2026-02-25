@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/screens/lock_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
 
@@ -57,6 +58,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: const Locale('ru'),
           home: LockScreen.forTesting(
             auth: auth,
             onUnlocked: () => unlocked++,
@@ -86,6 +90,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: const Locale('ru'),
           home: LockScreen.forTesting(
             auth: auth,
             onUnlocked: () => unlocked++,
@@ -112,6 +119,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: const Locale('ru'),
           home: LockScreen.forTesting(
             auth: auth,
             onUnlocked: () {},
@@ -161,6 +171,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: const Locale('ru'),
           home: LockScreen.forTesting(
             auth: auth,
             onUnlocked: () {},

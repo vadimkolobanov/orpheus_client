@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/license_screen.dart';
 
 void main() {
@@ -13,6 +14,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: L10n.localizationsDelegates,
+        supportedLocales: L10n.supportedLocales,
+        locale: const Locale('ru'),
         home: LicenseScreen(
           onLicenseConfirmed: () => confirmed = true,
           debugWsStreamOverride: controller.stream,

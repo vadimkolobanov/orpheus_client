@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/screens/home_screen.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -84,7 +85,12 @@ void main() {
       // В widget-тестах sqflite_ffi должен выполняться внутри runAsync,
       // иначе Future из ContactsScreen/initState может зависнуть и оставить pending timers.
       await tester.runAsync(() async {
-        await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+        await tester.pumpWidget(const MaterialApp(
+              localizationsDelegates: L10n.localizationsDelegates,
+              supportedLocales: L10n.supportedLocales,
+              locale: Locale('ru'),
+              home: HomeScreen(),
+            ));
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 350));
         await tester.pump();
@@ -110,7 +116,12 @@ void main() {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
 
-        await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+        await tester.pumpWidget(const MaterialApp(
+              localizationsDelegates: L10n.localizationsDelegates,
+              supportedLocales: L10n.supportedLocales,
+              locale: Locale('ru'),
+              home: HomeScreen(),
+            ));
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 350));
         await tester.pump();
@@ -129,7 +140,12 @@ void main() {
       });
 
       await tester.runAsync(() async {
-        await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+        await tester.pumpWidget(const MaterialApp(
+              localizationsDelegates: L10n.localizationsDelegates,
+              supportedLocales: L10n.supportedLocales,
+              locale: Locale('ru'),
+              home: HomeScreen(),
+            ));
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 350));
         await tester.pump();

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/screens/support_chat_screen.dart';
 
 void main() {
@@ -7,6 +8,9 @@ void main() {
     testWidgets('отображает заголовок "ЧАТ С РАЗРАБОТЧИКОМ"', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: SupportChatScreen(),
         ),
       );
@@ -18,6 +22,9 @@ void main() {
     testWidgets('имеет поле ввода сообщения', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: SupportChatScreen(),
         ),
       );
@@ -28,6 +35,9 @@ void main() {
     testWidgets('имеет кнопки отправки и прикрепления логов', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: SupportChatScreen(),
         ),
       );
@@ -42,6 +52,9 @@ void main() {
     testWidgets('имеет кнопку обновления в AppBar', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: SupportChatScreen(),
         ),
       );
@@ -53,6 +66,9 @@ void main() {
         (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: SupportChatScreen(),
         ),
       );
@@ -73,6 +89,9 @@ void main() {
     testWidgets('можно ввести текст в поле', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: SupportChatScreen(),
         ),
       );
@@ -86,6 +105,9 @@ void main() {
     testWidgets('кнопка отправки кликабельна', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: SupportChatScreen(),
         ),
       );

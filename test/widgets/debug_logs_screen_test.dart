@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/screens/debug_logs_screen.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 
@@ -9,7 +10,12 @@ void main() {
   });
 
   testWidgets('DebugLogsScreen: пустое состояние', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: DebugLogsScreen()));
+    await tester.pumpWidget(const MaterialApp(
+        localizationsDelegates: L10n.localizationsDelegates,
+        supportedLocales: L10n.supportedLocales,
+        locale: Locale('ru'),
+        home: DebugLogsScreen(),
+      ));
     expect(find.text('DEBUG LOGS'), findsOneWidget);
     expect(find.text('Нет логов'), findsOneWidget);
   });
@@ -18,7 +24,12 @@ void main() {
     DebugLogger.info('WS', 'hello');
     DebugLogger.error('DB', 'boom');
 
-    await tester.pumpWidget(const MaterialApp(home: DebugLogsScreen()));
+    await tester.pumpWidget(const MaterialApp(
+        localizationsDelegates: L10n.localizationsDelegates,
+        supportedLocales: L10n.supportedLocales,
+        locale: Locale('ru'),
+        home: DebugLogsScreen(),
+      ));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('ВСЕ ('), findsOneWidget);

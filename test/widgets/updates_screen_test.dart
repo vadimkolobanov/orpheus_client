@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/updates_screen.dart';
 
 void main() {
@@ -12,7 +13,12 @@ void main() {
       }
     ]);
 
-    await tester.pumpWidget(MaterialApp(home: UpdatesScreen(debugEntriesFutureOverride: future)));
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: L10n.localizationsDelegates,
+      supportedLocales: L10n.supportedLocales,
+      locale: const Locale('ru'),
+      home: UpdatesScreen(debugEntriesFutureOverride: future),
+    ));
     // В UpdatesScreen есть бесконечные анимации (repeat), поэтому pumpAndSettle() не подходит.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));

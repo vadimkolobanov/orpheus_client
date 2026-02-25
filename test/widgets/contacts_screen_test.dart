@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orpheus_project/contacts_screen.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -82,6 +83,9 @@ void main() {
     testWidgets('Отображает заголовок и основные элементы', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: ContactsScreen(enableUnreadCounters: false),
         ),
       );
@@ -100,6 +104,9 @@ void main() {
     testWidgets('Отображает состояние загрузки', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: ContactsScreen(enableUnreadCounters: false),
         ),
       );
@@ -161,6 +168,9 @@ void main() {
     testWidgets('Кнопка добавления контакта открывает диалог', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: ContactsScreen(enableUnreadCounters: false),
         ),
       );
@@ -179,6 +189,9 @@ void main() {
     testWidgets('Диалог добавления контакта можно закрыть', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
+          localizationsDelegates: L10n.localizationsDelegates,
+          supportedLocales: L10n.supportedLocales,
+          locale: Locale('ru'),
           home: ContactsScreen(enableUnreadCounters: false),
         ),
       );
