@@ -659,15 +659,15 @@ class L10nEn extends L10n {
 
   @override
   String get helpRegionsBullet1 =>
-      'System screen shows mode: \"Standard\" or \"Enhanced Protection\".';
+      'Your region is determined locally on your device and is never sent to Orpheus servers or any third party.';
 
   @override
   String get helpRegionsBullet2 =>
-      'If traffic-controlled region detected, app enables \"enhanced\" mode.';
+      'If a traffic-controlled region is detected, the app automatically enables \"Enhanced Protection\" mode.';
 
   @override
   String get helpRegionsBullet3 =>
-      'Connection issues? Check System screen for network/mode status.';
+      'Connection issues? Check the System screen for network and mode status.';
 
   @override
   String get selectLanguage => 'Select Language';
@@ -735,6 +735,9 @@ class L10nEn extends L10n {
 
   @override
   String get region => 'Region';
+
+  @override
+  String get regionLocalOnly => 'Local only • never sent';
 
   @override
   String get mode => 'Mode';

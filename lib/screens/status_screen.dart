@@ -275,6 +275,7 @@ class _StatusScreenState extends State<StatusScreen>
                   icon: Icons.public_rounded,
                   value: _countryCode,
                   subtitle: _country,
+                  secondaryValue: l10n.regionLocalOnly,
                   valueColor: _isTrafficControlRegion
                       ? AppColors.warning
                       : AppColors.textPrimary,

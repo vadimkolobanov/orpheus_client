@@ -632,13 +632,13 @@
   "helpRegionsTitle": "Regions and Traffic Control",
   "@helpRegionsTitle": {"description": "Help section: Regions"},
   
-  "helpRegionsBullet1": "System screen shows mode: \"Standard\" or \"Enhanced Protection\".",
+  "helpRegionsBullet1": "Your region is determined locally on your device and is never sent to Orpheus servers or any third party.",
   "@helpRegionsBullet1": {"description": "Regions bullet 1"},
-  
-  "helpRegionsBullet2": "If traffic-controlled region detected, app enables \"enhanced\" mode.",
+
+  "helpRegionsBullet2": "If a traffic-controlled region is detected, the app automatically enables \"Enhanced Protection\" mode.",
   "@helpRegionsBullet2": {"description": "Regions bullet 2"},
-  
-  "helpRegionsBullet3": "Connection issues? Check System screen for network/mode status.",
+
+  "helpRegionsBullet3": "Connection issues? Check the System screen for network and mode status.",
   "@helpRegionsBullet3": {"description": "Regions bullet 3"},
   
   "selectLanguage": "Select Language",
@@ -708,7 +708,10 @@
   
   "region": "Region",
   "@region": {"description": "Region label"},
-  
+
+  "regionLocalOnly": "Local only \u2022 never sent",
+  "@regionLocalOnly": {"description": "Region privacy note"},
+
   "mode": "Mode",
   "@mode": {"description": "Mode label"},
   

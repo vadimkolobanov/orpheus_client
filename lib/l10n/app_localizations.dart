@@ -1270,19 +1270,19 @@ abstract class L10n {
   /// Regions bullet 1
   ///
   /// In en, this message translates to:
-  /// **'System screen shows mode: \"Standard\" or \"Enhanced Protection\".'**
+  /// **'Your region is determined locally on your device and is never sent to Orpheus servers or any third party.'**
   String get helpRegionsBullet1;
 
   /// Regions bullet 2
   ///
   /// In en, this message translates to:
-  /// **'If traffic-controlled region detected, app enables \"enhanced\" mode.'**
+  /// **'If a traffic-controlled region is detected, the app automatically enables \"Enhanced Protection\" mode.'**
   String get helpRegionsBullet2;
 
   /// Regions bullet 3
   ///
   /// In en, this message translates to:
-  /// **'Connection issues? Check System screen for network/mode status.'**
+  /// **'Connection issues? Check the System screen for network and mode status.'**
   String get helpRegionsBullet3;
 
   /// Select language dialog title
@@ -1410,6 +1410,12 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'Region'**
   String get region;
+
+  /// Region privacy note
+  ///
+  /// In en, this message translates to:
+  /// **'Local only • never sent'**
+  String get regionLocalOnly;
 
   /// Mode label
   ///
