@@ -32,7 +32,7 @@ class _FakeNotif implements IncomingMessageNotifications {
   final List<String> calls = [];
 
   @override
-  Future<void> showCallNotification({required String callerName}) async {
+  Future<void> showCallNotification({required String callerName, String? payload}) async {
     calls.add('showCall:$callerName');
   }
 
@@ -65,7 +65,7 @@ void main() {
         database: db,
         notifications: notif,
         callBuffer: buffer,
-        openCallScreen: ({required contactPublicKey, required offer}) {
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {
           fail('openCallScreen не должен вызываться');
         },
         emitSignaling: signaling.add,
@@ -97,7 +97,7 @@ void main() {
         database: db,
         notifications: notif,
         callBuffer: buffer,
-        openCallScreen: ({required contactPublicKey, required offer}) {
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {
           openedKey = contactPublicKey;
           openedOffer = offer;
         },
@@ -142,7 +142,7 @@ void main() {
         database: db,
         notifications: notif,
         callBuffer: buffer,
-        openCallScreen: ({required contactPublicKey, required offer}) {
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {
           openCalls += 1;
         },
         emitSignaling: (_) {},
@@ -183,7 +183,7 @@ void main() {
         database: db,
         notifications: notif,
         callBuffer: buffer,
-        openCallScreen: ({required contactPublicKey, required offer}) {
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {
           openCalls += 1;
         },
         emitSignaling: (_) {},
@@ -215,7 +215,7 @@ void main() {
         database: db,
         notifications: notif,
         callBuffer: buffer,
-        openCallScreen: ({required contactPublicKey, required offer}) {
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {
           openCalls += 1;
         },
         emitSignaling: (_) {},
@@ -246,7 +246,7 @@ void main() {
         database: db,
         notifications: notif,
         callBuffer: buffer,
-        openCallScreen: ({required contactPublicKey, required offer}) {},
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {},
         emitSignaling: (msg) => order.add('signaling:${msg['type']}'),
         emitChatUpdate: (_) {},
         isAppInForeground: () => true,
@@ -274,7 +274,7 @@ void main() {
         database: db,
         notifications: notif,
         callBuffer: buffer,
-        openCallScreen: ({required contactPublicKey, required offer}) {},
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {},
         emitSignaling: (_) {},
         emitChatUpdate: chatUpdates.add,
         isAppInForeground: () => false,
@@ -307,7 +307,7 @@ void main() {
         database: db,
         notifications: notif,
         callBuffer: buffer,
-        openCallScreen: ({required contactPublicKey, required offer}) {},
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {},
         emitSignaling: (_) {},
         emitChatUpdate: (_) {},
         isAppInForeground: () => false,

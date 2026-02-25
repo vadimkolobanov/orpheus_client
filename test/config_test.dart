@@ -35,9 +35,9 @@ void main() {
       expect(url, endsWith('/api/test'));
     });
 
-    test('Список fallback-хостов определён и содержит legacy', () {
+    test('Список хостов определён и содержит primary', () {
       expect(AppConfig.apiHosts, isNotEmpty);
-      expect(AppConfig.apiHosts, contains(AppConfig.legacyHost));
+      expect(AppConfig.apiHosts, contains(AppConfig.primaryApiHost));
     });
 
     test('httpUrl поддерживает явный host', () {

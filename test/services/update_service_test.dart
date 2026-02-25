@@ -36,8 +36,8 @@ void main() {
       expect(resp!.statusCode, equals(200));
       expect(resp.body, equals('ok'));
 
-      // Проверяем порядок fallback: новый домен -> legacy
-      expect(called.map((u) => u.host).toList(), equals([AppConfig.primaryApiHost, AppConfig.legacyHost]));
+      // Проверяем что запрос ушёл на primary host
+      expect(called.map((u) => u.host).toList(), equals([AppConfig.primaryApiHost]));
     });
 
     testWidgets('checkForUpdate: показывает диалог, когда serverBuild > currentBuild, и закрывается по "ПОЗЖЕ"', (tester) async {
