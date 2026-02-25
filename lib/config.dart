@@ -49,6 +49,22 @@ class AppConfig {
   // - DO NOT add new entries here.
   static const List<Map<String, dynamic>> changelogData = [
     {
+      'version': '1.1.4',
+      'date': '25.02.2026',
+      'changes': [
+        'SECURITY: Removed legacy domain that exposed developer identity.',
+        'FIX: Account export now falls back to app PIN when biometrics unavailable.',
+        'NEW: Multi-select messages for batch delete (long-press or menu).',
+        'FIX: Call messages can now be selected and deleted.',
+        'FIX: Single tap on call pill no longer auto-redials.',
+        'FIX: Call status messages no longer duplicate.',
+        'UI: Compact inline call status pills.',
+        'PRIVACY: Region data is local-only, never transmitted to servers.',
+        'CORE: Centralized wipe handler for all wipe paths.',
+        'L10N: Desktop Link screen fully localized (EN + RU).',
+      ]
+    },
+    {
       'version': '1.1.0',
       'date': '12.12.2025',
       'changes': [
