@@ -38,10 +38,9 @@ class DatabaseService {
       print("DB: Путь к БД: $path");
 
       print("DB: Открытие базы данных...");
-  // Увеличиваем версию до 5
       final db = await openDatabase(
         path,
-        version: 5,
+        version: 6,
         onCreate: _createDB, 
         onUpgrade: _upgradeDB,
         singleInstance: true, // Важно для избежания блокировок
@@ -97,6 +96,18 @@ class DatabaseService {
         print("DB: Миграция до версии 5...");
         await _createNotesTable(db);
       }
+      if (oldVersion < 6) {
+        print("DB: Миграция до версии 6 — UNIQUE индекс на messages...");
+        try {
+          await db.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_message
+            ON messages(contactPublicKey, timestamp, isSentByMe)
+          ''');
+          print("DB: UNIQUE индекс создан");
+        } catch (e) {
+          print("DB: Ошибка создания индекса: $e");
+        }
+      }
       print("DB: Миграция завершена");
     } catch (e) {
       print("DB: ОШИБКА миграции: $e");
@@ -118,13 +129,17 @@ class DatabaseService {
     await db.execute('''
       CREATE TABLE messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        contactPublicKey TEXT NOT NULL, 
+        contactPublicKey TEXT NOT NULL,
         text TEXT NOT NULL,
         isSentByMe INTEGER NOT NULL,
         timestamp INTEGER NOT NULL,
         status INTEGER DEFAULT 1,
         isRead INTEGER DEFAULT 1
       )
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_message
+      ON messages(contactPublicKey, timestamp, isSentByMe)
     ''');
   }
 
@@ -254,7 +269,8 @@ class DatabaseService {
     // чтобы пользователь не терял данные.
     
     final db = await instance.database;
-    await db.insert('messages', message.toMap(contactKey));
+    await db.insert('messages', message.toMap(contactKey),
+        conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   /// Обновить статус сообщения (для исходящих/входящих).
