@@ -3,7 +3,6 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:flutter/foundation.dart';
 import 'package:open_filex/open_filex.dart';
 
 /// Result of APK download operation
@@ -191,46 +190,17 @@ class ApkDownloadService {
         return false;
       }
 
-      // Use open_filex to open APK file
-      // This will trigger Android system installer
-      final openFilex = await compute(_openApkInIsolate, filePath);
-      return openFilex;
-    } catch (e, stackTrace) {
-      print('APK_DOWNLOAD: Error installing APK: $e');
-      print('APK_DOWNLOAD: Stack trace: $stackTrace');
-      return false;
-    }
-  }
-
-  /// Helper function to open APK in isolate
-  static Future<bool> _openApkInIsolate(String filePath) async {
-    try {
-      // We'll use open_filex package
-      // Import it dynamically to avoid issues if package is not available
-      final openFilex = await _tryOpenFile(filePath);
-      return openFilex;
-    } catch (e) {
-      print('APK_DOWNLOAD: Error in isolate: $e');
-      return false;
-    }
-  }
-
-  /// Try to open file using open_filex package
-  static Future<bool> _tryOpenFile(String filePath) async {
-    try {
-      print('APK_DOWNLOAD: Opening APK file: $filePath');
-
+      // OpenFilex uses platform channels — must run on main isolate
       final result = await OpenFilex.open(
         filePath,
         type: 'application/vnd.android.package-archive',
       );
 
       print('APK_DOWNLOAD: OpenFilex result: ${result.type} - ${result.message}');
-
-      // ResultType.done means installer was opened successfully
       return result.type == ResultType.done;
-    } catch (e) {
-      print('APK_DOWNLOAD: Error opening file: $e');
+    } catch (e, stackTrace) {
+      print('APK_DOWNLOAD: Error installing APK: $e');
+      print('APK_DOWNLOAD: Stack trace: $stackTrace');
       return false;
     }
   }
