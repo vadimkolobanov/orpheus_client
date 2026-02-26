@@ -70,6 +70,10 @@ class IncomingMessageHandler {
   static const int _callOfferDebounceMs = 2500;
   static const int _callOfferTtlMs = 60 * 1000;
 
+  // Анти-дубликаты для chat: защита от повторной доставки при reconnect/offline delivery.
+  final Map<String, int> _lastChatTimestampBySender = {};
+  static const int _chatDedupeWindowMs = 5000;
+
   static const _ignoredTypes = <String>{
     'error',
     'payment-confirmed',
@@ -257,6 +261,15 @@ class IncomingMessageHandler {
     if (type == 'chat') {
       final payload = messageData['payload'] as String?;
       if (payload == null) return;
+
+      // Dedup: skip if same sender sent a message within the dedup window.
+      // Protects against WS + offline_messages double delivery on reconnect.
+      final now = _nowMs();
+      final lastTs = _lastChatTimestampBySender[senderKey];
+      if (lastTs != null && (now - lastTs) < _chatDedupeWindowMs) {
+        return;
+      }
+      _lastChatTimestampBySender[senderKey] = now;
 
       final decryptedMessage = await _crypto.decrypt(senderKey, payload);
 
