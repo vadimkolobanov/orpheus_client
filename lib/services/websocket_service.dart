@@ -268,31 +268,39 @@ class WebSocketService {
     _sendMessage(msg);
   }
   
-  /// Отправить все pending сообщения после восстановления соединения
+  /// Отправить все pending сообщения после восстановления соединения.
+  /// Удаляет из очереди ТОЛЬКО те, что реально ушли в канал.
   Future<void> _sendPendingMessages() async {
     final pending = await PendingActionsService.getPendingMessages();
     if (pending.isEmpty) return;
-    
+
     DebugLogger.info('WS', '📤 Отправка ${pending.length} pending сообщений...');
-    
+
+    var sentCount = 0;
     for (final msg in pending) {
       if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
-        DebugLogger.warn('WS', 'Соединение потеряно при отправке pending сообщений');
+        DebugLogger.warn('WS', 'Соединение потеряно при отправке pending сообщений, отправлено $sentCount из ${pending.length}');
         break;
       }
-      
+
       _sendMessage({
         "recipient_pubkey": msg.recipientKey,
         "type": "chat",
         "payload": msg.encryptedPayload,
       });
-      
+      sentCount++;
+
       // Небольшая задержка между сообщениями
       await Future.delayed(const Duration(milliseconds: 50));
     }
-    
-    await PendingActionsService.clearPendingMessages();
-    DebugLogger.success('WS', 'Все pending сообщения отправлены');
+
+    if (sentCount == pending.length) {
+      await PendingActionsService.clearPendingMessages();
+      DebugLogger.success('WS', 'Все $sentCount pending сообщений отправлены');
+    } else if (sentCount > 0) {
+      await PendingActionsService.removeFirstMessages(sentCount);
+      DebugLogger.warn('WS', 'Отправлено $sentCount из ${pending.length}, остальные остались в очереди');
+    }
   }
 
   // --- ОТПРАВКА СИГНАЛОВ С HTTP FALLBACK ---

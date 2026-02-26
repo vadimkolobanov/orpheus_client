@@ -152,6 +152,23 @@ class PendingActionsService {
       print("💬 ERROR: Не удалось очистить pending messages: $e");
     }
   }
+
+  /// Удалить первые [count] pending messages, оставив остальные в очереди.
+  /// Используется когда отправка прервалась на середине — удаляем только отправленные.
+  static Future<void> removeFirstMessages(int count) async {
+    if (count <= 0) return;
+    try {
+      final prefs = await _prefs();
+      final existing = prefs.getStringList(_pendingMessagesKey) ?? [];
+      if (count >= existing.length) {
+        await prefs.remove(_pendingMessagesKey);
+      } else {
+        await prefs.setStringList(_pendingMessagesKey, existing.sublist(count));
+      }
+    } catch (e) {
+      print("💬 ERROR: Не удалось удалить первые $count pending messages: $e");
+    }
+  }
   
   /// Количество pending messages
   static Future<int> getPendingMessagesCount() async {
