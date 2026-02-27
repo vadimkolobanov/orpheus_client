@@ -121,6 +121,9 @@
   "updateDownloading": "Downloading Update",
   "@updateDownloading": {"description": "Update downloading progress dialog title"},
 
+  "updateUpToDate": "You have the latest version",
+  "@updateUpToDate": {"description": "Snackbar shown when no update is available"},
+
   "exportAccount": "Export Account",
   "@exportAccount": {"description": "Export menu item"},
   

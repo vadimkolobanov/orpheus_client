@@ -56,6 +56,9 @@
   "updateDownloading": "Скачивание обновления",
   "@updateDownloading": {"description": "Update downloading progress dialog title"},
 
+  "updateUpToDate": "У вас последняя версия",
+  "@updateUpToDate": {"description": "Snackbar shown when no update is available"},
+
   "exportAccount": "Экспорт аккаунта",
   "exportAccountDesc": "Показать приватный ключ",
   "notificationSettings": "Настройка уведомлений",

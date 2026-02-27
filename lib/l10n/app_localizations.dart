@@ -295,6 +295,12 @@ abstract class L10n {
   /// **'Downloading Update'**
   String get updateDownloading;
 
+  /// Snackbar shown when no update is available
+  ///
+  /// In en, this message translates to:
+  /// **'You have the latest version'**
+  String get updateUpToDate;
+
   /// Export menu item
   ///
   /// In en, this message translates to:

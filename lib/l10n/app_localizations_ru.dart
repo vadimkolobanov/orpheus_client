@@ -137,6 +137,9 @@ class L10nRu extends L10n {
   String get updateDownloading => 'Скачивание обновления';
 
   @override
+  String get updateUpToDate => 'У вас последняя версия';
+
+  @override
   String get exportAccount => 'Экспорт аккаунта';
 
   @override

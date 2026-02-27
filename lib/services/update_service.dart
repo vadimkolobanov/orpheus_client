@@ -49,7 +49,7 @@ class UpdateService {
   }
 
   // Главный метод проверки
-  static Future<void> checkForUpdate(BuildContext context) async {
+  static Future<void> checkForUpdate(BuildContext context, {bool showNoUpdateFeedback = false}) async {
     if (_isUpdateDialogShown) return; // Не спамить окнами
 
     try {
@@ -82,6 +82,13 @@ class UpdateService {
           if (context.mounted) {
             _showUpdateDialog(context, versionName, downloadUrl, isRequired);
           }
+        } else if (showNoUpdateFeedback && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(L10n.of(context).updateUpToDate),
+              duration: const Duration(seconds: 3),
+            ),
+          );
         }
       }
     } catch (e) {

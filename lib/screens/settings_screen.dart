@@ -306,7 +306,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               versionLabel: versionLabel,
               l10n: l10n,
               registrationDate: cryptoService.registrationDate,
-              onCheckUpdates: () => UpdateService.checkForUpdate(context),
+              onCheckUpdates: () => UpdateService.checkForUpdate(context, showNoUpdateFeedback: true),
             ),
             const SizedBox(height: 18),
             TextButton.icon(

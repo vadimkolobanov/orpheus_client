@@ -133,6 +133,9 @@ class L10nEn extends L10n {
   String get updateDownloading => 'Downloading Update';
 
   @override
+  String get updateUpToDate => 'You have the latest version';
+
+  @override
   String get exportAccount => 'Export Account';
 
   @override
