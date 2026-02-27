@@ -215,6 +215,43 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
     _scrollToBottom();
   }
 
+  static bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  Widget _buildDateSeparator(BuildContext context, DateTime date) {
+    final l10n = L10n.of(context);
+    final now = DateTime.now();
+    String label;
+    if (_isSameDay(date, now)) {
+      label = l10n.today;
+    } else if (_isSameDay(date, now.subtract(const Duration(days: 1)))) {
+      label = l10n.yesterday;
+    } else {
+      label = DateFormat.yMMMd(Localizations.localeOf(context).toString())
+          .format(date.toLocal());
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: AppRadii.md,
+          ),
+          child: Text(
+            label,
+            style: Theme.of(context)
+                .textTheme
+                .labelSmall
+                ?.copyWith(color: AppColors.textSecondary),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -515,9 +552,19 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
         }
         final msgIndex = _isLoadingMore ? index - 1 : index;
         final message = _messages[msgIndex];
-        return _RoomMessageBubble(
-          message: message,
-          onLongPress: message.isSystem ? null : () => _saveNoteFromRoom(message),
+        final showDateSep = msgIndex == 0 ||
+            !_isSameDay(
+                _messages[msgIndex - 1].createdAt, message.createdAt);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showDateSep) _buildDateSeparator(context, message.createdAt),
+            _RoomMessageBubble(
+              message: message,
+              onLongPress:
+                  message.isSystem ? null : () => _saveNoteFromRoom(message),
+            ),
+          ],
         );
       },
     );
