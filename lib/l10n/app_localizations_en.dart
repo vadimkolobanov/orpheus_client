@@ -185,6 +185,12 @@ class L10nEn extends L10n {
   String get delete => 'Delete';
 
   @override
+  String get deleteForBoth => 'Delete for both';
+
+  @override
+  String get deleteForBothConfirm => 'Delete for both? The message will also be removed on the recipient\'s device.';
+
+  @override
   String nSelected(int count) {
     return '$count selected';
   }

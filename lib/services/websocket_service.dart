@@ -254,7 +254,7 @@ class WebSocketService {
 
   void sendChatMessage(String recipientPublicKey, String payload) {
     final msg = {"recipient_pubkey": recipientPublicKey, "type": "chat", "payload": payload};
-    
+
     // Если нет соединения - сохраняем в очередь
     if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
       DebugLogger.warn('WS', '📵 Нет соединения, сообщение сохранено в очередь');
@@ -264,7 +264,16 @@ class WebSocketService {
       );
       return;
     }
-    
+
+    _sendMessage(msg);
+  }
+
+  void sendDeleteForBoth(String recipientPublicKey, List<int> timestampsMs) {
+    final msg = {
+      "recipient_pubkey": recipientPublicKey,
+      "type": "delete-for-both",
+      "timestamps_ms": timestampsMs,
+    };
     _sendMessage(msg);
   }
   

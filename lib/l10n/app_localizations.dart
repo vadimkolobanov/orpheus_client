@@ -391,6 +391,10 @@ abstract class L10n {
   /// **'Delete'**
   String get delete;
 
+  String get deleteForBoth;
+
+  String get deleteForBothConfirm;
+
   /// Number of selected messages
   ///
   /// In en, this message translates to:

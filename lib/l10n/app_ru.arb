@@ -73,6 +73,8 @@
   "deleteAccountWarning": "Это действие удалит ключи, контакты и историю сообщений без возможности восстановления.",
   "deleteAccountConfirm": "Я понимаю, что это необратимо",
   "delete": "Удалить",
+  "deleteForBoth": "Удалить у обоих",
+  "deleteForBothConfirm": "Удалить у обоих? Сообщение будет также удалено на устройстве собеседника.",
   "nSelected": "{count} выбрано",
   "deleteSelectedConfirm": "Удалить {count} сообщений?",
   "selectMessages": "Выбрать",

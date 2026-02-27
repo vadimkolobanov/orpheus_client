@@ -189,6 +189,12 @@ class L10nRu extends L10n {
   String get delete => 'Удалить';
 
   @override
+  String get deleteForBoth => 'Удалить у обоих';
+
+  @override
+  String get deleteForBothConfirm => 'Удалить у обоих? Сообщение будет также удалено на устройстве собеседника.';
+
+  @override
   String nSelected(int count) {
     return '$count выбрано';
   }

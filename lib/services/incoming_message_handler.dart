@@ -257,6 +257,19 @@ class IncomingMessageHandler {
       return;
     }
 
+    // === DELETE FOR BOTH ===
+    if (type == 'delete-for-both') {
+      final timestamps = messageData['timestamps_ms'];
+      if (timestamps is List && timestamps.isNotEmpty) {
+        final tsInts = timestamps.map((e) => e is int ? e : int.tryParse('$e') ?? 0).where((t) => t > 0).toList();
+        if (tsInts.isNotEmpty) {
+          await _db.deleteMessagesByTimestamps(senderKey, tsInts.cast<int>());
+          _emitChatUpdate(senderKey);
+        }
+      }
+      return;
+    }
+
     // === ЧАТ ===
     if (type == 'chat') {
       final payload = messageData['payload'] as String?;

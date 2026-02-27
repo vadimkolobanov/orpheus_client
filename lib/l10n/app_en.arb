@@ -173,6 +173,10 @@
   
   "delete": "Delete",
   "@delete": {"description": "Delete button"},
+  "deleteForBoth": "Delete for both",
+  "@deleteForBoth": {"description": "Delete for both option in chat"},
+  "deleteForBothConfirm": "Delete for both? The message will also be removed on the recipient's device.",
+  "@deleteForBothConfirm": {"description": "Confirmation for delete for both"},
 
   "nSelected": "{count} selected",
   "@nSelected": {

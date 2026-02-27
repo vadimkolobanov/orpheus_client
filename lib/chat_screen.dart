@@ -205,6 +205,27 @@ class _ChatScreenState extends State<ChatScreen>
     await _loadChatHistory();
   }
 
+  Future<void> _deleteForBoth(ChatMessage message) async {
+    final l10n = L10n.of(context);
+    final ok = await AppDialog.show(
+      context: context,
+      icon: Icons.delete_sweep,
+      title: l10n.deleteForBothConfirm,
+      primaryLabel: l10n.deleteForBoth,
+      secondaryLabel: l10n.cancel,
+      isDanger: true,
+    );
+    if (!ok) return;
+
+    final tsMs = message.timestamp.millisecondsSinceEpoch;
+    websocketService.sendDeleteForBoth(widget.contact.publicKey, [tsMs]);
+    await DatabaseService.instance.deleteMessagesByTimestamps(
+      widget.contact.publicKey,
+      [tsMs],
+    );
+    await _loadChatHistory();
+  }
+
   Future<void> _confirmClearHistory() async {
     final l10n = L10n.of(context);
     final ok = await AppDialog.show(
@@ -541,6 +562,12 @@ class _ChatScreenState extends State<ChatScreen>
                 title: Text(l10n.delete),
                 onTap: () => Navigator.pop(context, 'delete'),
               ),
+              if (message.isSentByMe)
+                ListTile(
+                  leading: const Icon(Icons.delete_sweep, color: AppColors.danger),
+                  title: Text(l10n.deleteForBoth),
+                  onTap: () => Navigator.pop(context, 'delete_both'),
+                ),
               ListTile(
                 leading: const Icon(Icons.checklist, color: AppColors.action),
                 title: Text(l10n.selectMessages),
@@ -574,6 +601,10 @@ class _ChatScreenState extends State<ChatScreen>
     }
     if (action == 'delete') {
       await _deleteSingleMessage(message);
+      return;
+    }
+    if (action == 'delete_both') {
+      await _deleteForBoth(message);
       return;
     }
     if (action == 'select') {
