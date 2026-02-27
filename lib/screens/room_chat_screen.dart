@@ -37,6 +37,8 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
   final Set<String> _messageIds = <String>{};
   List<RoomMessage> _messages = <RoomMessage>[];
   bool _isLoading = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = false;
   bool _isSending = false;
   String? _error;
   bool _canSendAsOrpheus = false;
@@ -52,6 +54,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
     _loadMyBadge();
     _loadRoomPrefs();
     _wsSub = websocketService.stream.listen(_handleWsMessage);
+    _scrollController.addListener(_onScroll);
   }
 
   @override
@@ -82,12 +85,13 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
       _error = null;
     });
     try {
-      final list = await _service.loadMessages(widget.room.id);
+      final result = await _service.loadMessages(widget.room.id);
       if (!mounted) return;
-      _messages = list;
+      _messages = result.messages;
+      _hasMore = result.hasMore;
       _messageIds
         ..clear()
-        ..addAll(list.map((m) => m.id));
+        ..addAll(result.messages.map((m) => m.id));
       _isLoading = false;
       _scrollToBottom();
       setState(() {});
@@ -97,6 +101,37 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
         _isLoading = false;
         _error = _isOrpheusRoom ? _orpheusRoomError : 'error';
       });
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels <=
+            _scrollController.position.minScrollExtent + 100 &&
+        _hasMore &&
+        !_isLoadingMore) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_messages.isEmpty || _isLoadingMore || !_hasMore) return;
+    setState(() => _isLoadingMore = true);
+    try {
+      final oldestId = int.tryParse(_messages.first.id);
+      final result = await _service.loadMessages(
+        widget.room.id,
+        beforeId: oldestId,
+      );
+      if (!mounted) return;
+      final newMessages =
+          result.messages.where((m) => !_messageIds.contains(m.id)).toList();
+      _messageIds.addAll(newMessages.map((m) => m.id));
+      _messages = [...newMessages, ..._messages];
+      _hasMore = result.hasMore;
+      setState(() => _isLoadingMore = false);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingMore = false);
     }
   }
 
@@ -465,13 +500,21 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
       );
     }
 
+    final itemCount = _messages.length + (_isLoadingMore ? 1 : 0);
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xl),
-      itemCount: _messages.length,
+      itemCount: itemCount,
       itemBuilder: (context, index) {
-        final message = _messages[index];
+        if (_isLoadingMore && index == 0) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+        final msgIndex = _isLoadingMore ? index - 1 : index;
+        final message = _messages[msgIndex];
         return _RoomMessageBubble(
           message: message,
           onLongPress: message.isSystem ? null : () => _saveNoteFromRoom(message),

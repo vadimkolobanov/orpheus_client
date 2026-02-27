@@ -83,9 +83,15 @@ class RoomsService {
     return Room.fromJson(roomJson);
   }
 
-  Future<List<RoomMessage>> loadMessages(String roomId, {int limit = 100}) async {
-    if (_pubkey == null) return [];
-    final url = AppConfig.httpUrl('/api/rooms/$roomId/messages?limit=$limit');
+  Future<({List<RoomMessage> messages, bool hasMore})> loadMessages(
+    String roomId, {
+    int limit = 100,
+    int? beforeId,
+  }) async {
+    if (_pubkey == null) return (messages: <RoomMessage>[], hasMore: false);
+    var path = '/api/rooms/$roomId/messages?limit=$limit';
+    if (beforeId != null) path += '&before_id=$beforeId';
+    final url = AppConfig.httpUrl(path);
     final response = await _httpClient
         .get(Uri.parse(url), headers: _headers)
         .timeout(const Duration(seconds: 10));
@@ -96,10 +102,12 @@ class RoomsService {
 
     final data = json.decode(response.body) as Map<String, dynamic>;
     final messagesRaw = data['messages'] as List<dynamic>? ?? [];
-    return messagesRaw
+    final messages = messagesRaw
         .whereType<Map<String, dynamic>>()
         .map(RoomMessage.fromJson)
         .toList();
+    final hasMore = data['has_more'] == true;
+    return (messages: messages, hasMore: hasMore);
   }
 
   Future<Map<String, dynamic>> loadRoomPrefs(String roomId) async {
