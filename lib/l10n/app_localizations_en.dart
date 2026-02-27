@@ -1310,7 +1310,7 @@ class L10nEn extends L10n {
 
   @override
   String get roomWarningUnprotected =>
-      'Warning: messages in this chat are not protected and stored on the server. Do not share sensitive information.';
+      'This chat is not end-to-end encrypted. Avoid sharing sensitive information.';
 
   @override
   String get enableRoomNotifications => 'Enable chat notifications';

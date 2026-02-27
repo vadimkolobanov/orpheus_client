@@ -1281,7 +1281,7 @@
   "@roomCreated": {"description": "Room created message"},
   "roomJoined": "Joined room",
   "@roomJoined": {"description": "Room joined message"},
-  "roomWarningUnprotected": "Warning: messages in this chat are not protected and stored on the server. Do not share sensitive information.",
+  "roomWarningUnprotected": "This chat is not end-to-end encrypted. Avoid sharing sensitive information.",
   "@roomWarningUnprotected": {"description": "Room warning banner"},
   "enableRoomNotifications": "Enable chat notifications",
   "@enableRoomNotifications": {"description": "Enable room notifications action"},
