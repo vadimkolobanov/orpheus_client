@@ -26,6 +26,11 @@ class _FakeDb implements IncomingMessageDatabase {
   Future<String?> getContactName(String publicKey) async {
     return contactNames[publicKey];
   }
+
+  @override
+  Future<int> deleteMessagesByTimestamps(String contactKey, List<int> timestamps) async {
+    return timestamps.length;
+  }
 }
 
 class _FakeNotif implements IncomingMessageNotifications {

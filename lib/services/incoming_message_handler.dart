@@ -14,6 +14,7 @@ abstract interface class IncomingMessageCrypto {
 abstract interface class IncomingMessageDatabase {
   Future<void> addMessage(ChatMessage message, String contactPublicKey);
   Future<String?> getContactName(String publicKey);
+  Future<int> deleteMessagesByTimestamps(String contactKey, List<int> timestamps);
 }
 
 abstract interface class IncomingMessageNotifications {
