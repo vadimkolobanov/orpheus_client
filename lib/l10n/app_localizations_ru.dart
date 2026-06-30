@@ -140,6 +140,16 @@ class L10nRu extends L10n {
   String get updateUpToDate => 'У вас последняя версия';
 
   @override
+  String get updateInstallError => 'Ошибка установки';
+
+  @override
+  String get updateInstallErrorMessage =>
+      'Не удалось установить обновление автоматически. Можно скачать через браузер.';
+
+  @override
+  String get updateOpenBrowser => 'Открыть в браузере';
+
+  @override
   String get exportAccount => 'Экспорт аккаунта';
 
   @override
@@ -195,7 +205,8 @@ class L10nRu extends L10n {
   String get deleteForBoth => 'Удалить у обоих';
 
   @override
-  String get deleteForBothConfirm => 'Удалить у обоих? Сообщение будет также удалено на устройстве собеседника.';
+  String get deleteForBothConfirm =>
+      'Удалить у обоих? Сообщение будет также удалено на устройстве собеседника.';
 
   @override
   String nSelected(int count) {

@@ -15,11 +15,16 @@ import android.os.Bundle
 import android.app.NotificationManager
 import android.app.KeyguardManager
 import android.os.Build.VERSION_CODES
+import androidx.core.content.FileProvider
+import java.io.File
+import java.io.FileInputStream
+import android.content.pm.PackageInstaller
 
 class MainActivity: FlutterFragmentActivity() {
     private val BATTERY_CHANNEL = "com.example.orpheus_project/battery"
     private val SETTINGS_CHANNEL = "com.example.orpheus_project/settings"
     private val CALL_CHANNEL = "com.example.orpheus_project/call"
+    private val APK_INSTALLER_CHANNEL = "com.orpheus.apk_installer"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,6 +87,21 @@ class MainActivity: FlutterFragmentActivity() {
                 "openFullScreenIntentSettings" -> {
                     openFullScreenIntentSettings()
                     result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // Канал для установки APK
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APK_INSTALLER_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "installApk" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath != null) {
+                        result.success(installApk(filePath))
+                    } else {
+                        result.error("INVALID_PATH", "filePath is required", null)
+                    }
                 }
                 else -> result.notImplemented()
             }
@@ -225,6 +245,74 @@ class MainActivity: FlutterFragmentActivity() {
                 Uri.parse("package:$packageName")
             )
             startActivity(intent)
+        }
+    }
+
+    private fun installApk(filePath: String): Boolean {
+        return try {
+            val file = File(filePath)
+            if (!file.exists()) {
+                android.util.Log.e("APK_INSTALL", "File not found: $filePath")
+                return false
+            }
+
+            val fileSize = file.length()
+            android.util.Log.i("APK_INSTALL", "Installing APK: $filePath ($fileSize bytes)")
+
+            // Use PackageInstaller API (reliable on Android 21+)
+            val installer = packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            params.setSize(fileSize)
+
+            val sessionId = installer.createSession(params)
+            val session = installer.openSession(sessionId)
+
+            // Stream APK into the session
+            FileInputStream(file).use { input ->
+                session.openWrite("orpheus_update.apk", 0, fileSize).use { output ->
+                    input.copyTo(output)
+                    session.fsync(output)
+                }
+            }
+
+            // Create a pending intent for the install result
+            val intent = Intent(Intent.ACTION_VIEW)
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this, sessionId, intent,
+                android.app.PendingIntent.FLAG_MUTABLE
+            )
+
+            session.commit(pendingIntent.intentSender)
+            android.util.Log.i("APK_INSTALL", "PackageInstaller session committed: $sessionId")
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("APK_INSTALL", "PackageInstaller failed: ${e.message}", e)
+            // Fallback to Intent.ACTION_VIEW
+            installApkViaIntent(filePath)
+        }
+    }
+
+    private fun installApkViaIntent(filePath: String): Boolean {
+        return try {
+            val file = File(filePath)
+            val uri = FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.fileprovider",
+                file
+            )
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            startActivity(intent)
+            android.util.Log.i("APK_INSTALL", "Fallback intent launched for $filePath")
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("APK_INSTALL", "Fallback intent also failed: ${e.message}", e)
+            false
         }
     }
 

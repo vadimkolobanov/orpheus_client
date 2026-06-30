@@ -124,6 +124,15 @@
   "updateUpToDate": "You have the latest version",
   "@updateUpToDate": {"description": "Snackbar shown when no update is available"},
 
+  "updateInstallError": "Installation Error",
+  "@updateInstallError": {"description": "Update install error dialog title"},
+
+  "updateInstallErrorMessage": "Could not install the update automatically. You can download it via browser.",
+  "@updateInstallErrorMessage": {"description": "Update install error dialog message"},
+
+  "updateOpenBrowser": "Open in Browser",
+  "@updateOpenBrowser": {"description": "Open in browser button"},
+
   "exportAccount": "Export Account",
   "@exportAccount": {"description": "Export menu item"},
   

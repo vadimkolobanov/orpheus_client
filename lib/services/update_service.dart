@@ -171,18 +171,21 @@ class UpdateService {
     print('UPDATE: Attempting in-app APK download from $url');
 
     try {
-      // Check if we can install APK in-app
+      // Check if we can install APK in-app (checks permission too).
+      // This may open system settings and send app to background,
+      // so we wait for app to stabilize after permission grant.
       final canInstallInApp = await ApkDownloadService.canInstallApkInApp();
 
       if (!canInstallInApp) {
-        print('UPDATE: Device does not support in-app APK installation, using browser');
-        await _launchBrowser(url);
-        if (!required && context.mounted) {
-          Navigator.pop(context);
-          _isUpdateDialogShown = false;
+        print('UPDATE: Cannot install in-app (permission denied or unsupported)');
+        if (context.mounted) {
+          _showFallbackDialog(context, url, required);
         }
         return;
       }
+
+      // Wait for app to return from permission screen and stabilize
+      await Future.delayed(const Duration(milliseconds: 800));
 
       // Show progress dialog
       if (!context.mounted) return;
@@ -243,11 +246,9 @@ class UpdateService {
       }
 
       if (!result.success) {
-        print('UPDATE: Download failed: ${result.error}, falling back to browser');
-        await _launchBrowser(url);
-        if (!required && context.mounted) {
-          Navigator.pop(context); // Close update dialog
-          _isUpdateDialogShown = false;
+        print('UPDATE: Download failed: ${result.error}');
+        if (context.mounted) {
+          _showFallbackDialog(context, url, required);
         }
         return;
       }
@@ -258,13 +259,17 @@ class UpdateService {
       final installed = await ApkDownloadService.installApk(result.filePath!);
 
       if (!installed) {
-        print('UPDATE: Installation failed, falling back to browser');
-        await _launchBrowser(url);
-        if (!required && context.mounted) {
-          Navigator.pop(context); // Close update dialog
-          _isUpdateDialogShown = false;
+        print('UPDATE: Installation failed, retrying with intent');
+        // Retry once with a small delay (system might need time after permission grant)
+        await Future.delayed(const Duration(milliseconds: 500));
+        final retryInstall = await ApkDownloadService.installApk(result.filePath!);
+        if (!retryInstall) {
+          print('UPDATE: Retry also failed');
+          if (context.mounted) {
+            _showFallbackDialog(context, url, required);
+          }
+          return;
         }
-        return;
       }
 
       print('UPDATE: APK installation initiated successfully');
@@ -275,20 +280,58 @@ class UpdateService {
         _isUpdateDialogShown = false;
       }
 
-      // Clean up old APKs in background
-      ApkDownloadService.cleanupOldApks();
+      // Do NOT clean up APKs here — the system installer is still reading the file.
+      // Cleanup happens at the start of the next download in ApkDownloadService.downloadApk().
 
     } catch (e, stackTrace) {
       print('UPDATE: Unexpected error during download: $e');
       print('UPDATE: Stack trace: $stackTrace');
 
-      // Fallback to browser on any error
-      await _launchBrowser(url);
-      if (!required && context.mounted) {
-        Navigator.pop(context);
-        _isUpdateDialogShown = false;
+      if (context.mounted) {
+        _showFallbackDialog(context, url, required);
       }
     }
+  }
+
+  /// Show dialog when in-app install fails, offering browser as explicit choice
+  static void _showFallbackDialog(BuildContext context, String url, bool required) {
+    final l10n = L10n.of(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Colors.grey),
+        ),
+        title: Text(l10n.updateInstallError, style: const TextStyle(color: Colors.white)),
+        content: Text(l10n.updateInstallErrorMessage, style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (!required) {
+                Navigator.pop(context); // Close update dialog too
+                _isUpdateDialogShown = false;
+              }
+            },
+            child: Text(l10n.updateLater, style: const TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB0BEC5)),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _launchBrowser(url);
+              if (!required && context.mounted) {
+                Navigator.pop(context);
+                _isUpdateDialogShown = false;
+              }
+            },
+            child: Text(l10n.updateOpenBrowser, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   static Future<void> _launchBrowser(String urlString) async {

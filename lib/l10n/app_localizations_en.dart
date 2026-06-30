@@ -136,6 +136,16 @@ class L10nEn extends L10n {
   String get updateUpToDate => 'You have the latest version';
 
   @override
+  String get updateInstallError => 'Installation Error';
+
+  @override
+  String get updateInstallErrorMessage =>
+      'Could not install the update automatically. You can download it via browser.';
+
+  @override
+  String get updateOpenBrowser => 'Open in Browser';
+
+  @override
   String get exportAccount => 'Export Account';
 
   @override
@@ -191,7 +201,8 @@ class L10nEn extends L10n {
   String get deleteForBoth => 'Delete for both';
 
   @override
-  String get deleteForBothConfirm => 'Delete for both? The message will also be removed on the recipient\'s device.';
+  String get deleteForBothConfirm =>
+      'Delete for both? The message will also be removed on the recipient\'s device.';
 
   @override
   String nSelected(int count) {

@@ -301,6 +301,24 @@ abstract class L10n {
   /// **'You have the latest version'**
   String get updateUpToDate;
 
+  /// Update install error dialog title
+  ///
+  /// In en, this message translates to:
+  /// **'Installation Error'**
+  String get updateInstallError;
+
+  /// Update install error dialog message
+  ///
+  /// In en, this message translates to:
+  /// **'Could not install the update automatically. You can download it via browser.'**
+  String get updateInstallErrorMessage;
+
+  /// Open in browser button
+  ///
+  /// In en, this message translates to:
+  /// **'Open in Browser'**
+  String get updateOpenBrowser;
+
   /// Export menu item
   ///
   /// In en, this message translates to:
@@ -397,8 +415,16 @@ abstract class L10n {
   /// **'Delete'**
   String get delete;
 
+  /// Delete for both option in chat
+  ///
+  /// In en, this message translates to:
+  /// **'Delete for both'**
   String get deleteForBoth;
 
+  /// Confirmation for delete for both
+  ///
+  /// In en, this message translates to:
+  /// **'Delete for both? The message will also be removed on the recipient\'s device.'**
   String get deleteForBothConfirm;
 
   /// Number of selected messages
@@ -2492,7 +2518,7 @@ abstract class L10n {
   /// Room warning banner
   ///
   /// In en, this message translates to:
-  /// **'Warning: messages in this chat are not protected and stored on the server. Do not share sensitive information.'**
+  /// **'This chat is not end-to-end encrypted. Avoid sharing sensitive information.'**
   String get roomWarningUnprotected;
 
   /// Enable room notifications action

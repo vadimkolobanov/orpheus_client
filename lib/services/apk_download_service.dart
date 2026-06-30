@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:flutter/services.dart';
 
 /// Result of APK download operation
 class ApkDownloadResult {
@@ -27,24 +28,24 @@ class ApkDownloadService {
   /// Check if the device supports in-app APK installation
   static Future<bool> canInstallApkInApp() async {
     try {
-      // Check Android version (must be Android 5.0+ / API 21+)
-      if (!Platform.isAndroid) {
-        return false;
-      }
+      if (!Platform.isAndroid) return false;
 
       final deviceInfo = DeviceInfoPlugin();
       final androidInfo = await deviceInfo.androidInfo;
 
-      // Android 5.0 (API 21) and above
-      if (androidInfo.version.sdkInt < 21) {
-        return false;
-      }
+      if (androidInfo.version.sdkInt < 21) return false;
 
-      // For Android 8+ (API 26+), check if we can request install packages
+      // For Android 8+ (API 26+), must have REQUEST_INSTALL_PACKAGES permission
       if (androidInfo.version.sdkInt >= 26) {
-        // This permission is automatically granted if declared in manifest
-        // but we should still check
-        return true;
+        var status = await Permission.requestInstallPackages.status;
+        print('APK_DOWNLOAD: Install packages permission status: $status');
+        if (!status.isGranted) {
+          status = await Permission.requestInstallPackages.request();
+          print('APK_DOWNLOAD: Install packages permission after request: $status');
+          if (!status.isGranted) {
+            return false;
+          }
+        }
       }
 
       return true;
@@ -93,30 +94,27 @@ class ApkDownloadService {
     try {
       print('APK_DOWNLOAD: Starting download from $url');
 
-      // Check if we can install APK
-      final canInstall = await canInstallApkInApp();
-      if (!canInstall) {
-        return ApkDownloadResult.error('Device does not support in-app APK installation');
-      }
-
-      // Request permissions
-      final permissionsGranted = await requestPermissions();
-      if (!permissionsGranted) {
-        return ApkDownloadResult.error('Required permissions not granted');
-      }
-
-      // Get cache directory
-      final cacheDir = await getTemporaryDirectory();
-      final updatesDir = Directory('${cacheDir.path}/updates');
+      // Use app documents directory (more reliable than temp/cache)
+      final docsDir = await getApplicationDocumentsDirectory();
+      final updatesDir = Directory('${docsDir.path}/updates');
 
       // Create updates directory if it doesn't exist
       if (!await updatesDir.exists()) {
         await updatesDir.create(recursive: true);
       }
 
+      // Clean old APKs before downloading new one
+      try {
+        final existing = await updatesDir.list().toList();
+        for (final f in existing) {
+          if (f is File && f.path.endsWith('.apk')) {
+            await f.delete();
+          }
+        }
+      } catch (_) {}
+
       // Generate file path
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final filePath = '${updatesDir.path}/orpheus_update_$timestamp.apk';
+      final filePath = '${updatesDir.path}/orpheus_update.apk';
 
       print('APK_DOWNLOAD: Saving to $filePath');
 
@@ -134,20 +132,20 @@ class ApkDownloadService {
           if (total > 0) {
             final progress = received / total;
             onProgress(progress);
-            print('APK_DOWNLOAD: Progress ${(progress * 100).toStringAsFixed(1)}%');
           }
         },
-        options: Options(
-          headers: {
-            'User-Agent': 'Orpheus/1.1.2 (Android)',
-          },
-        ),
+        deleteOnError: true,
       );
 
       // Verify file was downloaded
       final file = File(filePath);
-      if (!await file.exists()) {
-        return ApkDownloadResult.error('Downloaded file not found');
+      final exists = await file.exists();
+      print('APK_DOWNLOAD: File exists: $exists at $filePath');
+      if (!exists) {
+        // List directory to debug
+        final dirContents = await updatesDir.list().toList();
+        print('APK_DOWNLOAD: Directory contents: ${dirContents.map((f) => f.path).toList()}');
+        return ApkDownloadResult.error('Downloaded file not found at $filePath');
       }
 
       final fileSize = await file.length();
@@ -190,13 +188,27 @@ class ApkDownloadService {
         return false;
       }
 
-      // OpenFilex uses platform channels — must run on main isolate
+      final fileSize = await file.length();
+      print('APK_DOWNLOAD: APK file size: $fileSize bytes');
+
+      // Try Android Intent directly via platform channel first
+      if (Platform.isAndroid) {
+        try {
+          final installed = await _installViaIntent(filePath);
+          if (installed) return true;
+          print('APK_DOWNLOAD: Intent install returned false, trying OpenFilex');
+        } catch (e) {
+          print('APK_DOWNLOAD: Intent install failed: $e, trying OpenFilex');
+        }
+      }
+
+      // Fallback to OpenFilex
       final result = await OpenFilex.open(
         filePath,
         type: 'application/vnd.android.package-archive',
       );
 
-      print('APK_DOWNLOAD: OpenFilex result: ${result.type} - ${result.message}');
+      print('APK_DOWNLOAD: OpenFilex result: type=${result.type}, message=${result.message}');
       return result.type == ResultType.done;
     } catch (e, stackTrace) {
       print('APK_DOWNLOAD: Error installing APK: $e');
@@ -205,11 +217,27 @@ class ApkDownloadService {
     }
   }
 
+  static const _channel = MethodChannel('com.orpheus.apk_installer');
+
+  /// Install APK via Android Intent (more reliable than OpenFilex)
+  static Future<bool> _installViaIntent(String filePath) async {
+    try {
+      final result = await _channel.invokeMethod<bool>('installApk', {
+        'filePath': filePath,
+      });
+      print('APK_DOWNLOAD: Intent install result: $result');
+      return result ?? false;
+    } on MissingPluginException {
+      print('APK_DOWNLOAD: Native install channel not available');
+      return false;
+    }
+  }
+
   /// Clean up old downloaded APK files
   static Future<void> cleanupOldApks() async {
     try {
-      final cacheDir = await getTemporaryDirectory();
-      final updatesDir = Directory('${cacheDir.path}/updates');
+      final docsDir = await getApplicationDocumentsDirectory();
+      final updatesDir = Directory('${docsDir.path}/updates');
 
       if (!await updatesDir.exists()) {
         return;

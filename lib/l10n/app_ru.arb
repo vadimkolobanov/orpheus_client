@@ -59,6 +59,10 @@
   "updateUpToDate": "У вас последняя версия",
   "@updateUpToDate": {"description": "Snackbar shown when no update is available"},
 
+  "updateInstallError": "Ошибка установки",
+  "updateInstallErrorMessage": "Не удалось установить обновление автоматически. Можно скачать через браузер.",
+  "updateOpenBrowser": "Открыть в браузере",
+
   "exportAccount": "Экспорт аккаунта",
   "exportAccountDesc": "Показать приватный ключ",
   "notificationSettings": "Настройка уведомлений",

@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Cache directory для скачанных APK файлов -->
+    <!-- Root path covers all internal storage including app_flutter/ -->
+    <root-path name="root" path="." />
+
+    <!-- Cache directory -->
     <cache-path name="apk_cache" path="updates/" />
 
-    <!-- External cache (если основной кеш недоступен) -->
+    <!-- External cache (fallback) -->
     <external-cache-path name="external_apk_cache" path="updates/" />
 </paths>
