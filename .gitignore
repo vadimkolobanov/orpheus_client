@@ -11,6 +11,10 @@ build/
 .vscode/
 *.iml
 
+# Secrets — never commit
+.mcp.json
+.env
+
 # Android/Gradle (local/cache)
 android/.gradle/
 android/.kotlin/
