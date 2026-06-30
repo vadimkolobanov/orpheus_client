@@ -7,9 +7,9 @@ const Map<String, dynamic> rtcConfiguration = {
   'iceServers': [
     {
       'urls': [
-        'turn:213.171.10.108:3478',
-        'turn:213.171.10.108:3478?transport=tcp',
-        'turn:213.171.10.108:443?transport=tcp',
+        'turn:194.87.151.56:3478',
+        'turn:194.87.151.56:3478?transport=tcp',
+        'turn:194.87.151.56:443?transport=tcp',
       ],
       'username': 'orpheus',
       'credential': 'TEST112',
