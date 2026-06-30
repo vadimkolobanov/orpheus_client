@@ -76,7 +76,7 @@ Future<void> main() async {
     (options) {
       options.dsn = _sentryDsn;
       // Версия приложения для отслеживания регрессий
-      options.release = 'orpheus@1.1.1+7';
+      options.release = 'orpheus@1.1.6+12';
       options.environment = 'production';
       // Отслеживание производительности (10% транзакций)
       options.tracesSampleRate = 0.1;
@@ -177,11 +177,8 @@ Future<void> _initializeApp() async {
   // 7.5 Телеметрия (полные логи в БД для анализа)
   await TelemetryService.instance.init();
 
-  // 8. WebSocket подключение
-  if (_hasKeys && cryptoService.publicKeyBase64 != null) {
-    DebugLogger.info('APP', 'Подключение WebSocket...');
-    websocketService.connect(cryptoService.publicKeyBase64!);
-  }
+  // 8. WebSocket подключение отложено до initState виджета,
+  // чтобы _licenseSubscription был зарегистрирован до прихода license-status.
 
   // 9. Слушаем сообщения
   _listenForMessages();
@@ -942,13 +939,24 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         });
       }
     });
+
+    // Подключаем WebSocket здесь, ПОСЛЕ регистрации _licenseSubscription,
+    // чтобы не пропустить license-status из-за race condition с broadcast stream.
+    if (_keysExist && !_isLocked && cryptoService.publicKeyBase64 != null) {
+      websocketService.connect(cryptoService.publicKeyBase64!);
+    }
   }
 
   void _onAuthComplete() {
-    setState(() => _keysExist = true);
-    if (cryptoService.publicKeyBase64 != null) {
-      websocketService.connect(cryptoService.publicKeyBase64!);
-    }
+    // Delay state change to next frame to avoid duplicate GlobalKeys
+    // when Navigator rebuilds during the same frame as WelcomeScreen disposal.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _keysExist = true);
+      if (cryptoService.publicKeyBase64 != null) {
+        websocketService.connect(cryptoService.publicKeyBase64!);
+      }
+    });
   }
 
   void _onUnlocked() {
