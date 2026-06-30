@@ -139,11 +139,13 @@ class _WelcomeScreenState extends State<WelcomeScreen>
           controller: _importController,
           l10n: l10n,
           onImport: () async {
+            // Capture value synchronously before any async work —
+            // the controller may be disposed if parent navigates away.
             final key = _importController.text.trim();
             if (key.isEmpty) return;
             try {
+              Navigator.pop(context);
               await _importAccount(key);
-              if (context.mounted) Navigator.pop(context);
             } catch (e) {
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
@@ -404,43 +406,44 @@ class _ImportKeyDialog extends StatelessWidget {
         borderRadius: AppRadii.lg,
         side: BorderSide(color: AppColors.outline),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.warning.withOpacity(0.12),
-                    borderRadius: AppRadii.sm,
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withOpacity(0.12),
+                      borderRadius: AppRadii.sm,
+                    ),
+                    child: const Icon(Icons.key, color: AppColors.warning, size: 22),
                   ),
-                  child: const Icon(Icons.key, color: AppColors.warning, size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    l10n.recovery,
-                    style: Theme.of(context).textTheme.titleMedium,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      l10n.recovery,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              l10n.recoveryWarning,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 14),
-            AppTextField(
-              controller: controller,
-              hintText: l10n.pastePrivateKey,
-              prefixIcon: Icons.vpn_key_outlined,
-              maxLines: 4,
-            ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                l10n.recoveryWarning,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 14),
+              AppTextField(
+                controller: controller,
+                hintText: l10n.pastePrivateKey,
+                prefixIcon: Icons.vpn_key_outlined,
+                maxLines: 4,
+              ),
             const SizedBox(height: 18),
             Row(
               children: [
@@ -462,6 +465,7 @@ class _ImportKeyDialog extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }
