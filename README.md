@@ -5,8 +5,16 @@
 ## Быстрый старт
 
 ### Требования
-- Flutter SDK (см. `environment` в `pubspec.yaml`)
+- Flutter SDK 3.44.x (проект разрабатывается на 3.44.4, канал stable). В `pubspec.yaml` → `environment`
+  зафиксирован только Dart SDK.
 - Android SDK / Android Studio (для Android)
+
+> **Без сервисов Google:** клиент не использует Firebase/FCM/ML Kit — сборка идёт сразу после
+> `flutter pub get`, никаких `google-services.json` или секретов Google не нужно. Пуши доставляет
+> собственный постоянный foreground-сервис поверх WebSocket (см. `PushConnectionService`).
+>
+> **Ветка:** активная разработка этого клиента идёт в изолированном треке `wl/dev` (форк
+> `AlexWhiplash/orpheus_client`); ветку `master` не трогаем.
 
 ### Установка зависимостей
 ```powershell
@@ -17,6 +25,16 @@ flutter pub get
 ```powershell
 flutter run
 ```
+
+### Сборка APK (релиз)
+```powershell
+flutter build apk --release
+```
+Готовый файл: `build/app/outputs/flutter-apk/app-release.apk`.
+
+> Подпись release: если создан `android/key.properties` (см. `android/key.properties.example`), сборка
+> подписывается **вашим keystore**; если файла нет — фолбэк на debug-ключ, чтобы сборка работала без секретов
+> (`OPS-1`). Для публичной раздачи сгенерируйте свой keystore и заполните `key.properties` (инструкция — в примере).
 
 ## Тесты и отчёты
 

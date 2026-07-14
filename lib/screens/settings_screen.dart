@@ -8,9 +8,9 @@ import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/screens/debug_logs_screen.dart';
 import 'package:orpheus_project/screens/help_screen.dart';
+import 'package:orpheus_project/screens/purchase_screen.dart';
 import 'package:orpheus_project/screens/security_settings_screen.dart';
 import 'package:orpheus_project/screens/support_chat_screen.dart';
-import 'package:orpheus_project/services/auth_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/device_settings_service.dart';
@@ -141,8 +141,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (systemAuthAvailable) {
         authenticated = await auth.authenticate(
           localizedReason: l10n.confirmIdentity,
-          options: const AuthenticationOptions(
-              stickyAuth: true, biometricOnly: false),
+          persistAcrossBackgrounding: true,
+          biometricOnly: false,
         );
         // User explicitly cancelled — don't fall through to PIN
         if (!authenticated) return;
@@ -193,7 +193,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (pin == null || !mounted) return false;
 
-    final result = authService.verifyPin(pin);
+    final result = await authService.verifyPin(pin);
     if (result == PinVerifyResult.success) return true;
 
     if (mounted) {
@@ -236,7 +236,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = L10n.of(context);
-    final myKey = cryptoService.publicKeyBase64 ?? l10n.error;
+    final myKey = cryptoService.addressBase64 ?? l10n.error;
     final versionLabel = _appVersionLabel ?? AppConfig.appVersion;
 
     return Scaffold(
@@ -272,13 +272,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _PrimaryActions(
               myKey: myKey,
               l10n: l10n,
-              onShare: () => Share.share(l10n.shareMessage(myKey)),
+              onShare: () =>
+                  SharePlus.instance.share(ShareParams(text: l10n.shareMessage(myKey))),
             ),
             const SizedBox(height: 14),
             _StatsCard(stats: _stats, l10n: l10n),
             const SizedBox(height: 14),
             _MenuCard(
               l10n: l10n,
+              onBuyPremium: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PurchaseScreen(
+                    onConfirmed: () => Navigator.of(context).maybePop(),
+                  ),
+                ),
+              ),
               onSecurity: () => Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -457,13 +466,13 @@ class _PrimaryActions extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: SizedBox(
-            height: 50,
-            child: ElevatedButton.icon(
-              onPressed: onShare,
-              icon: const Icon(Icons.share, size: 18),
-              label: Text(l10n.share),
-            ),
+          child: ElevatedButton.icon(
+            onPressed: onShare,
+            icon: const Icon(Icons.share, size: 18),
+            label: Text(l10n.share),
+            // Высота 50 как МИНИМУМ, а не жёстко: при крупном системном шрифте
+            // (font_scale 1.3) фикс. высота обрезала низ букв («Поделиться»).
+            style: ElevatedButton.styleFrom(minimumSize: const Size(0, 50)),
           ),
         ),
       ],
@@ -538,6 +547,7 @@ class _StatsCard extends StatelessWidget {
 class _MenuCard extends StatelessWidget {
   const _MenuCard({
     required this.l10n,
+    required this.onBuyPremium,
     required this.onSecurity,
     required this.onSupport,
     required this.onHelp,
@@ -548,6 +558,7 @@ class _MenuCard extends StatelessWidget {
   });
 
   final L10n l10n;
+  final VoidCallback onBuyPremium;
   final VoidCallback onSecurity;
   final VoidCallback onSupport;
   final VoidCallback onHelp;
@@ -565,10 +576,18 @@ class _MenuCard extends StatelessWidget {
         borderRadius: AppRadii.lg,
         border: Border.all(color: AppColors.outline),
       ),
-      child: Column(
-        children: [
-          _tile(context, Icons.security, l10n.security, l10n.securityDesc,
-              onSecurity),
+      // Material-предок между декорированным Container и ListTile'ами:
+      // без него Flutter 3.44 бросает debug-ассерт "ink splashes may be invisible"
+      // (ripple рисуется под непрозрачным фоном карточки). transparency сохраняет фон.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          children: [
+            _tile(context, Icons.workspace_premium, l10n.buyLicense, null,
+                onBuyPremium),
+            _divider(),
+            _tile(context, Icons.security, l10n.security, l10n.securityDesc,
+                onSecurity),
           _divider(),
           // Выбор языка
           LanguageSelector(
@@ -596,6 +615,7 @@ class _MenuCard extends StatelessWidget {
             onNotifications,
           ),
         ],
+        ),
       ),
     );
   }

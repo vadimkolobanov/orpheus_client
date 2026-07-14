@@ -294,10 +294,13 @@ class L10nRu extends L10n {
   String get incomingCall => 'Входящий звонок';
 
   @override
+  String get incomingEncryptedCall => 'Закрытая связь';
+
+  @override
   String get outgoingCall => 'Исходящий звонок';
 
   @override
-  String get missedCall => 'Пропущен звонок';
+  String get missedCall => 'Пропущенный звонок';
 
   @override
   String get callLabel => 'Звонок';
@@ -366,6 +369,12 @@ class L10nRu extends L10n {
 
   @override
   String get add => 'Добавить';
+
+  @override
+  String get fillAllFields => 'Заполните оба поля';
+
+  @override
+  String get invalidPublicKey => 'Неверный формат ключа';
 
   @override
   String get contactAdded => 'Контакт добавлен';
@@ -519,6 +528,13 @@ class L10nRu extends L10n {
   String get disconnected => 'Отключено';
 
   @override
+  String get authFailedStatus => 'Авторизация отклонена';
+
+  @override
+  String get authFailedBanner =>
+      'Сервер отклонил авторизацию устройства. Проверьте обновления.';
+
+  @override
   String get reconnecting => 'Переподключение...';
 
   @override
@@ -577,6 +593,35 @@ class L10nRu extends L10n {
 
   @override
   String get decline => 'Отклонить';
+
+  @override
+  String get answerCall => 'Ответить';
+
+  @override
+  String get microphone => 'Микрофон';
+
+  @override
+  String get newMessage => 'Новое сообщение';
+
+  @override
+  String get unknownCaller => 'Неизвестный';
+
+  @override
+  String get callBack => 'Перезвонить';
+
+  @override
+  String get newMessageInChat => 'Новое сообщение в чате';
+
+  @override
+  String get officialOrpheusReply => 'Официальный ответ Orpheus';
+
+  @override
+  String get testNotificationWorks => 'Тестовое уведомление работает! 🔔';
+
+  @override
+  String fromCaller(String name) {
+    return 'От: $name';
+  }
 
   @override
   String get supportChat => 'Чат поддержки';
@@ -687,7 +732,7 @@ class L10nRu extends L10n {
 
   @override
   String get helpRegionsBullet1 =>
-      'Ваш регион определяется локально на устройстве и никогда не отправляется на серверы Orpheus или третьим лицам.';
+      'Регион определяется коротким зашифрованным запросом к одному из нескольких независимых геолокационных сервисов, который видит ваш IP-адрес (как и любой открываемый вами сайт). Серверы Orpheus в этом не участвуют. Если проверка недоступна, используется регион из настроек устройства.';
 
   @override
   String get helpRegionsBullet2 =>
@@ -729,13 +774,22 @@ class L10nRu extends L10n {
       'Добавьте первого собеседника, чтобы начать защищённое общение';
 
   @override
-  String get enterName => 'Введите имя контакта';
+  String get enterName => 'Введите имя';
+
+  @override
+  String get unitHourShort => 'ч';
+
+  @override
+  String get unitMinuteShort => 'м';
+
+  @override
+  String get unitSecondShort => 'с';
 
   @override
   String get publicKey => 'Публичный ключ';
 
   @override
-  String get pasteOrScanKey => 'Вставьте или отсканируйте ключ';
+  String get pasteOrScanKey => 'Ключ или QR';
 
   @override
   String get rename => 'Переименовать';
@@ -765,7 +819,10 @@ class L10nRu extends L10n {
   String get region => 'Регион';
 
   @override
-  String get regionLocalOnly => 'Только локально • не передаётся';
+  String get regionSourceIp => 'По IP • зашифровано';
+
+  @override
+  String get regionSourceLocale => 'Из настроек устройства';
 
   @override
   String get mode => 'Режим';
@@ -838,6 +895,13 @@ class L10nRu extends L10n {
 
   @override
   String get inactivityLockDesc => 'Блокировка при отсутствии активности';
+
+  @override
+  String get callerNameOnLockTitle => 'Имя звонящего на локскрине';
+
+  @override
+  String get callerNameOnLockDesc =>
+      'Показывать имя контакта на входящем звонке, когда телефон заблокирован. По умолчанию выключено для приватности.';
 
   @override
   String get inactivity30s => '30 секунд';
@@ -1211,6 +1275,10 @@ class L10nRu extends L10n {
   String get pointCameraAtQr => 'Наведите камеру на QR-код';
 
   @override
+  String get cameraAccessDenied =>
+      'Нет доступа к камере. Разрешите доступ к камере, чтобы отсканировать QR-код.';
+
+  @override
   String get publicKeyAutoRecognized =>
       'Публичный ключ контакта будет распознан автоматически';
 
@@ -1386,6 +1454,16 @@ class L10nRu extends L10n {
       'Вы перестанете получать сообщения из этой комнаты.';
 
   @override
+  String get deleteRoom => 'Удалить комнату';
+
+  @override
+  String get deleteRoomTitle => 'Удалить комнату?';
+
+  @override
+  String get deleteRoomDesc =>
+      'Комната и все её сообщения будут безвозвратно удалены у всех участников. Это действие необратимо.';
+
+  @override
   String get create => 'Создать';
 
   @override
@@ -1510,44 +1588,127 @@ class L10nRu extends L10n {
   String get notesFromOracle => 'Из чата с Оракулом';
 
   @override
-  String get desktopLinkTitle => 'Связь с ПК';
+  String get searchContactsHint => 'Поиск контактов';
 
   @override
-  String get desktopLinkScanQr => 'Сканировать QR-код';
+  String get noContactsFound => 'Контакты не найдены';
 
   @override
-  String get desktopLinkReset => 'Сбросить сессию';
+  String get contactInfo => 'Информация о контакте';
 
   @override
-  String get desktopLinkStatusTitle => 'Статус подключения';
+  String get verifyKeyHint =>
+      'Сверьте этот ключ с контактом по доверенному каналу, чтобы убедиться, что переписку никто не перехватывает.';
 
   @override
-  String get desktopLinkConnecting => 'Подключение...';
+  String get buyLicense => 'Купить лицензию';
 
   @override
-  String get desktopLinkNotPaired =>
-      'Не привязан. Отсканируйте QR-код из приложения на ПК.';
+  String get premiumPurchaseTitle => 'Покупка Premium';
 
   @override
-  String get desktopLinkPaired => 'Успешно привязан';
+  String get choosePlan => 'Выберите тариф';
 
   @override
-  String get desktopLinkOtpLabel => 'Одноразовый пароль';
+  String get choosePlanHint =>
+      'Оплата в USDT (TRC-20). Лицензия активируется автоматически после оплаты.';
 
   @override
-  String get desktopLinkOtpHint =>
-      'Введите этот код в приложении на ПК для подтверждения.';
+  String get plansLoadError =>
+      'Не удалось загрузить тарифы. Проверьте соединение и попробуйте снова.';
 
   @override
-  String get desktopLinkExpired => 'Сессия истекла. Отсканируйте снова.';
+  String get createInvoiceError =>
+      'Не удалось создать счёт. Попробуйте ещё раз.';
 
   @override
-  String get desktopLinkInvalidQr => 'Неверный QR-код.';
+  String get paymentNetworkWarning =>
+      'Отправляйте ТОЛЬКО USDT в сети TRON (TRC-20). Средства в любой другой сети будут потеряны.';
 
   @override
-  String get desktopLinkNetworkError => 'Ошибка сети. Проверьте подключение.';
+  String get walletAddress => 'Адрес кошелька';
 
   @override
-  String get desktopLinkUnknownError =>
-      'Что-то пошло не так. Попробуйте снова.';
+  String get amountToPay => 'Сумма';
+
+  @override
+  String get scanQrHint =>
+      'Отсканируйте QR-код своим USDT (TRC-20) кошельком или скопируйте адрес ниже.';
+
+  @override
+  String get awaitingPayment => 'Ожидаем оплату…';
+
+  @override
+  String get awaitingPaymentHint =>
+      'Экран разблокируется автоматически, как только оплата подтвердится (около минуты).';
+
+  @override
+  String get iPaid => 'Я оплатил(а)';
+
+  @override
+  String get invoiceExpired => 'Время на оплату истекло.';
+
+  @override
+  String get newInvoice => 'Новый счёт';
+
+  @override
+  String get paymentConfirmedTitle => 'Оплата подтверждена';
+
+  @override
+  String get paymentConfirmedBody =>
+      'Лицензия активна. Добро пожаловать в Orpheus.';
+
+  @override
+  String get editNote => 'Редактировать';
+
+  @override
+  String get rotateConfirm => 'Ротировать';
+
+  @override
+  String get panicClearConfirm => 'Очистить';
+
+  @override
+  String get leaveConfirm => 'Выйти';
+
+  @override
+  String get deleteConfirm => 'Удалить';
+
+  @override
+  String get serverSwitchTitle => 'Сервер';
+
+  @override
+  String get serverProduction => 'Прод';
+
+  @override
+  String get serverTest => 'Тестовый сервер';
+
+  @override
+  String serverCurrent(String host) {
+    return 'Текущий: $host';
+  }
+
+  @override
+  String get serverTestConnection => 'Проверить связь';
+
+  @override
+  String serverConnectionOk(int ms) {
+    return 'Доступен ($ms мс)';
+  }
+
+  @override
+  String get serverConnectionFailed => 'Сервер недоступен';
+
+  @override
+  String get serverApply => 'Применить и переподключить';
+
+  @override
+  String get serverResetProd => 'Сбросить на прод';
+
+  @override
+  String get serverTestBanner => 'ТЕСТОВЫЙ СЕРВЕР';
+
+  @override
+  String serverSwitched(String host) {
+    return 'Переключено на $host';
+  }
 }

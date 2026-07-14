@@ -583,13 +583,19 @@ abstract class L10n {
   /// **'Incoming call'**
   String get incomingCall;
 
+  /// Neutral incoming-call label shown on a locked device so the caller identity is not leaked on the lockscreen
+  ///
+  /// In en, this message translates to:
+  /// **'Secure connection'**
+  String get incomingEncryptedCall;
+
   /// Outgoing call status
   ///
   /// In en, this message translates to:
   /// **'Outgoing call'**
   String get outgoingCall;
 
-  /// Missed call status
+  /// CallKit missed-call subtitle
   ///
   /// In en, this message translates to:
   /// **'Missed call'**
@@ -726,6 +732,18 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'Add'**
   String get add;
+
+  /// Validation error when a required dialog field is empty
+  ///
+  /// In en, this message translates to:
+  /// **'Please fill in both fields'**
+  String get fillAllFields;
+
+  /// Validation error when the pasted public key is not a valid key
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid key format'**
+  String get invalidPublicKey;
 
   /// Contact added message
   ///
@@ -1003,6 +1021,18 @@ abstract class L10n {
   /// **'Disconnected'**
   String get disconnected;
 
+  /// Connection status when the server keeps rejecting the PoP handshake
+  ///
+  /// In en, this message translates to:
+  /// **'Authorization rejected'**
+  String get authFailedStatus;
+
+  /// Banner shown when the server keeps rejecting the PoP handshake
+  ///
+  /// In en, this message translates to:
+  /// **'Server rejected this device\'s authorization. Check for updates.'**
+  String get authFailedBanner;
+
   /// Reconnecting status
   ///
   /// In en, this message translates to:
@@ -1123,6 +1153,60 @@ abstract class L10n {
   /// **'Decline'**
   String get decline;
 
+  /// Answer incoming call button
+  ///
+  /// In en, this message translates to:
+  /// **'Answer'**
+  String get answerCall;
+
+  /// Microphone control label
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone'**
+  String get microphone;
+
+  /// Notification body for a new message (content hidden for privacy)
+  ///
+  /// In en, this message translates to:
+  /// **'New message'**
+  String get newMessage;
+
+  /// Default caller/sender name when none is provided
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown'**
+  String get unknownCaller;
+
+  /// CallKit call-back action label
+  ///
+  /// In en, this message translates to:
+  /// **'Call back'**
+  String get callBack;
+
+  /// Room/chat message notification body
+  ///
+  /// In en, this message translates to:
+  /// **'New message in chat'**
+  String get newMessageInChat;
+
+  /// Official Orpheus notification body
+  ///
+  /// In en, this message translates to:
+  /// **'Official Orpheus reply'**
+  String get officialOrpheusReply;
+
+  /// Test notification body
+  ///
+  /// In en, this message translates to:
+  /// **'Test notification works! 🔔'**
+  String get testNotificationWorks;
+
+  /// Fallback incoming-call notification body
+  ///
+  /// In en, this message translates to:
+  /// **'From: {name}'**
+  String fromCaller(String name);
+
   /// Support chat title
   ///
   /// In en, this message translates to:
@@ -1147,10 +1231,10 @@ abstract class L10n {
   /// **'Camera permission required'**
   String get cameraPermissionRequired;
 
-  /// Open settings button
+  /// Button that opens the app system settings
   ///
   /// In en, this message translates to:
-  /// **'Open Settings'**
+  /// **'Open settings'**
   String get openSettings;
 
   /// Help section: Quick start
@@ -1306,7 +1390,7 @@ abstract class L10n {
   /// Regions bullet 1
   ///
   /// In en, this message translates to:
-  /// **'Your region is determined locally on your device and is never sent to Orpheus servers or any third party.'**
+  /// **'Your region is detected by a brief encrypted request to one of several independent geolocation services, which sees your IP address (as any website you visit does). Orpheus servers are not involved. If the check is unavailable, the region from your device settings is used.'**
   String get helpRegionsBullet1;
 
   /// Regions bullet 2
@@ -1384,8 +1468,26 @@ abstract class L10n {
   /// Contact name hint
   ///
   /// In en, this message translates to:
-  /// **'Enter contact name'**
+  /// **'Enter name'**
   String get enterName;
+
+  /// Short hour unit for session uptime, e.g. 2h
+  ///
+  /// In en, this message translates to:
+  /// **'h'**
+  String get unitHourShort;
+
+  /// Short minute unit for session uptime, e.g. 5m
+  ///
+  /// In en, this message translates to:
+  /// **'m'**
+  String get unitMinuteShort;
+
+  /// Short second unit for session uptime, e.g. 20s
+  ///
+  /// In en, this message translates to:
+  /// **'s'**
+  String get unitSecondShort;
 
   /// Public key label
   ///
@@ -1447,11 +1549,17 @@ abstract class L10n {
   /// **'Region'**
   String get region;
 
-  /// Region privacy note
+  /// Region subtitle when country was resolved by IP geolocation
   ///
   /// In en, this message translates to:
-  /// **'Local only • never sent'**
-  String get regionLocalOnly;
+  /// **'IP check • encrypted'**
+  String get regionSourceIp;
+
+  /// Region subtitle when country came from the device locale
+  ///
+  /// In en, this message translates to:
+  /// **'From device settings'**
+  String get regionSourceLocale;
 
   /// Mode label
   ///
@@ -1596,6 +1704,18 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'Lock after no activity'**
   String get inactivityLockDesc;
+
+  /// Setting toggle: show the incoming caller's name while the device is locked
+  ///
+  /// In en, this message translates to:
+  /// **'Caller name on lockscreen'**
+  String get callerNameOnLockTitle;
+
+  /// Setting description for caller name on lockscreen
+  ///
+  /// In en, this message translates to:
+  /// **'Show the contact name on an incoming call while the phone is locked. Off by default for privacy.'**
+  String get callerNameOnLockDesc;
 
   /// Inactivity timeout 30s
   ///
@@ -2263,6 +2383,12 @@ abstract class L10n {
   /// **'Point camera at QR code'**
   String get pointCameraAtQr;
 
+  /// Shown when camera permission or init fails on the QR scanner
+  ///
+  /// In en, this message translates to:
+  /// **'No camera access. Allow camera access to scan the QR code.'**
+  String get cameraAccessDenied;
+
   /// QR scan hint subtitle
   ///
   /// In en, this message translates to:
@@ -2599,6 +2725,24 @@ abstract class L10n {
   /// **'You will stop receiving messages from this room.'**
   String get leaveRoomDesc;
 
+  /// Delete room action (owner only)
+  ///
+  /// In en, this message translates to:
+  /// **'Delete room'**
+  String get deleteRoom;
+
+  /// Delete room confirm title
+  ///
+  /// In en, this message translates to:
+  /// **'Delete room?'**
+  String get deleteRoomTitle;
+
+  /// Delete room confirm description
+  ///
+  /// In en, this message translates to:
+  /// **'The room and all its messages will be permanently deleted for every member. This cannot be undone.'**
+  String get deleteRoomDesc;
+
   /// Create button
   ///
   /// In en, this message translates to:
@@ -2827,83 +2971,227 @@ abstract class L10n {
   /// **'From Oracle chat'**
   String get notesFromOracle;
 
-  /// Desktop link screen title
+  /// Contacts search field hint
   ///
   /// In en, this message translates to:
-  /// **'Desktop Link'**
-  String get desktopLinkTitle;
+  /// **'Search contacts'**
+  String get searchContactsHint;
 
-  /// Scan QR button
+  /// Empty contacts search results
   ///
   /// In en, this message translates to:
-  /// **'Scan QR Code'**
-  String get desktopLinkScanQr;
+  /// **'No contacts found'**
+  String get noContactsFound;
 
-  /// Reset session button
+  /// Chat menu: contact info item
   ///
   /// In en, this message translates to:
-  /// **'Reset Session'**
-  String get desktopLinkReset;
+  /// **'Contact info'**
+  String get contactInfo;
 
-  /// Status card title
+  /// Hint for verifying a contact's public key against MITM
   ///
   /// In en, this message translates to:
-  /// **'Connection Status'**
-  String get desktopLinkStatusTitle;
+  /// **'Compare this key with your contact over a trusted channel to make sure no one is intercepting your messages.'**
+  String get verifyKeyHint;
 
-  /// Connecting state
+  /// Button to open in-app license purchase
   ///
   /// In en, this message translates to:
-  /// **'Connecting...'**
-  String get desktopLinkConnecting;
+  /// **'Buy license'**
+  String get buyLicense;
 
-  /// Not paired state
+  /// Purchase screen title
   ///
   /// In en, this message translates to:
-  /// **'Not paired. Scan a QR code from the desktop app.'**
-  String get desktopLinkNotPaired;
+  /// **'Buy Premium'**
+  String get premiumPurchaseTitle;
 
-  /// Paired state
+  /// Plan selection heading
   ///
   /// In en, this message translates to:
-  /// **'Paired successfully'**
-  String get desktopLinkPaired;
+  /// **'Choose a plan'**
+  String get choosePlan;
 
-  /// OTP label
+  /// Plan selection subtitle
   ///
   /// In en, this message translates to:
-  /// **'One-Time Password'**
-  String get desktopLinkOtpLabel;
+  /// **'Pay with USDT (TRC-20). Your license activates automatically after payment.'**
+  String get choosePlanHint;
 
-  /// OTP hint
+  /// Error loading tariffs
   ///
   /// In en, this message translates to:
-  /// **'Enter this code in the desktop app to confirm.'**
-  String get desktopLinkOtpHint;
+  /// **'Couldn\'t load plans. Check your connection and try again.'**
+  String get plansLoadError;
 
-  /// Expired error
+  /// Error creating an invoice
   ///
   /// In en, this message translates to:
-  /// **'Session expired. Please scan again.'**
-  String get desktopLinkExpired;
+  /// **'Couldn\'t create the payment. Please try again.'**
+  String get createInvoiceError;
 
-  /// Invalid QR error
+  /// Warning to send on the correct network
   ///
   /// In en, this message translates to:
-  /// **'Invalid QR code.'**
-  String get desktopLinkInvalidQr;
+  /// **'Send ONLY USDT on the TRON network (TRC-20). Funds sent on any other network will be lost.'**
+  String get paymentNetworkWarning;
 
-  /// Network error
+  /// Label for the payment address
   ///
   /// In en, this message translates to:
-  /// **'Network error. Check your connection.'**
-  String get desktopLinkNetworkError;
+  /// **'Wallet address'**
+  String get walletAddress;
 
-  /// Unknown error
+  /// Label for the amount to pay
   ///
   /// In en, this message translates to:
-  /// **'Something went wrong. Try again.'**
-  String get desktopLinkUnknownError;
+  /// **'Amount'**
+  String get amountToPay;
+
+  /// Hint under the payment QR code
+  ///
+  /// In en, this message translates to:
+  /// **'Scan the QR code with your USDT (TRC-20) wallet, or copy the address below.'**
+  String get scanQrHint;
+
+  /// Payment pending status
+  ///
+  /// In en, this message translates to:
+  /// **'Awaiting payment…'**
+  String get awaitingPayment;
+
+  /// Hint under the awaiting-payment status
+  ///
+  /// In en, this message translates to:
+  /// **'This screen unlocks automatically once the payment is confirmed (about a minute).'**
+  String get awaitingPaymentHint;
+
+  /// Button to force a payment status re-check
+  ///
+  /// In en, this message translates to:
+  /// **'I\'ve paid'**
+  String get iPaid;
+
+  /// Invoice expired message
+  ///
+  /// In en, this message translates to:
+  /// **'The payment time has expired.'**
+  String get invoiceExpired;
+
+  /// Button to start a new invoice
+  ///
+  /// In en, this message translates to:
+  /// **'New invoice'**
+  String get newInvoice;
+
+  /// Success dialog title
+  ///
+  /// In en, this message translates to:
+  /// **'Payment confirmed'**
+  String get paymentConfirmedTitle;
+
+  /// Success dialog body
+  ///
+  /// In en, this message translates to:
+  /// **'Your license is now active. Welcome to Orpheus.'**
+  String get paymentConfirmedBody;
+
+  /// Edit note menu item
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get editNote;
+
+  /// Rotate invite confirm button (short)
+  ///
+  /// In en, this message translates to:
+  /// **'Rotate'**
+  String get rotateConfirm;
+
+  /// Clear room history confirm button (short)
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get panicClearConfirm;
+
+  /// Leave room confirm button (short)
+  ///
+  /// In en, this message translates to:
+  /// **'Leave'**
+  String get leaveConfirm;
+
+  /// Delete room confirm button (short)
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get deleteConfirm;
+
+  /// Server switch dialog title
+  ///
+  /// In en, this message translates to:
+  /// **'Server'**
+  String get serverSwitchTitle;
+
+  /// Production server option
+  ///
+  /// In en, this message translates to:
+  /// **'Production'**
+  String get serverProduction;
+
+  /// Test server option
+  ///
+  /// In en, this message translates to:
+  /// **'Test server'**
+  String get serverTest;
+
+  /// Current active host label
+  ///
+  /// In en, this message translates to:
+  /// **'Current: {host}'**
+  String serverCurrent(String host);
+
+  /// Test connection button
+  ///
+  /// In en, this message translates to:
+  /// **'Test connection'**
+  String get serverTestConnection;
+
+  /// Connection OK result
+  ///
+  /// In en, this message translates to:
+  /// **'Reachable ({ms} ms)'**
+  String serverConnectionOk(int ms);
+
+  /// Connection failed result
+  ///
+  /// In en, this message translates to:
+  /// **'Server unreachable'**
+  String get serverConnectionFailed;
+
+  /// Apply server switch button
+  ///
+  /// In en, this message translates to:
+  /// **'Apply & reconnect'**
+  String get serverApply;
+
+  /// Reset to production button
+  ///
+  /// In en, this message translates to:
+  /// **'Reset to production'**
+  String get serverResetProd;
+
+  /// Banner shown when a non-production host is active
+  ///
+  /// In en, this message translates to:
+  /// **'TEST SERVER'**
+  String get serverTestBanner;
+
+  /// Snackbar after switching server
+  ///
+  /// In en, this message translates to:
+  /// **'Switched to {host}'**
+  String serverSwitched(String host);
 }
 
 class _L10nDelegate extends LocalizationsDelegate<L10n> {

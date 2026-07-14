@@ -1,22 +1,41 @@
 // lib/services/database_service.dart
 
 import 'dart:io';
-import 'package:sqflite/sqflite.dart';
+import 'dart:convert';
+import 'dart:math';
+import 'package:sqflite_sqlcipher/sqflite.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:orpheus_project/services/secure_storage_options.dart';
 import 'package:path/path.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
-import 'package:orpheus_project/services/auth_service.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/models/ai_message_model.dart';
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
   static Database? _database;
   static const String _dbFileName = 'orpheus.db';
+  // Ключ шифрования БД (SQLCipher). Хранится в Keystore-backed secure storage.
+  static const String _dbKeyStoreKey = 'orpheus_db_key';
+  // Allow-list адресов контактов в secure storage — для строгого mutual-add гейта
+  // в фоновом изоляте (там зашифрованная БД ненадёжна). Keystore-шифр, граф не утекает.
+  static const String kContactAllowlistKey = 'orpheus_contact_addrs';
+  final FlutterSecureStorage _secureStorage = appSecureStorage;
   bool _isWiping = false;
   DatabaseService._init();
 
-  /// Проверка: находимся ли мы в duress mode (показываем пустой профиль)
-  bool get _isDuressMode => AuthService.instance.isDuressMode;
+  /// Находимся ли мы в duress mode (показываем пустой профиль).
+  ///
+  /// Флаг ПРОТАЛКИВАЕТСЯ снаружи через [setDuressMode] — БД сама НЕ знает про
+  /// AuthService. Это разрывает цикл import auth↔database (аудит ARCH-1): раньше
+  /// здесь был геттер `=> AuthService.instance.isDuressMode`, из-за чего два
+  /// ядровых сервиса безопасности нельзя было менять/тестировать по отдельности.
+  bool _isDuressMode = false;
+
+  /// Установить duress-режим. Вызывается ТОЛЬКО из AuthService при смене режима
+  /// (вход/duress/lock/wipe), чтобы read-методы фильтровали данные корректно.
+  void setDuressMode(bool value) => _isDuressMode = value;
 
   // Метод для тестов: инициализация с готовой БД
   void initWithDatabase(Database db) {
@@ -27,29 +46,67 @@ class DatabaseService {
     if (_isWiping) throw StateError('Database is being wiped');
     if (_database != null) return _database!;
     _database = await _initDB(_dbFileName);
+    // Разово при первом открытии синкаем allow-list адресов контактов в secure storage
+    // (для фонового строгого-mutual-add гейта; покрывает и существующие контакты после апгрейда).
+    _syncContactAllowlist();
     return _database!;
   }
 
   Future<Database> _initDB(String filePath) async {
     try {
-      print("DB: Получение пути к базе данных...");
       final dbPath = await getDatabasesPath();
       final path = join(dbPath, filePath);
-      print("DB: Путь к БД: $path");
 
-      print("DB: Открытие базы данных...");
+      // Ключ шифрования БД из Keystore (при первом запуске генерируется, а старая
+      // НЕзашифрованная БД удаляется — перенос данных не требуется).
+      final dbKey = await _getOrCreateDbKey();
+
       final db = await openDatabase(
         path,
-        version: 6,
-        onCreate: _createDB, 
+        password: dbKey,
+        version: 9,
+        onCreate: _createDB,
         onUpgrade: _upgradeDB,
         singleInstance: true, // Важно для избежания блокировок
       );
-      print("DB: База данных открыта успешно");
+      DebugLogger.success('DB', 'База данных (зашифрованная) открыта');
       return db;
     } catch (e) {
-      print("DB: КРИТИЧЕСКАЯ ОШИБКА инициализации: $e");
+      DebugLogger.error('DB', 'КРИТИЧЕСКАЯ ОШИБКА инициализации: $e');
       rethrow;
+    }
+  }
+
+  /// Возвращает ключ шифрования БД, генерируя его при первом запуске.
+  /// Ключ — 256 случайных бит из [Random.secure], лежит в Keystore-backed
+  /// secure storage. При первой генерации (переход на шифрование) удаляем
+  /// возможную старую НЕзашифрованную БД: критичных данных в приложении нет,
+  /// перенос не требуется (см. AUDIT_REPORT SEC-1).
+  Future<String> _getOrCreateDbKey() async {
+    final existing = await _secureStorage.read(key: _dbKeyStoreKey);
+    if (existing != null && existing.isNotEmpty) return existing;
+
+    await _deletePlainDbFilesIfAny();
+
+    final rnd = Random.secure();
+    final bytes = List<int>.generate(32, (_) => rnd.nextInt(256));
+    final key = base64Url.encode(bytes);
+    await _secureStorage.write(key: _dbKeyStoreKey, value: key);
+    DebugLogger.info('DB', 'Сгенерирован новый ключ шифрования БД');
+    return key;
+  }
+
+  /// Удаляет старый файл БД и его sidecar-файлы (journal/wal/shm), если есть.
+  Future<void> _deletePlainDbFilesIfAny() async {
+    try {
+      final path = await _dbPath();
+      for (final suffix in const ['', '-journal', '-wal', '-shm']) {
+        final f = File('$path$suffix');
+        if (await f.exists()) await f.delete();
+      }
+    } catch (_) {
+      // best-effort: если удалить не удалось, открытие зашифрованной БД всё равно
+      // пройдёт (или создаст новую), данные не критичны.
     }
   }
 
@@ -108,6 +165,53 @@ class DatabaseService {
           print("DB: Ошибка создания индекса: $e");
         }
       }
+      if (oldVersion < 7) {
+        // messageId — стабильный id сообщения для дедупа и «удалить у обоих».
+        // Убираем старый UNIQUE-индекс по timestamp (мог молча терять сообщения
+        // с одинаковой мс — аудит DB-4) и заменяем на индекс по messageId.
+        DebugLogger.info('DB', 'Миграция до версии 7 — messageId');
+        try {
+          await db.execute("ALTER TABLE messages ADD COLUMN messageId TEXT");
+        } catch (_) {}
+        try {
+          await db.execute("DROP INDEX IF EXISTS idx_unique_message");
+        } catch (_) {}
+        try {
+          await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_messages_contact_ts
+            ON messages(contactPublicKey, timestamp)
+          ''');
+          await db.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_message_id
+            ON messages(contactPublicKey, messageId)
+          ''');
+        } catch (e) {
+          DebugLogger.warn('DB', 'Ошибка индексов v7: $e');
+        }
+      }
+      if (oldVersion < 8) {
+        // Отдельный индекс по одному timestamp: авто-очистка истории фильтрует
+        // `WHERE timestamp < ?` без contactPublicKey, поэтому составной индекс
+        // (contactPublicKey, timestamp) ей не помогал — был полный скан (аудит PERF-2).
+        DebugLogger.info('DB', 'Миграция до версии 8 — индекс messages.timestamp');
+        try {
+          await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+            ON messages(timestamp)
+          ''');
+        } catch (e) {
+          DebugLogger.warn('DB', 'Ошибка индекса v8: $e');
+        }
+      }
+      if (oldVersion < 9) {
+        // PoP: contacts.publicKey теперь = Ed25519-адрес; отдельный X25519 enc-ключ.
+        DebugLogger.info('DB', 'Миграция до версии 9 — contacts.encryptionKey');
+        try {
+          await db.execute("ALTER TABLE contacts ADD COLUMN encryptionKey TEXT");
+        } catch (e) {
+          DebugLogger.warn('DB', 'Ошибка миграции v9: $e');
+        }
+      }
       print("DB: Миграция завершена");
     } catch (e) {
       print("DB: ОШИБКА миграции: $e");
@@ -120,7 +224,8 @@ class DatabaseService {
       CREATE TABLE contacts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        publicKey TEXT NOT NULL UNIQUE
+        publicKey TEXT NOT NULL UNIQUE,
+        encryptionKey TEXT
       )
     ''');
   }
@@ -130,6 +235,7 @@ class DatabaseService {
       CREATE TABLE messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         contactPublicKey TEXT NOT NULL,
+        messageId TEXT,
         text TEXT NOT NULL,
         isSentByMe INTEGER NOT NULL,
         timestamp INTEGER NOT NULL,
@@ -137,9 +243,22 @@ class DatabaseService {
         isRead INTEGER DEFAULT 1
       )
     ''');
+    // Индекс под горячий запрос чата и агрегат «последнее сообщение».
     await db.execute('''
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_message
-      ON messages(contactPublicKey, timestamp, isSentByMe)
+      CREATE INDEX IF NOT EXISTS idx_messages_contact_ts
+      ON messages(contactPublicKey, timestamp)
+    ''');
+    // Отдельный индекс по timestamp: авто-очистка истории фильтрует по
+    // `timestamp < ?` без contactPublicKey, где составной индекс не работает (PERF-2).
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+      ON messages(timestamp)
+    ''');
+    // Дедуп по стабильному messageId (NULL допускается многократно —
+    // сообщения без id от старых клиентов не считаются дублями).
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_message_id
+      ON messages(contactPublicKey, messageId)
     ''');
   }
 
@@ -178,9 +297,36 @@ class DatabaseService {
   Future<void> addContact(Contact contact) async {
     // В duress mode не добавляем контакты
     if (_isDuressMode) return;
-    
+
     final db = await instance.database;
     await db.insert('contacts', contact.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    await _syncContactAllowlist();
+  }
+
+  /// Добавить контакт, ТОЛЬКО если его ещё нет. Нужно для авто-создания контакта
+  /// при входящем сообщении от неизвестного отправителя: иначе сообщение
+  /// сохраняется, но не появляется в списке чатов (аудит DB-6). Имя по умолчанию —
+  /// префикс публичного ключа (пользователь может переименовать). Duress НЕ
+  /// проверяем — как и addMessage, чтобы реальный набор данных был консистентен
+  /// (в duress-режиме список контактов всё равно пуст на чтении).
+  Future<void> addContactIfMissing(String publicKey, {String? encryptionKey}) async {
+    if (publicKey.isEmpty) return;
+    final db = await instance.database;
+    final existing = await db.query('contacts',
+        columns: ['id', 'encryptionKey'], where: 'publicKey = ?', whereArgs: [publicKey], limit: 1);
+    if (existing.isNotEmpty) {
+      // Контакт уже есть: допишем enc-ключ, если раньше его не знали, а теперь узнали.
+      final currentEnc = existing.first['encryptionKey'] as String?;
+      if (encryptionKey != null && encryptionKey.isNotEmpty && (currentEnc == null || currentEnc.isEmpty)) {
+        await db.update('contacts', {'encryptionKey': encryptionKey},
+            where: 'publicKey = ?', whereArgs: [publicKey]);
+      }
+      return;
+    }
+    final name = publicKey.length >= 8 ? publicKey.substring(0, 8) : publicKey;
+    await db.insert('contacts', {'name': name, 'publicKey': publicKey, 'encryptionKey': encryptionKey},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+    await _syncContactAllowlist();
   }
 
   Future<List<Contact>> getContacts() async {
@@ -193,21 +339,78 @@ class DatabaseService {
     // 1. Контакты с недавними сообщениями — сверху
     // 2. Контакты без сообщений — снизу (по имени)
     final maps = await db.rawQuery('''
-      SELECT c.id, c.name, c.publicKey,
+      SELECT c.id, c.name, c.publicKey, c.encryptionKey,
              COALESCE(MAX(m.timestamp), 0) as lastMessageTime
       FROM contacts c
       LEFT JOIN messages m ON c.publicKey = m.contactPublicKey
-      GROUP BY c.id, c.name, c.publicKey
+      GROUP BY c.id, c.name, c.publicKey, c.encryptionKey
       ORDER BY lastMessageTime DESC, c.name ASC
     ''');
-    
+
     return List.generate(maps.length, (i) {
+      final lastTs = maps[i]['lastMessageTime'] as int?;
       return Contact(
         id: maps[i]['id'] as int,
         name: maps[i]['name'] as String,
         publicKey: maps[i]['publicKey'] as String,
+        encryptionKey: maps[i]['encryptionKey'] as String?,
+        lastMessageTime: (lastTs == null || lastTs == 0) ? null : lastTs,
       );
     });
+  }
+
+  /// Строгий mutual-add: является ли адрес нашим контактом. Duress -> false
+  /// (в duress контактов "нет"). Используется как гейт приёма сообщений/звонков.
+  Future<bool> isContact(String publicKey) async {
+    if (_isDuressMode || publicKey.isEmpty) return false;
+    try {
+      final db = await instance.database;
+      final rows = await db.query('contacts',
+          columns: ['id'], where: 'publicKey = ?', whereArgs: [publicKey], limit: 1);
+      return rows.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Пересобрать allow-list адресов контактов в secure storage (для фонового изолята).
+  Future<void> _syncContactAllowlist() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.query('contacts', columns: ['publicKey']);
+      final addrs = rows.map((r) => r['publicKey'] as String).toList();
+      await _secureStorage.write(key: kContactAllowlistKey, value: json.encode(addrs));
+    } catch (_) {
+      // best-effort: если не удалось — фоновый гейт просто отработает по последнему снимку
+    }
+  }
+
+  /// Читает allow-list адресов контактов из secure storage БЕЗ открытия БД —
+  /// для фонового изолята (там зашифрованная БД ненадёжна). Пустое множество
+  /// при ошибке/отсутствии (тогда фоновый гейт дропнет всё — безопасный дефолт).
+  static Future<Set<String>> loadContactAllowlist() async {
+    try {
+      final raw = await appSecureStorage.read(key: kContactAllowlistKey);
+      if (raw == null || raw.isEmpty) return <String>{};
+      final decoded = json.decode(raw);
+      if (decoded is List) return decoded.map((e) => e.toString()).toSet();
+    } catch (_) {}
+    return <String>{};
+  }
+
+  /// X25519 enc-ключ контакта (для расшифровки/шифрования). null, если контакта
+  /// нет или enc-ключ ещё не известен.
+  Future<String?> getContactEncryptionKey(String publicKey) async {
+    if (_isDuressMode) return null;
+    try {
+      final db = await instance.database;
+      final maps = await db.query('contacts',
+          columns: ['encryptionKey'], where: 'publicKey = ?', whereArgs: [publicKey], limit: 1);
+      if (maps.isEmpty) return null;
+      return maps[0]['encryptionKey'] as String?;
+    } catch (e) {
+      return null;
+    }
   }
 
   /// Получить контакт по publicKey
@@ -232,6 +435,7 @@ class DatabaseService {
         id: maps[0]['id'] as int,
         name: maps[0]['name'] as String,
         publicKey: maps[0]['publicKey'] as String,
+        encryptionKey: maps[0]['encryptionKey'] as String?,
       );
     } catch (e) {
       print("DB ERROR: Failed to get contact by publicKey: $e");
@@ -245,6 +449,7 @@ class DatabaseService {
       await txn.delete('messages', where: 'contactPublicKey = ?', whereArgs: [publicKey]);
       await txn.delete('contacts', where: 'id = ?', whereArgs: [id]);
     });
+    await _syncContactAllowlist();
   }
 
   /// Обновить имя контакта
@@ -292,6 +497,21 @@ class DatabaseService {
     );
   }
 
+  /// Обновить статус сообщения по стабильному messageId (точнее, чем по времени).
+  Future<void> updateMessageStatusByMessageId(
+    String contactKey,
+    String messageId,
+    MessageStatus status,
+  ) async {
+    final db = await instance.database;
+    await db.update(
+      'messages',
+      {'status': status.index},
+      where: 'contactPublicKey = ? AND messageId = ?',
+      whereArgs: [contactKey, messageId],
+    );
+  }
+
   // Получить сообщения (с маппингом новых полей)
   Future<List<ChatMessage>> getMessagesForContact(String contactKey) async {
     // В duress mode возвращаем пустой список
@@ -305,16 +525,67 @@ class DatabaseService {
       orderBy: 'timestamp ASC',
     );
 
-    return List.generate(maps.length, (i) {
-      return ChatMessage(
-        id: maps[i]['id'] as int,
-        text: maps[i]['text'] as String,
-        isSentByMe: (maps[i]['isSentByMe'] as int) == 1,
-        timestamp: DateTime.fromMillisecondsSinceEpoch(maps[i]['timestamp'] as int),
-        status: MessageStatus.values[(maps[i]['status'] as int?) ?? 1],
-        isRead: ((maps[i]['isRead'] as int?) ?? 1) == 1,
-      );
-    });
+    return maps.map(_rowToMessage).toList();
+  }
+
+  /// Сообщения контакта СТРОГО новее указанной метки времени (ASC).
+  /// Для инкрементальной подгрузки новых сообщений без перечитывания всей
+  /// истории на каждое входящее (аудит PERF-1).
+  Future<List<ChatMessage>> getMessagesForContactAfter(
+      String contactKey, int afterMs) async {
+    if (_isDuressMode) return [];
+    final db = await instance.database;
+    final maps = await db.query(
+      'messages',
+      where: 'contactPublicKey = ? AND timestamp > ?',
+      whereArgs: [contactKey, afterMs],
+      orderBy: 'timestamp ASC',
+    );
+    return maps.map(_rowToMessage).toList();
+  }
+
+  /// Последние [limit] сообщений контакта для НАЧАЛЬНОЙ загрузки чата страницами
+  /// (вместо всей истории — аудит PERF-1). Возвращает по возрастанию времени (ASC).
+  Future<List<ChatMessage>> getMessagesForContactLatest(
+      String contactKey, {int limit = 50}) async {
+    if (_isDuressMode) return [];
+    final db = await instance.database;
+    final maps = await db.query(
+      'messages',
+      where: 'contactPublicKey = ?',
+      whereArgs: [contactKey],
+      orderBy: 'timestamp DESC',
+      limit: limit,
+    );
+    return maps.reversed.map(_rowToMessage).toList();
+  }
+
+  /// [limit] сообщений контакта СТРОГО старше [beforeMs] — для подгрузки истории
+  /// вверх по скроллу (аудит PERF-1). Возвращает по возрастанию времени (ASC).
+  Future<List<ChatMessage>> getMessagesForContactBefore(
+      String contactKey, int beforeMs, {int limit = 50}) async {
+    if (_isDuressMode) return [];
+    final db = await instance.database;
+    final maps = await db.query(
+      'messages',
+      where: 'contactPublicKey = ? AND timestamp < ?',
+      whereArgs: [contactKey, beforeMs],
+      orderBy: 'timestamp DESC',
+      limit: limit,
+    );
+    return maps.reversed.map(_rowToMessage).toList();
+  }
+
+  ChatMessage _rowToMessage(Map<String, Object?> row) {
+    return ChatMessage(
+      id: row['id'] as int?,
+      messageId: row['messageId'] as String?,
+      text: row['text'] as String,
+      isSentByMe: (row['isSentByMe'] as int) == 1,
+      timestamp: DateTime.fromMillisecondsSinceEpoch(row['timestamp'] as int),
+      status: MessageStatus.values[(row['status'] as int?) ?? 1],
+      isRead: ((row['isRead'] as int?) ?? 1) == 1,
+    );
   }
 
   // --- AI Assistant ---
@@ -404,6 +675,21 @@ class DatabaseService {
       'source_id': sourceId,
       'source_label': sourceLabel,
     });
+  }
+
+  /// Обновить текст заметки (редактирование). Источник (source_type/label) не
+  /// трогаем — меняется только содержимое.
+  Future<void> updateNote({required int id, required String text}) async {
+    if (_isDuressMode) return;
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    final db = await instance.database;
+    await db.update(
+      'notes',
+      {'text': trimmed},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<List<Map<String, dynamic>>> getNotes() async {
@@ -532,6 +818,31 @@ class DatabaseService {
     );
   }
 
+  /// Удалить сообщения по стабильным messageId (для «удалить у обоих»).
+  Future<int> deleteMessagesByMessageIds(String contactKey, List<String> messageIds) async {
+    if (_isDuressMode || messageIds.isEmpty) return 0;
+    final db = await instance.database;
+    final placeholders = List.filled(messageIds.length, '?').join(',');
+    return await db.delete(
+      'messages',
+      where: 'contactPublicKey = ? AND messageId IN ($placeholders)',
+      whereArgs: [contactKey, ...messageIds],
+    );
+  }
+
+  /// Есть ли уже сообщение с таким messageId от этого контакта (для дедупа входящих).
+  Future<bool> messageExistsByMessageId(String contactKey, String messageId) async {
+    final db = await instance.database;
+    final rows = await db.query(
+      'messages',
+      columns: ['id'],
+      where: 'contactPublicKey = ? AND messageId = ?',
+      whereArgs: [contactKey, messageId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   /// Удалить все сообщения старше указанной даты.
   /// 
   /// Используется для автоматической очистки сообщений по политике retention.
@@ -613,11 +924,18 @@ class DatabaseService {
         if (await f.exists()) await f.delete();
       }
 
-      // 5. Verify deletion
+      // 5. Delete the DB encryption key from secure storage, so any residual
+      //    ciphertext is cryptographically unrecoverable and the next launch
+      //    regenerates a fresh key + empty database.
+      try {
+        await _secureStorage.delete(key: _dbKeyStoreKey);
+      } catch (_) {}
+
+      // 6. Verify deletion
       if (await File(path).exists()) {
-        print("DB ERROR: Database file still exists after deletion!");
+        DebugLogger.error('DB', 'Файл БД всё ещё существует после удаления!');
       } else {
-        print("DB: Database deleted and verified");
+        DebugLogger.success('DB', 'БД удалена и проверена');
       }
     } catch (e) {
       print("DB ERROR: Error deleting database: $e");
@@ -667,11 +985,18 @@ class DatabaseService {
     }
     
     final db = await instance.database;
-    
+
+    // Записи звонков лежат в `messages`, но это НЕ переписка — исключаем их из
+    // счётчиков, иначе профиль показывает звонки как сообщения (см. ChatMessage.callEventTexts).
+    final callTexts = ChatMessage.callEventTexts.toList();
+    final ph = List.filled(callTexts.length, '?').join(',');
+
     final contactsResult = await db.rawQuery('SELECT COUNT(*) FROM contacts');
-    final messagesResult = await db.rawQuery('SELECT COUNT(*) FROM messages');
-    final sentResult = await db.rawQuery('SELECT COUNT(*) FROM messages WHERE isSentByMe = 1');
-    
+    final messagesResult = await db.rawQuery(
+        'SELECT COUNT(*) FROM messages WHERE text NOT IN ($ph)', callTexts);
+    final sentResult = await db.rawQuery(
+        'SELECT COUNT(*) FROM messages WHERE isSentByMe = 1 AND text NOT IN ($ph)', callTexts);
+
     return {
       'contacts': Sqflite.firstIntValue(contactsResult) ?? 0,
       'messages': Sqflite.firstIntValue(messagesResult) ?? 0,

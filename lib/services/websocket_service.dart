@@ -6,19 +6,31 @@ import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:orpheus_project/config.dart';
+import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/network_monitor_service.dart';
-import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/pending_actions_service.dart';
+import 'package:orpheus_project/services/push_connection_service.dart' show kPrefSignalPopToken;
 import 'package:rxdart/rxdart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-enum ConnectionStatus { Disconnected, Connecting, Connected }
+// Authenticating: сокет открыт, идёт обязательный PoP-хендшейк (challenge->proof->ok);
+// до pop-ok сессия НЕ считается живой (не шлём pending, не считаем Connected).
+// AuthFailed: сервер стабильно отвергает PoP (серия провалов подряд) — это НЕ сеть:
+// ретраи продолжаются на максимальном backoff, UI предлагает проверить обновления.
+enum ConnectionStatus { Disconnected, Connecting, Authenticating, Connected, AuthFailed }
 
 class WebSocketService {
   WebSocketService({http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
 
   WebSocketChannel? _channel;
   final http.Client _httpClient;
+  Timer? _authTimeout;
+
+  static List<int> _b64urlDecode(String s) {
+    final pad = (4 - s.length % 4) % 4;
+    return base64Url.decode(s + ('=' * pad));
+  }
 
   final _socketResponseController = StreamController<String>.broadcast();
   Stream<String> get stream => _socketResponseController.stream;
@@ -30,7 +42,17 @@ class WebSocketService {
   String? _currentPublicKey;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
+  Timer? _connectTimeout;
   bool _isDisconnectingIntentional = false;
+  // Поколение попытки подключения: защищает от гонки, когда _initConnection
+  // запускается повторно (реконнект/сеть/lifecycle), пока предыдущий
+  // WebSocket.connect ещё в полёте. Сокет устаревшего поколения закрывается и
+  // не подписывается — иначе получаются два живых сокета и двойная доставка
+  // (аудит LOGIC-9).
+  int _connectionGeneration = 0;
+  // Защита от параллельного слива очереди pending-сообщений (быстрый реконнект
+  // мог запустить второй проход → дубли/потери в очереди).
+  bool _sendingPending = false;
 
   // Подписка на изменения сети
   StreamSubscription? _networkSubscription;
@@ -39,6 +61,55 @@ class WebSocketService {
   int _reconnectAttempt = 0;
   static const int _minReconnectDelay = 1; // секунды
   static const int _maxReconnectDelay = 30; // секунды
+
+  // PoP: серия подряд проваленных хендшейков (proof отправлен или pop-error получен,
+  // pop-ok не пришёл). После порога это трактуется как отказ авторизации, а не сеть:
+  // статус AuthFailed, backoff сразу максимальный, смена сети/resume его не сбрасывает.
+  // Инцидент 13.07.2026: до-PoP клиенты после серверного деплоя молча долбили
+  // реконнект ~1/сек без какого-либо сигнала пользователю.
+  int _authFailStreak = 0;
+  static const int _authFailThreshold = 3;
+  // Код причины из последнего pop-error сервера (для UI/диагностики).
+  String? lastPopErrorCode;
+  bool get isAuthFailed => _authFailStreak >= _authFailThreshold;
+
+  // PoP-токен для HTTP-фолбэка /api/signal: приходит в pop-ok, дублируется в prefs
+  // (kPrefSignalPopToken), чтобы холодный старт имел токен до первого pop-ok.
+  String? _signalToken;
+
+  Future<String> _loadSignalToken() async {
+    if (_signalToken != null) return _signalToken!;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _signalToken = prefs.getString(kPrefSignalPopToken);
+    } catch (_) {}
+    return _signalToken ?? '';
+  }
+
+  void _storeSignalToken(dynamic token) {
+    if (token is! String || token.isEmpty) return;
+    _signalToken = token;
+    // fire-and-forget: prefs нужен только как кэш для холодного старта
+    () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(kPrefSignalPopToken, token);
+      } catch (_) {}
+    }();
+  }
+
+  // Единая точка учёта провала авторизации (pop-error или закрытие после proof без pop-ok).
+  void _recordAuthFailure(String reason) {
+    _authFailStreak++;
+    DebugLogger.error('WS', 'PoP-провал: $reason (серия $_authFailStreak/$_authFailThreshold)');
+  }
+
+  @visibleForTesting
+  void debugSimulateAuthFailure({String? popErrorCode}) {
+    if (popErrorCode != null) lastPopErrorCode = popErrorCode;
+    _recordAuthFailure('debug');
+    _handleDisconnect();
+  }
 
   int _getReconnectDelay() {
     // Экспоненциальный backoff: 1, 2, 4, 8, 16, 30, 30, 30...
@@ -75,9 +146,12 @@ class WebSocketService {
     
     // Отменяем текущий таймер реконнекта
     _reconnectTimer?.cancel();
-    
-    // Сбрасываем backoff для быстрого переподключения
-    _reconnectAttempt = 0;
+
+    // Сбрасываем backoff для быстрого переподключения — но НЕ при серии PoP-отказов:
+    // смена сети/resume не лечит отвергнутый proof, быстрые ретраи только долбят сервер.
+    if (!isAuthFailed) {
+      _reconnectAttempt = 0;
+    }
     
     // Закрываем текущее соединение
     _stopPingPong();
@@ -96,6 +170,7 @@ class WebSocketService {
     _isDisconnectingIntentional = false;
     _hostIndex = 0; // всегда начинаем с нового домена
     _reconnectAttempt = 0; // сброс backoff при новом подключении
+    _authFailStreak = 0; // явный connect — даём авторизации чистый шанс
 
     // Инициализируем мониторинг сети
     _initNetworkMonitoring();
@@ -108,32 +183,142 @@ class WebSocketService {
     _initConnection();
   }
 
+  /// Вызывать при возврате приложения на передний план / разблокировке.
+  ///
+  /// Обычный [connect] делает no-op при статусе Connecting — но после фона сокет
+  /// часто мёртв, а статус залип в Connecting (реконнект-таймер не тикал в фоне),
+  /// и приложение висело в Connecting до watchdog/backoff (особенно Samsung).
+  /// Здесь: если WS НЕ Connected — форсируем свежий реконнект (закрыть возможно
+  /// мёртвый сокет + переподключиться со сбросом backoff). Если уже Connected —
+  /// не трогаем (живость держит ping-pong).
+  void forceReconnectIfStale(String myPublicKey) {
+    _currentPublicKey = myPublicKey;
+    _isDisconnectingIntentional = false;
+    if (_statusController.value == ConnectionStatus.Connected) return;
+    _forceReconnect(reason: 'app resumed (was ${_statusController.value})');
+  }
+
   void _initConnection() {
     if (_currentPublicKey == null) return;
 
+    final gen = ++_connectionGeneration;
     final uri = Uri.parse(AppConfig.webSocketUrl(_currentPublicKey!, host: currentHost));
     _statusController.add(ConnectionStatus.Connecting);
     print("WS: Попытка подключения к $uri...");
     DebugLogger.info('WS', 'Attempting to connect to $uri');
 
+    // Watchdog: не залипаем в Connecting навсегда, если connect зависает.
+    // По таймауту помечаем поколение устаревшим (опоздавший сокет закроется в
+    // .then по gen-guard — без второго живого сокета), ротируем хост и уходим в
+    // реконнект.
+    _connectTimeout?.cancel();
+    // 8с (было 20): на флаки-сотовой (Samsung) connect часто зависает, и 20с
+    // держали WS в Connecting слишком долго. Быстрее сдаёмся -> быстрее реконнект.
+    _connectTimeout = Timer(const Duration(seconds: 8), () {
+      if (gen != _connectionGeneration || _channel != null) return;
+      DebugLogger.warn('WS', 'Connect timeout — abandoning attempt');
+      _connectionGeneration++;
+      _rotateHost();
+      _handleDisconnect();
+    });
+
     try {
       WebSocket.connect(uri.toString()).then((ws) {
+        // Пока подключались, стартовал более новый connect — этот сокет лишний:
+        // закрываем и НЕ подписываемся, иначе будет второй живой сокет (LOGIC-9).
+        if (gen != _connectionGeneration) {
+          try {
+            ws.close();
+          } catch (_) {}
+          return;
+        }
+        _connectTimeout?.cancel(); // успели подключиться — гасим watchdog
         ws.pingInterval = const Duration(seconds: 10);
 
+        // Закрываем прежний канал, если он вдруг ещё открыт.
+        try {
+          _channel?.sink.close();
+        } catch (_) {}
         _channel = IOWebSocketChannel(ws);
-        _statusController.add(ConnectionStatus.Connected);
-        _reconnectAttempt = 0; // Сброс backoff при успешном подключении
-        print("WS: Соединение установлено!");
-        DebugLogger.success('WS', 'Соединение установлено!');
+        // Сокет открыт, но НЕ Connected: сначала обязательный PoP-хендшейк
+        // (pop-challenge -> pop-proof -> pop-ok). До pop-ok не шлём pending и не
+        // считаем сессию живой (сервер закроет сокет 1008, если proof не пройдёт).
+        _statusController.add(ConnectionStatus.Authenticating);
+        DebugLogger.info('WS', 'Сокет открыт, ожидаем PoP-challenge...');
+        bool authed = false;
+        // proofSent + failCounted: закрытие сокета ПОСЛЕ отправки proof без pop-ok —
+        // это отказ авторизации (считаем в _authFailStreak), но ровно один раз за цикл
+        // (pop-error и последующий onDone не должны дать двойной счёт).
+        bool proofSent = false;
+        bool failCounted = false;
 
-        _sendFcmToken();
-        _startPingPong();
-        
-        // Отправляем pending сообщения после восстановления соединения
-        _sendPendingMessages();
+        _authTimeout?.cancel();
+        _authTimeout = Timer(const Duration(seconds: 12), () {
+          if (gen != _connectionGeneration || authed) return;
+          DebugLogger.warn('WS', 'PoP handshake timeout — abandoning');
+          _handleDisconnect();
+        });
 
         _channel!.stream.listen(
-              (message) {
+              (message) async {
+            if (!authed) {
+              try {
+                final data = json.decode(message);
+                final type = data['type'];
+                if (type == 'pop-challenge') {
+                  final nonce = _b64urlDecode(data['nonce'] as String);
+                  final ts = data['ts'] as int;
+                  final sig = await CryptoService.instance.signPopProof(nonce, ts);
+                  if (gen != _connectionGeneration) return;
+                  _channel?.sink.add(json.encode({
+                    'type': 'pop-proof',
+                    'v': 1,
+                    'address': _currentPublicKey,
+                    'sig': sig,
+                  }));
+                  proofSent = true;
+                  return;
+                } else if (type == 'pop-ok') {
+                  authed = true;
+                  _authTimeout?.cancel();
+                  if (gen != _connectionGeneration) return;
+                  _authFailStreak = 0;
+                  lastPopErrorCode = null;
+                  _storeSignalToken(data['signal_token']);
+                  _statusController.add(ConnectionStatus.Connected);
+                  _reconnectAttempt = 0; // Сброс backoff при успешном подключении
+                  print("WS: PoP ok — соединение установлено!");
+                  DebugLogger.success('WS', 'PoP ok — соединение установлено!');
+                  _startPingPong();
+                  // Отправляем pending сообщения после аутентификации
+                  _sendPendingMessages();
+                  return;
+                } else if (type == 'pop-error') {
+                  // Явный отказ сервера с причиной (bad_signature/address_mismatch/...).
+                  // Сервер после pop-error додерживает сокет (tarpit для старых клиентов) —
+                  // не ждём его close, закрываем сами и уходим в backoff.
+                  if (gen != _connectionGeneration) return;
+                  lastPopErrorCode = (data['code'] ?? 'unknown').toString();
+                  _recordAuthFailure('pop-error: $lastPopErrorCode');
+                  failCounted = true;
+                  try {
+                    _channel?.sink.close();
+                  } catch (_) {}
+                  _handleDisconnect();
+                  return;
+                } else {
+                  DebugLogger.error('WS', 'Неожиданный фрейм до PoP: $type');
+                  if (gen != _connectionGeneration) return;
+                  _handleDisconnect();
+                  return;
+                }
+              } catch (e) {
+                DebugLogger.error('WS', 'Ошибка PoP-хендшейка: $e');
+                if (gen != _connectionGeneration) return;
+                _handleDisconnect();
+                return;
+              }
+            }
             _socketResponseController.add(message);
             // Логируем входящие сообщения (кроме pong)
             try {
@@ -145,23 +330,40 @@ class WebSocketService {
             } catch (_) {}
           },
           onDone: () {
+            // Событие от УСТАРЕВШЕГО сокета (его закрыл более новый connect) —
+            // игнорируем: иначе закрытие живого предшественника дёрнет
+            // _handleDisconnect и вызовет лишний цикл реконнектов при живом
+            // соединении (регресс, найденный при верификации LOGIC-9).
+            if (gen != _connectionGeneration) return;
             print("WS: Соединение закрыто (onDone).");
-            DebugLogger.warn('WS', 'Соединение закрыто (onDone)');
+            DebugLogger.warn('WS',
+                'Соединение закрыто (onDone) code=${ws.closeCode} reason=${ws.closeReason}');
+            // Proof отправлен, pop-ok не пришёл, сокет закрыт — сервер отверг
+            // авторизацию молча (до-pop-error серверы закрывали 1008 без фрейма).
+            if (!authed && proofSent && !failCounted) {
+              _recordAuthFailure('закрытие без pop-ok после proof');
+              failCounted = true;
+            }
             _handleDisconnect();
           },
           onError: (error) {
+            if (gen != _connectionGeneration) return;
             print("WS ERROR: Socket error: $error");
             DebugLogger.error('WS', 'Socket error: $error');
             _handleDisconnect();
           },
         );
       }).catchError((e) {
+        // Устаревшая попытка (уже стартовал новый connect) — не трогаем состояние.
+        if (gen != _connectionGeneration) return;
+        _connectTimeout?.cancel();
         print("WS FATAL: Не удалось подключиться: $e");
         DebugLogger.error('WS', 'FATAL: Не удалось подключиться: $e');
         _rotateHost();
         _handleDisconnect();
       });
     } catch (e) {
+      _connectTimeout?.cancel();
       print("WS EXCEPTION: $e");
       DebugLogger.error('WS', 'EXCEPTION: $e');
       _rotateHost();
@@ -175,32 +377,19 @@ class WebSocketService {
     DebugLogger.warn('WS', 'Переключение хоста: $currentHost');
   }
 
-  void _sendFcmToken() {
-    final token = NotificationService().fcmToken;
-    if (token != null) {
-      print("WS: Отправка FCM токена на сервер...");
-      DebugLogger.info('WS', 'Отправка FCM токена: ${token.substring(0, 20)}...');
-      final msg = json.encode({
-        "type": "register-fcm",
-        "token": token
-      });
-      _channel?.sink.add(msg);
-    } else {
-      print("WS WARN: FCM токен не готов, пропускаем отправку.");
-      DebugLogger.warn('WS', 'FCM токен не готов, пропускаем отправку');
-    }
-  }
-
   void _handleDisconnect() {
-    if (_statusController.value != ConnectionStatus.Disconnected) {
-      _statusController.add(ConnectionStatus.Disconnected);
-      DebugLogger.warn('WS', 'Статус изменён на Disconnected');
+    // Серия PoP-отказов = проблема авторизации, а не сети: показываем AuthFailed
+    // (UI предложит проверить обновления) и ретраим сразу на максимальном backoff.
+    final target = isAuthFailed ? ConnectionStatus.AuthFailed : ConnectionStatus.Disconnected;
+    if (_statusController.value != target) {
+      _statusController.add(target);
+      DebugLogger.warn('WS', 'Статус изменён на ${target.name}');
     }
 
     _stopPingPong();
 
     if (!_isDisconnectingIntentional) {
-      final delay = _getReconnectDelay();
+      final delay = isAuthFailed ? _maxReconnectDelay : _getReconnectDelay();
       _reconnectAttempt++;
       print("WS: Планирование переподключения через $delay сек (попытка $_reconnectAttempt)...");
       DebugLogger.info('WS', 'Планирование переподключения через $delay сек (попытка $_reconnectAttempt)...');
@@ -215,7 +404,13 @@ class WebSocketService {
 
   void disconnect() {
     _isDisconnectingIntentional = true;
+    // Инвалидируем любой connect «в полёте»: если WebSocket.connect завершится
+    // уже после намеренного disconnect, его поколение не совпадёт и сокет будет
+    // закрыт, а не установлен (LOGIC-9).
+    _connectionGeneration++;
     _reconnectTimer?.cancel();
+    _connectTimeout?.cancel();
+    _authTimeout?.cancel();
     _stopPingPong();
     _networkSubscription?.cancel();
     _networkSubscription = null;
@@ -252,8 +447,18 @@ class WebSocketService {
     _pingTimer?.cancel();
   }
 
-  void sendChatMessage(String recipientPublicKey, String payload) {
-    final msg = {"recipient_pubkey": recipientPublicKey, "type": "chat", "payload": payload};
+  void sendChatMessage(String recipientPublicKey, String payload, {String? messageId}) {
+    // Прикрепляем свой подписанный enc-ключ inline, чтобы получатель (в т.ч.
+    // незнакомец) мог зарезолвить X25519 для расшифровки без directory-запроса.
+    final bundle = CryptoService.instance.cachedIdentityBundle;
+    final msg = {
+      "recipient_pubkey": recipientPublicKey,
+      "type": "chat",
+      "payload": payload,
+      if (messageId != null) "message_id": messageId,
+      if (bundle != null) "senc": bundle['enc'],
+      if (bundle != null) "ssig": bundle['sig'],
+    };
 
     // Если нет соединения - сохраняем в очередь
     if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
@@ -261,6 +466,7 @@ class WebSocketService {
       PendingActionsService.addPendingMessage(
         recipientKey: recipientPublicKey,
         encryptedPayload: payload,
+        messageId: messageId,
       );
       return;
     }
@@ -268,11 +474,16 @@ class WebSocketService {
     _sendMessage(msg);
   }
 
-  void sendDeleteForBoth(String recipientPublicKey, List<int> timestampsMs) {
+  void sendDeleteForBoth(
+    String recipientPublicKey, {
+    required List<int> timestampsMs,
+    List<String> messageIds = const [],
+  }) {
     final msg = {
       "recipient_pubkey": recipientPublicKey,
       "type": "delete-for-both",
       "timestamps_ms": timestampsMs,
+      if (messageIds.isNotEmpty) "message_ids": messageIds,
     };
     _sendMessage(msg);
   }
@@ -280,35 +491,47 @@ class WebSocketService {
   /// Отправить все pending сообщения после восстановления соединения.
   /// Удаляет из очереди ТОЛЬКО те, что реально ушли в канал.
   Future<void> _sendPendingMessages() async {
-    final pending = await PendingActionsService.getPendingMessages();
-    if (pending.isEmpty) return;
+    // Не допускаем два параллельных слива очереди (иначе removeFirstMessages/
+    // clearPendingMessages двух проходов передерутся → дубли/потери).
+    if (_sendingPending) return;
+    _sendingPending = true;
+    try {
+      final pending = await PendingActionsService.getPendingMessages();
+      if (pending.isEmpty) return;
 
-    DebugLogger.info('WS', '📤 Отправка ${pending.length} pending сообщений...');
+      DebugLogger.info('WS', '📤 Отправка ${pending.length} pending сообщений...');
 
-    var sentCount = 0;
-    for (final msg in pending) {
-      if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
-        DebugLogger.warn('WS', 'Соединение потеряно при отправке pending сообщений, отправлено $sentCount из ${pending.length}');
-        break;
+      var sentCount = 0;
+      for (final msg in pending) {
+        if (_channel == null || _statusController.value != ConnectionStatus.Connected) {
+          DebugLogger.warn('WS', 'Соединение потеряно при отправке pending сообщений, отправлено $sentCount из ${pending.length}');
+          break;
+        }
+
+        final bundle = CryptoService.instance.cachedIdentityBundle;
+        _sendMessage({
+          "recipient_pubkey": msg.recipientKey,
+          "type": "chat",
+          "payload": msg.encryptedPayload,
+          if (msg.messageId != null) "message_id": msg.messageId,
+          if (bundle != null) "senc": bundle['enc'],
+          if (bundle != null) "ssig": bundle['sig'],
+        });
+        sentCount++;
+
+        // Небольшая задержка между сообщениями
+        await Future.delayed(const Duration(milliseconds: 50));
       }
 
-      _sendMessage({
-        "recipient_pubkey": msg.recipientKey,
-        "type": "chat",
-        "payload": msg.encryptedPayload,
-      });
-      sentCount++;
-
-      // Небольшая задержка между сообщениями
-      await Future.delayed(const Duration(milliseconds: 50));
-    }
-
-    if (sentCount == pending.length) {
-      await PendingActionsService.clearPendingMessages();
-      DebugLogger.success('WS', 'Все $sentCount pending сообщений отправлены');
-    } else if (sentCount > 0) {
-      await PendingActionsService.removeFirstMessages(sentCount);
-      DebugLogger.warn('WS', 'Отправлено $sentCount из ${pending.length}, остальные остались в очереди');
+      if (sentCount == pending.length) {
+        await PendingActionsService.clearPendingMessages();
+        DebugLogger.success('WS', 'Все $sentCount pending сообщений отправлены');
+      } else if (sentCount > 0) {
+        await PendingActionsService.removeFirstMessages(sentCount);
+        DebugLogger.warn('WS', 'Отправлено $sentCount из ${pending.length}, остальные остались в очереди');
+      }
+    } finally {
+      _sendingPending = false;
     }
   }
 
@@ -380,12 +603,14 @@ class WebSocketService {
       'signal_type': signalType,
     };
     DebugLogger.info('HTTP', 'Отправка $signalType через HTTP fallback на все хосты...', context: signalContext);
-    
+
     final body = json.encode({
       'sender_pubkey': _currentPublicKey,
       'recipient_pubkey': recipientPublicKey,
       'signal_type': signalType,
       'data': data,
+      // PoP-подтверждение отправителя; пустой токен сервер (фаза 1) пропускает с warning.
+      'signal_token': await _loadSignalToken(),
     });
 
     // Отправляем на ВСЕ хосты параллельно

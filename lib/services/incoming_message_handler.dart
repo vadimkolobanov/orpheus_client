@@ -6,21 +6,32 @@ import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/services/incoming_call_buffer.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/call_id_storage.dart';
+import 'package:orpheus_project/services/device_settings_service.dart';
+import 'package:orpheus_project/services/notification_service.dart';
 
 abstract interface class IncomingMessageCrypto {
-  Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload);
+  /// Расшифровка: [senderEncKeyBase64] — X25519 enc-ключ отправителя (НЕ адрес!).
+  Future<String> decrypt(String senderEncKeyBase64, String encryptedPayload);
+
+  /// Проверка самоподписи связки адрес<->enc отправителя (Ed25519).
+  Future<bool> verifyIdentityBundle(String address, String enc, String sig);
 }
 
 abstract interface class IncomingMessageDatabase {
   Future<void> addMessage(ChatMessage message, String contactPublicKey);
+  Future<void> addContactIfMissing(String publicKey, {String? encryptionKey});
+  Future<bool> isContact(String publicKey);
+  Future<String?> getContactEncryptionKey(String publicKey);
   Future<String?> getContactName(String publicKey);
   Future<int> deleteMessagesByTimestamps(String contactKey, List<int> timestamps);
+  Future<int> deleteMessagesByMessageIds(String contactKey, List<String> messageIds);
+  Future<bool> messageExistsByMessageId(String contactKey, String messageId);
 }
 
 abstract interface class IncomingMessageNotifications {
   Future<void> showCallNotification({required String callerName, String? payload});
   Future<void> hideCallNotification();
-  Future<void> showMessageNotification({required String senderName});
+  Future<void> showMessageNotification();
 }
 
 typedef OpenCallScreen = void Function({
@@ -84,6 +95,11 @@ class IncomingMessageHandler {
     'presence-update',
   };
 
+  // Teardown-сигналы завершения звонка — НЕ гейтим строгим mutual-add (см. handleDecoded):
+  // без payload, звонок не поднимают, только завершают; гарантируют, что активный
+  // звонок всегда можно закрыть быстро (иначе — zombie-call до ICE-таймаута).
+  static const _callTeardownTypes = <String>{'hang-up', 'call-rejected'};
+
   Future<void> handleRawMessage(String messageJson) async {
     final dynamic decoded = json.decode(messageJson);
     if (decoded is! Map<String, dynamic>) return;
@@ -96,13 +112,23 @@ class IncomingMessageHandler {
 
     if (type == 'support-reply') {
       if (!_isAppInForeground()) {
-        await _notif.showMessageNotification(senderName: _supportSenderLabel);
+        await _notif.showMessageNotification();
       }
       return;
     }
 
     // Пропускаем служебные сообщения и любые пакеты без sender_pubkey.
     if (type == null || senderKey == null || _ignoredTypes.contains(type)) return;
+
+    // Строгий mutual-add: сообщения/звонки принимаем ТОЛЬКО от добавленных контактов.
+    // Не-контакты дропаем целиком (без расшифровки, без показа, без авто-добавления).
+    // Исключение — teardown-сигналы завершения звонка (_callTeardownTypes): их пропускаем,
+    // чтобы активный звонок всегда можно было закрыть (реальное закрытие всё равно
+    // фильтруется по пиру в CallScreen). Комнаты/Оракул сюда не приходят (свои пути).
+    if (!_callTeardownTypes.contains(type) && !await _db.isContact(senderKey)) {
+      DebugLogger.info('SECURITY', 'Дроп $type от не-контакта (строгий mutual-add)');
+      return;
+    }
 
     // === ЗВОНКИ ===
     if (type == 'call-offer') {
@@ -163,17 +189,11 @@ class IncomingMessageHandler {
       } else {
         DebugLogger.info('CALL', '📞 Background: показываю CallKit UI',
             context: {'call_id': callId, 'peer_pubkey': senderKey});
-        // Доп. фолбек: локальное уведомление, если CallKit не покажется
-        await _notif.showCallNotification(
-          callerName: displayName,
-          payload: json.encode({
-            'type': 'incoming_call',
-            'caller_key': senderKey,
-            'caller_name': displayName,
-            'offer_data': json.encode(data),
-            'call_id': callId,
-          }),
-        );
+        // Показываем ТОЛЬКО нативный CallKit-входящий. Раньше здесь ДОПОЛНИТЕЛЬНО
+        // показывалось fullScreenIntent-уведомление как "фолбек" — но на локскрине
+        // оно само запускало активити и открывало ВТОРОЙ экран звонка (задвоение),
+        // да ещё и с реальным именем в обход приват-гейта. CallKit показывает
+        // входящий надёжно (в т.ч. поверх локскрина) и применяет приват-подпись.
         await _showCallKitIncoming(
           callerName: displayName,
           callerKey: senderKey,
@@ -255,11 +275,26 @@ class IncomingMessageHandler {
         DebugLogger.warn('CALL', 'Error hiding CallKit: $e',
             context: {'call_id': callId, 'peer_pubkey': senderKey});
       }
+      // Освобождаем активный call_id: звонок завершён собеседником ДО ответа
+      // (CallScreen мог не открыться, dispose не сработает) — иначе следующий
+      // звонок отклонится как "занято" до истечения TTL 15с.
+      await CallIdStorage.clear();
       return;
     }
 
     // === DELETE FOR BOTH ===
     if (type == 'delete-for-both') {
+      // Предпочитаем стабильные messageId; timestamps_ms — fallback для старых клиентов
+      // (по времени приёма матч не срабатывал у получателя — аудит LOGIC-2).
+      final ids = messageData['message_ids'];
+      if (ids is List && ids.isNotEmpty) {
+        final idList = ids.map((e) => '$e').where((s) => s.isNotEmpty).toList();
+        if (idList.isNotEmpty) {
+          await _db.deleteMessagesByMessageIds(senderKey, idList);
+          _emitChatUpdate(senderKey);
+          return;
+        }
+      }
       final timestamps = messageData['timestamps_ms'];
       if (timestamps is List && timestamps.isNotEmpty) {
         final tsInts = timestamps.map((e) => e is int ? e : int.tryParse('$e') ?? 0).where((t) => t > 0).toList();
@@ -276,34 +311,64 @@ class IncomingMessageHandler {
       final payload = messageData['payload'] as String?;
       if (payload == null) return;
 
-      // Dedup: skip if same sender sent a message within the dedup window.
-      // Protects against WS + offline_messages double delivery on reconnect.
-      final now = _nowMs();
-      final lastTs = _lastChatTimestampBySender[senderKey];
-      if (lastTs != null && (now - lastTs) < _chatDedupeWindowMs) {
+      final messageId = messageData['message_id'] as String?;
+
+      if (messageId != null && messageId.isNotEmpty) {
+        // Точный дедуп по стабильному id: пропускаем только НАСТОЯЩИЙ дубль
+        // (двойная доставка WS + offline), а не любое сообщение в 5-сек окне,
+        // из-за чего терялись быстрые подряд сообщения (аудит LOGIC-1).
+        if (await _db.messageExistsByMessageId(senderKey, messageId)) {
+          return;
+        }
+      } else {
+        // Старый клиент без message_id — fallback на прежнее окно дедупа
+        // от двойной доставки WS + offline_messages на реконнекте.
+        final now = _nowMs();
+        final lastTs = _lastChatTimestampBySender[senderKey];
+        if (lastTs != null && (now - lastTs) < _chatDedupeWindowMs) {
+          return;
+        }
+        _lastChatTimestampBySender[senderKey] = now;
+      }
+
+      // senderKey — это Ed25519-АДРЕС; для ECDH нужен X25519 enc-ключ отправителя.
+      // Берём inline-bundle из сообщения (senc/ssig, verified) или сохранённый у контакта.
+      final senc = messageData['senc'] as String?;
+      final ssig = messageData['ssig'] as String?;
+      String? encKey;
+      if (senc != null && senc.isNotEmpty && ssig != null && ssig.isNotEmpty) {
+        if (await _crypto.verifyIdentityBundle(senderKey, senc, ssig)) {
+          encKey = senc;
+        } else {
+          DebugLogger.warn('CHAT', 'inline-bundle отправителя не прошёл проверку подписи');
+        }
+      }
+      encKey ??= await _db.getContactEncryptionKey(senderKey);
+      if (encKey == null || encKey.isEmpty) {
+        DebugLogger.warn('CHAT', 'Нет enc-ключа отправителя — сообщение не расшифровать');
         return;
       }
-      _lastChatTimestampBySender[senderKey] = now;
 
-      final decryptedMessage = await _crypto.decrypt(senderKey, payload);
+      final decryptedMessage = await _crypto.decrypt(encKey, payload);
 
       final receivedMessage = ChatMessage(
+        messageId: messageId,
         text: decryptedMessage,
         isSentByMe: false,
         status: MessageStatus.delivered,
         isRead: false,
       );
 
+      // Авто-добавляем неизвестного отправителя в контакты (и запоминаем его enc-ключ),
+      // иначе сообщение сохранится, но не появится в списке чатов (аудит DB-6).
+      await _db.addContactIfMissing(senderKey, encryptionKey: encKey);
       await _db.addMessage(receivedMessage, senderKey);
       _emitChatUpdate(senderKey);
 
       final isCallStatusMessage = _isCallStatusMessage(decryptedMessage);
       if (!_isAppInForeground() && !isCallStatusMessage) {
-        final contactName = (await _db.getContactName(senderKey))?.trim();
-        final displayName = (contactName != null && contactName.isNotEmpty)
-            ? contactName
-            : senderKey.substring(0, 8);
-        await _notif.showMessageNotification(senderName: displayName);
+        // Обезличенное уведомление — без отправителя (приватность на локскрине).
+        await _notif.showMessageNotification();
       }
     }
   }
@@ -340,23 +405,22 @@ class IncomingMessageHandler {
     // ВАЖНО: FCM и WebSocket могут генерировать РАЗНЫЕ callId для одного звонка!
     // Поэтому проверяем по callerKey, а не по callId.
     try {
+      // activeCalls() теперь возвращает List<CallKitParams> (callkit 3.x).
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
-      if (activeCalls is List && activeCalls.isNotEmpty) {
+      if (activeCalls.isNotEmpty) {
         for (final call in activeCalls) {
-          if (call is Map) {
-            // Проверяем по callId
-            if (call['id'] == callId) {
-              DebugLogger.info('CALL', '📞 CallKit с id=$callId уже показан, пропускаю дубликат',
-                  context: {'call_id': callId, 'peer_pubkey': callerKey});
-              return;
-            }
-            // Проверяем по callerKey в extra — если тот же caller, значит дубль!
-            final extra = call['extra'];
-            if (extra is Map && extra['callerKey'] == callerKey) {
-              DebugLogger.info('CALL', '📞 CallKit для $callerKey уже показан (FCM?), пропускаю WS дубликат',
-                  context: {'call_id': callId, 'peer_pubkey': callerKey});
-              return;
-            }
+          // Проверяем по callId
+          if (call.id == callId) {
+            DebugLogger.info('CALL', '📞 CallKit с id=$callId уже показан, пропускаю дубликат',
+                context: {'call_id': callId, 'peer_pubkey': callerKey});
+            return;
+          }
+          // Проверяем по callerKey в extra — если тот же caller, значит дубль!
+          final extra = call.extra;
+          if (extra != null && extra['callerKey'] == callerKey) {
+            DebugLogger.info('CALL', '📞 CallKit для $callerKey уже показан, пропускаю WS дубликат',
+                context: {'call_id': callId, 'peer_pubkey': callerKey});
+            return;
           }
         }
         // Есть активный звонок от ДРУГОГО caller — закрываем и показываем новый
@@ -369,21 +433,34 @@ class IncomingMessageHandler {
           context: {'call_id': callId, 'peer_pubkey': callerKey});
     }
     
+    // Приватность на локскрине: заблокировано + флаг выключен -> нейтральная
+    // подпись без имени/ключа (имя появится на экране звонка после разблокировки).
+    String displayName = callerName;
+    bool hideCallerIdentity = false;
+    try {
+      if (await DeviceSettingsService.hideCallerIdentityOnIncoming()) {
+        hideCallerIdentity = true;
+        displayName = await NotificationService.incomingEncryptedCallLabel();
+      }
+    } catch (_) {}
+
     final params = CallKitParams(
       id: callId,
-      nameCaller: callerName,
+      nameCaller: displayName,
       appName: 'Orpheus',
-      handle: callerKey.substring(0, 8), // Короткий ID для отображения
+      handle: hideCallerIdentity ? '' : callerKey.substring(0, 8),
       type: 0, // Audio call
       duration: 45000, // 45 секунд рингтон (больше времени на ответ)
-      textAccept: 'Answer',
-      textDecline: 'Decline',
       missedCallNotification: const NotificationParams(
         showNotification: true,
         isShowCallback: false,
         subtitle: 'Missed call',
         callbackText: 'Call back',
       ),
+      // No plugin ongoing-call notification: the app runs its own in-call FGS
+      // (CallAudioService); the plugin's START_STICKY service leaks when
+      // endAllCalls finds the active-call list already empty.
+      callingNotification: const NotificationParams(showNotification: false),
       extra: <String, dynamic>{
         'callerKey': callerKey,
         'offerData': json.encode(offerData),
@@ -396,6 +473,13 @@ class IncomingMessageHandler {
         backgroundColor: '#0D0D0D',
         actionColor: '#6AD394',
         textColor: '#FFFFFF',
+        // callkit 3.x: textAccept/textDecline теперь в AndroidParams.
+        textAccept: 'Answer',
+        textDecline: 'Decline',
+        // ПРИМЕЧАНИЕ: пробовали false (heads-up вместо полноэкранного ринга, чтобы
+        // обойти плагинный requestDismissKeyguard) — не помогло, PIN оставался на
+        // обоих устройствах, а UX входящего стал хуже. Вернули true. Ответ на
+        // заблокированном телефоне остаётся нерешённым на уровне плагина/keyguard.
         isShowFullLockedScreen: true,
         // КРИТИЧНО для пробуждения устройства:
         isImportant: true,

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
@@ -19,11 +18,15 @@ import 'package:orpheus_project/screens/lock_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/config.dart';
 import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:orpheus_project/services/device_settings_service.dart';
 import 'package:orpheus_project/services/incoming_call_buffer.dart';
 import 'package:orpheus_project/services/incoming_message_handler.dart';
 import 'package:orpheus_project/services/locale_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:orpheus_project/services/pending_call_storage.dart';
+import 'package:orpheus_project/services/pending_inbox_storage.dart';
 import 'package:orpheus_project/services/network_monitor_service.dart';
 import 'package:orpheus_project/services/notification_service.dart';
 import 'package:orpheus_project/services/panic_wipe_service.dart';
@@ -33,18 +36,27 @@ import 'package:orpheus_project/services/presence_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/services/telemetry_service.dart';
 import 'package:orpheus_project/services/call_id_storage.dart';
+import 'package:orpheus_project/services/push_connection_service.dart';
+import 'package:orpheus_project/services/secure_storage_options.dart';
 import 'package:orpheus_project/theme/app_theme.dart';
 import 'package:orpheus_project/welcome_screen.dart';
 import 'package:orpheus_project/screens/home_screen.dart';
 
+part 'main_callkit.dart';
+
 // Глобальные сервисы
-final cryptoService = CryptoService();
+final cryptoService = CryptoService.instance;
 final websocketService = WebSocketService();
 final presenceService = PresenceService(websocketService);
 final notificationService = NotificationService();
 final authService = AuthService.instance;
 final panicWipeService = PanicWipeService.instance;
 final messageCleanupService = MessageCleanupService.instance;
+
+// Обработчик входящих (создаётся в _listenForMessages). Вынесен в глобал, чтобы
+// _drainPendingInbox мог прогнать через ту же логику конверты, сохранённые
+// push-изолятом при убитом приложении.
+IncomingMessageHandler? incomingMessageHandler;
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -57,6 +69,9 @@ final IncomingCallBuffer incomingCallBuffer = IncomingCallBuffer.instance;
 
 bool _hasKeys = false;
 
+/// Таймер heartbeat для координации с сервисным isolate (PushConnectionService).
+Timer? _pushHeartbeatTimer;
+
 /// Глобальный флаг: приложение в foreground (активно)?
 bool isAppInForeground = true;
 
@@ -67,17 +82,60 @@ PendingCallData? _pendingCall;
 /// Флаг: ожидается открытие CallScreen из CallKit (блокирует дубли из WebSocket)
 bool _isProcessingCallKitAnswer = false;
 
+/// Синхронный CLAIM навигации на экран звонка по call_id. Один и тот же звонок,
+/// доставленный дважды (call-offer уходит и по WS, И по HTTP-fallback) или сразу
+/// двумя путями (fullScreenIntent-уведомление + CallKit accept), должен открыть
+/// ОДИН экран. Опираться на isCallActive нельзя: он ставится поздно, в
+/// CallScreen.initState — кадром ПОЗЖЕ push, поэтому два вызова в одном кадре оба
+/// видят false и оба пушат. Этот claim ставится СИНХРОННО на входе навигации, до
+/// postFrame; Dart однопоточный и между проверкой и присвоением нет await, значит
+/// конкурентные вызовы сериализуются: первый захватывает call_id, остальные
+/// отклоняются. TTL самозаживляется (законный повторный звонок получает новый
+/// call_id и не блокируется).
+String? _navClaimedCallId;
+int _navClaimedAtMs = 0;
+const int _navClaimTtlMs = 15000;
+
+bool _claimCallNavigation(String? callId) {
+  if (callId == null || callId.isEmpty) return true;
+  final now = DateTime.now().millisecondsSinceEpoch;
+  if (_navClaimedCallId == callId && (now - _navClaimedAtMs) < _navClaimTtlMs) {
+    return false;
+  }
+  _navClaimedCallId = callId;
+  _navClaimedAtMs = now;
+  return true;
+}
+
+/// Освобождает claim (если Navigator оказался null в postFrame и звонок ушёл в
+/// pending — чтобы повторная обработка смогла заново захватить и открыть экран).
+void _resetCallNavigationClaim() => _navClaimedCallId = null;
+
 /// Sentry DSN для мониторинга ошибок
 const String _sentryDsn = 'https://7d6801508e29bc2e4f5b93b986147cdc@o4509485705265152.ingest.de.sentry.io/4510682122879056';
 
 Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Sentry — сторонний краш-репортер (ingest.de.sentry.io). Для privacy-мессенджера
+  // отправка данных наружу должна быть строго opt-in: инициализируем Sentry только
+  // если пользователь явно включил телеметрию (тот же флаг, что у TelemetryService).
+  // По умолчанию (флаг выключен) наружу ничего не уходит.
+  final telemetryEnabled = await _isTelemetryEnabled();
+
+  if (!telemetryEnabled) {
+    await _initializeApp();
+    _runOrpheus();
+    return;
+  }
+
   // Sentry инициализация с перехватом всех ошибок
   await SentryFlutter.init(
     (options) {
       options.dsn = _sentryDsn;
       // Версия приложения для отслеживания регрессий
-      options.release = 'orpheus@1.1.6+12';
-      options.environment = 'production';
+      options.release = 'orpheus@${AppConfig.appVersion}';
+      options.environment = kReleaseMode ? 'production' : 'development';
       // Отслеживание производительности (10% транзакций)
       options.tracesSampleRate = 0.1;
       // Отключаем отправку PII (персональных данных)
@@ -85,7 +143,7 @@ Future<void> main() async {
       // Фильтруем breadcrumbs от чувствительных данных
       options.beforeBreadcrumb = (Breadcrumb? breadcrumb, Hint _hint) {
         // Не логируем содержимое сообщений
-        if (breadcrumb?.category == 'message' || 
+        if (breadcrumb?.category == 'message' ||
             breadcrumb?.message?.contains('encrypted') == true) {
           return null;
         }
@@ -94,9 +152,42 @@ Future<void> main() async {
     },
     appRunner: () async {
       await _initializeApp();
-      runApp(const MyApp());
+      _runOrpheus();
     },
   );
+}
+
+/// Запускает приложение в Zone, перехватывающей `print` (Dart) в DebugLogger —
+/// иначе логи сервисов на `print` (WS/WebRTC) не попадали в файл/буфер (перехвачен
+/// был только debugPrint). Ошибки Zone тоже логируются. Только для тест-сборок
+/// (за флагом AppConfig.debugFileLogging).
+void _runOrpheus() {
+  if (!AppConfig.debugFileLogging) {
+    runApp(const MyApp());
+    return;
+  }
+  runZonedGuarded(
+    () => runApp(const MyApp()),
+    (error, stack) =>
+        DebugLogger.error('ZONE', '$error', context: {'stack': '$stack'}),
+    zoneSpecification: ZoneSpecification(
+      print: (self, parent, zone, line) {
+        DebugLogger.info('PRINT', line);
+        parent.print(zone, line);
+      },
+    ),
+  );
+}
+
+/// Читает opt-in флаг телеметрии (по умолчанию выключено). Один и тот же флаг
+/// управляет и Sentry, и фоновой телеметрией (см. [TelemetryService]).
+Future<bool> _isTelemetryEnabled() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('telemetry_enabled') ?? false;
+  } catch (_) {
+    return false;
+  }
 }
 
 /// Основная инициализация приложения
@@ -115,6 +206,13 @@ Future<void> _initializeApp() async {
     FlutterError.presentError(details);
   };
   
+  // Персистентное файловое логирование (тест-сборки): все логи пишутся в файл,
+  // переживают рестарт приложения и выгружаются кнопкой «Поделиться» в экране
+  // отладки — не нужно подключать телефон к ПК.
+  if (AppConfig.debugFileLogging) {
+    await DebugLogger.enableFileLogging();
+  }
+
   DebugLogger.info('APP', '🚀 Orpheus запускается...');
 
   // Инициализация сервиса локализации
@@ -131,25 +229,29 @@ Future<void> _initializeApp() async {
   Intl.defaultLocale = LocaleService.instance.effectiveLocale.languageCode;
 
   try {
-    // 1. Firebase
-    DebugLogger.info('APP', 'Инициализация Firebase...');
-    await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    DebugLogger.success('APP', 'Firebase инициализирован');
-    
-    // 2. Уведомления (простая инициализация)
+    // Уведомления (локальные, без Google/FCM)
     DebugLogger.info('APP', 'Инициализация уведомлений...');
     await notificationService.init();
     DebugLogger.success('APP', 'Уведомления инициализированы');
-
-    // 3. BackgroundCallService — НЕ инициализируем на старте.
-    // Он будет lazy-инициализирован при первом звонке (см. BackgroundCallService.startCallService()).
   } catch (e, stackTrace) {
     print("INIT ERROR: $e");
     DebugLogger.error('APP', 'INIT ERROR: $e');
-    // Отправляем ошибку инициализации в Sentry
+    // Отправляем ошибку инициализации в Sentry (no-op, если Sentry выключен)
     await Sentry.captureException(e, stackTrace: stackTrace);
   }
+
+  // 3.5. Одноразовый чистый сброс secure storage при переходе на
+  // flutter_secure_storage v10 (новые шифры). ДО первого чтения ключей.
+  await ensureSecureStorageMigrated();
+
+  // 3.6. Активный API-хост (prod/test) из prefs — ДО любого сетевого сервиса,
+  // чтобы первый WebSocket/HTTP шёл уже на выбранный сервер (тест-сборки).
+  await AppConfig.loadActiveHost();
+
+  // 3.7. Скриншоты: в тест-сборках снимаем FLAG_SECURE (тестировщику нужны скрины),
+  // в релизе окно защищено (нативный дефолт FLAG_SECURE не трогаем). Один флаг —
+  // тот же, что и для файловых логов, отдельного тумблера крутить не нужно.
+  DeviceSettingsService.setScreenSecure(!AppConfig.debugFileLogging);
 
   // 4. Криптография
   DebugLogger.info('APP', 'Инициализация криптографии...');
@@ -182,7 +284,11 @@ Future<void> _initializeApp() async {
 
   // 9. Слушаем сообщения
   _listenForMessages();
-  
+
+  // 9a. Сливаем сообщения, доставленные push-изолятом при убитом приложении
+  // (сервер не кладёт их в оффлайн-очередь, т.к. считал нас «онлайн» по push-сокету).
+  _drainPendingInbox();
+
   // 10. Инициализация CallKit для нативного UI звонков
   DebugLogger.info('APP', 'Инициализация CallKit...');
   _initCallKit();
@@ -202,565 +308,69 @@ Future<void> _initializeApp() async {
       offerData = offerJson;
     }
     final callId = data['call_id'] ?? data['callId'] ?? data['id'];
+    // ВАЖНО: тап/полноэкранный показ уведомления входящего != согласие ответить.
+    // Открываем ЗВОНЯЩИЙ экран (рингтон + кнопка "Ответить") и ждём пользователя.
+    // На локскрине fullScreenIntent сам запускает активити и дёргает этот колбэк
+    // без реального нажатия — с autoAnswer:true это авто-поднимало трубку на
+    // заблокированном телефоне (могли слушать). Реальный "Ответить" идёт отдельным
+    // путём CallKit accept (main_callkit), там autoAnswer корректен.
     _navigateToCallScreen(
       callerKey.toString(),
       offerData,
-      autoAnswer: true,
+      autoAnswer: false,
       callId: callId?.toString(),
     );
   };
 
+  // Постоянный foreground-сервис доставки пушей (замена FCM). Поднимаем только
+  // если у пользователя есть ключи (иначе показывать постоянное уведомление до
+  // создания аккаунта незачем).
+  _startPushConnectionAndHeartbeat();
+
   DebugLogger.success('APP', '✅ Приложение запущено');
 }
 
-/// Инициализация CallKit для обработки нативного UI входящих звонков
-void _initCallKit() {
-  // Слушаем события от CallKit (принять/отклонить звонок)
-  FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
-    if (event == null) return;
-    
-    DebugLogger.info('CALLKIT', 'Event: ${event.event}, body keys: ${event.body?.keys.toList()}');
-    
-    switch (event.event) {
-      case Event.actionCallAccept:
-        // Пользователь принял звонок через нативный UI
-        await _handleCallKitAccept(event.body);
-        break;
-        
-      case Event.actionCallDecline:
-        // Пользователь отклонил звонок через нативный UI
-        await _handleCallKitDecline(event.body);
-        break;
-        
-      case Event.actionCallEnded:
-        // Звонок завершён
-        DebugLogger.info('CALLKIT', 'Звонок завершён');
-        break;
-        
-      case Event.actionCallTimeout:
-        // Таймаут - никто не ответил
-        DebugLogger.info('CALLKIT', 'Таймаут звонка');
-        await _handleCallKitDecline(event.body);
-        break;
-        
-      default:
-        break;
-    }
-  });
-  
-  // Проверяем, есть ли активный звонок при запуске приложения
-  // (если приложение было запущено из нативного UI)
-  _checkActiveCallOnStart();
-}
+/// Heartbeat main-изолята + публикация pubkey для сервисного isolate, плюс старт
+/// постоянного сервиса. Пока main-изолят жив и пишет heartbeat, сервис молчит;
+/// когда приложение убито и heartbeat протухает — сервис берёт доставку на себя.
+void _startPushConnectionAndHeartbeat() {
+  final pubkey = cryptoService.addressBase64;
+  if (!_hasKeys || pubkey == null || pubkey.isEmpty) return;
 
-/// Рекурсивно конвертирует Map<Object?, Object?> → Map<String, dynamic>
-Map<String, dynamic> _convertToStringDynamicMap(dynamic input) {
-  if (input is Map<String, dynamic>) return input;
-  if (input is Map) {
-    return input.map((key, value) {
-      final stringKey = key?.toString() ?? '';
-      if (value is Map) {
-        return MapEntry(stringKey, _convertToStringDynamicMap(value));
-      }
-      return MapEntry(stringKey, value);
-    });
-  }
-  return {};
-}
-
-/// Извлекает extra из CallKit body (обрабатывает разные типы)
-Map<String, dynamic>? _extractExtraFromBody(Map<String, dynamic>? body) {
-  if (body == null) return null;
-  
-  final rawExtra = body['extra'];
-  DebugLogger.info('CALLKIT', 'rawExtra type: ${rawExtra?.runtimeType}');
-  
-  if (rawExtra == null) return null;
-  
-  // Случай 1: уже Map<String, dynamic>
-  if (rawExtra is Map<String, dynamic>) {
-    DebugLogger.info('CALLKIT', 'extra is Map<String, dynamic>');
-    return rawExtra;
-  }
-  
-  // Случай 2: Map<Object?, Object?> или LinkedHashMap
-  if (rawExtra is Map) {
-    DebugLogger.info('CALLKIT', 'extra is Map (converting...)');
-    return _convertToStringDynamicMap(rawExtra);
-  }
-  
-  // Случай 3: JSON строка
-  if (rawExtra is String) {
-    DebugLogger.info('CALLKIT', 'extra is String (parsing JSON...)');
+  Future<void> beat() async {
     try {
-      final decoded = json.decode(rawExtra);
-      if (decoded is Map) {
-        return _convertToStringDynamicMap(decoded);
-      }
-    } catch (e) {
-      DebugLogger.error('CALLKIT', 'Ошибка парсинга extra JSON: $e');
-    }
-  }
-  
-  return null;
-}
-
-/// Проверка активного звонка при запуске приложения
-Future<void> _checkActiveCallOnStart() async {
-  // Ждём пока Navigator будет готов (первый кадр отрисован)
-  await Future.delayed(const Duration(milliseconds: 300));
-  
-  // КРИТИЧНО: Сначала проверяем PERSISTENT storage!
-  // Когда приложение перезапускается при accept звонка из background,
-  // RAM данные (_pendingCall) теряются, но storage сохраняется.
-  final storedPending = await PendingCallStorage.instance.loadAndClear();
-  if (storedPending != null && storedPending.isValid) {
-    DebugLogger.info('CALLKIT', '📞 Найден pending call в STORAGE, открываю CallScreen');
-    _isProcessingCallKitAnswer = true;
-    _navigateToCallScreen(
-      storedPending.callerKey,
-      storedPending.offerData,
-      autoAnswer: storedPending.autoAnswer,
-      callId: storedPending.callId,
-    );
-    return;
-  }
-  
-  // Fallback: проверяем pending call в RAM (для случаев без перезапуска)
-  if (_pendingCall != null && _pendingCall!.isValid) {
-    DebugLogger.info('CALLKIT', '📞 Найден pending call в RAM, открываю CallScreen');
-    final pending = _pendingCall!;
-    _pendingCall = null;
-    _navigateToCallScreen(
-      pending.callerKey,
-      pending.offerData,
-      autoAnswer: pending.autoAnswer,
-      callId: pending.callId,
-    );
-    return;
-  }
-  
-  try {
-    final calls = await FlutterCallkitIncoming.activeCalls();
-    DebugLogger.info('CALLKIT', 'Проверка активных звонков: ${calls.length}');
-    
-    if (calls.isNotEmpty) {
-      DebugLogger.info('CALLKIT', 'Найден активный звонок при запуске');
-      
-      // КРИТИЧНО: блокируем дубли из WebSocket
-      _isProcessingCallKitAnswer = true;
-      
-      // Конвертируем первый звонок в Map<String, dynamic>
-      final rawCall = calls.first;
-      Map<String, dynamic> call;
-      if (rawCall is Map<String, dynamic>) {
-        call = rawCall;
-      } else if (rawCall is Map) {
-        call = _convertToStringDynamicMap(rawCall);
-      } else {
-        DebugLogger.error('CALLKIT', 'Неизвестный тип call: ${rawCall.runtimeType}');
-        _isProcessingCallKitAnswer = false;
-        return;
-      }
-      
-      DebugLogger.info('CALLKIT', 'Active call keys: ${call.keys.toList()}');
-      
-      // Парсим extra
-      final extra = _extractExtraFromBody(call);
-      String? callerKey = extra?['callerKey'] as String?;
-      
-      // Fallback на буфер
-      if (callerKey == null) {
-        callerKey = incomingCallBuffer.lastCallerKey;
-        DebugLogger.info('CALLKIT', 'callerKey from buffer: $callerKey');
-      }
-      
-      if (callerKey != null) {
-        DebugLogger.info('CALLKIT', 'Открываю CallScreen для активного звонка: $callerKey');
-        final callId = call['id'] as String?;
-        
-        // Формируем extra
-        Map<String, dynamic> callExtra = extra ?? {};
-        if (callExtra['offerData'] == null) {
-          final bufferOffer = incomingCallBuffer.lastOfferData;
-          if (bufferOffer != null) {
-            callExtra['offerData'] = json.encode(bufferOffer);
-          }
-        }
-        callExtra['callerKey'] = callerKey;
-        
-        _openCallScreenFromCallKit(callerKey, callExtra, callId: callId);
-      } else {
-        DebugLogger.warn('CALLKIT', 'callerKey is null, не могу открыть CallScreen');
-        _isProcessingCallKitAnswer = false;
-      }
-    }
-  } catch (e) {
-    DebugLogger.error('CALLKIT', 'Ошибка проверки активного звонка: $e');
-    _isProcessingCallKitAnswer = false;
-  }
-}
-
-/// Обработка принятия звонка через CallKit
-Future<void> _handleCallKitAccept(Map<String, dynamic>? body) async {
-  DebugLogger.info('CALLKIT', '📥 ACCEPT body: $body');
-  
-  // КРИТИЧНО: блокируем открытие CallScreen из WebSocket пока обрабатываем CallKit
-  _isProcessingCallKitAnswer = true;
-  
-  final callId = body?['id'] as String?;
-  
-  // Используем надёжный парсинг extra
-  final extra = _extractExtraFromBody(body);
-  DebugLogger.info('CALLKIT', '📥 extra parsed: ${extra?.keys.toList()}');
-  
-  String? callerKey = extra?['callerKey'] as String?;
-  DebugLogger.info('CALLKIT', '📥 callerKey from extra: $callerKey');
-  
-  // ВАЖНО: НЕ вызываем endAllCalls() здесь!
-  // При перезапуске приложения из killed state, _checkActiveCallOnStart() 
-  // должен найти активный звонок. CallScreen сам вызовет endAllCalls() при инициализации.
-  
-  // Если callerKey из extra null, пробуем буфер
-  if (callerKey == null) {
-    DebugLogger.warn('CALLKIT', '⚠️ callerKey null, проверяю буфер...');
-    callerKey = incomingCallBuffer.lastCallerKey;
-    DebugLogger.info('CALLKIT', '📥 callerKey from buffer: $callerKey');
-  }
-  
-  DebugLogger.info(
-    'CALLKIT',
-    '✅ Звонок принят: callId=$callId, callerKey=$callerKey',
-    context: {'call_id': callId, 'peer_pubkey': callerKey},
-  );
-  
-  // Открываем CallScreen
-  if (callerKey != null) {
-    // Формируем extra для CallScreen
-    Map<String, dynamic> callExtra = extra ?? {};
-    
-    // Если offerData не в extra, берём из буфера
-    if (callExtra['offerData'] == null) {
-      final bufferOffer = incomingCallBuffer.lastOfferData;
-      if (bufferOffer != null) {
-        callExtra['offerData'] = json.encode(bufferOffer);
-        DebugLogger.info('CALLKIT', '📥 offerData взят из буфера');
-      }
-    }
-    
-    callExtra['callerKey'] = callerKey;
-    
-    // КРИТИЧНО: Сохраняем в persistent storage СРАЗУ!
-    // Если Android перезапустит Flutter Engine, RAM данные потеряются,
-    // но storage сохранится и _checkActiveCallOnStart найдёт pending call.
-    final offerDataStr = callExtra['offerData'] as String?;
-    Map<String, dynamic>? offerData;
-    if (offerDataStr != null) {
-      try {
-        offerData = json.decode(offerDataStr) as Map<String, dynamic>;
-      } catch (e) {
-        DebugLogger.warn('CALLKIT', 'Error parsing offerData for storage: $e');
-      }
-    }
-    await PendingCallStorage.instance.save(
-      callerKey: callerKey,
-      offerData: offerData,
-      autoAnswer: true,
-      callId: callId,
-    );
-    
-    _openCallScreenFromCallKit(callerKey, callExtra, callId: callId);
-  } else {
-    DebugLogger.error('CALLKIT', '❌ callerKey is null! Нет данных для звонка!');
-    _isProcessingCallKitAnswer = false; // Сбрасываем флаг при ошибке
-    // Скрываем UI только при ошибке
-    await FlutterCallkitIncoming.endAllCalls();
-  }
-}
-
-/// Обработка отклонения звонка через CallKit
-Future<void> _handleCallKitDecline(Map<String, dynamic>? body) async {
-  DebugLogger.info('CALLKIT', '📥 DECLINE body: $body');
-  
-  // Сбрасываем флаг обработки CallKit
-  _isProcessingCallKitAnswer = false;
-  
-  final callId = body?['id'] as String?;
-  
-  // Используем надёжный парсинг extra
-  final extra = _extractExtraFromBody(body);
-  String? callerKey = extra?['callerKey'] as String?;
-  
-  DebugLogger.info('CALLKIT', '📥 callerKey from extra: $callerKey');
-  
-  // Fallback: используем данные из буфера
-  if (callerKey == null) {
-    callerKey = incomingCallBuffer.lastCallerKey;
-    DebugLogger.info('CALLKIT', '📥 callerKey from buffer: $callerKey');
-  }
-  
-  DebugLogger.info(
-    'CALLKIT',
-    '❌ Звонок отклонён: callId=$callId, callerKey=$callerKey',
-    context: {'call_id': callId, 'peer_pubkey': callerKey},
-  );
-
-  // Если CallKit отклонён системой в фоне сразу после показа — не сбрасываем звонок.
-  if (!isAppInForeground && callId != null) {
-    final ageMs = await CallIdStorage.getActiveCallAgeMs();
-    if (ageMs != null && ageMs < 2000) {
-      DebugLogger.warn('CALLKIT', '⚠️ Системный decline в фоне, пропускаю call-rejected',
-          context: {'call_id': callId, 'peer_pubkey': callerKey, 'age_ms': ageMs});
-      return;
-    }
-  }
-  
-  // Скрываем нативный UI СРАЗУ
-  await FlutterCallkitIncoming.endAllCalls();
-  
-  // Очищаем буфер
-  incomingCallBuffer.clearLastIncomingCall();
-  
-  // Отправляем call-rejected (WebSocket или HTTP fallback)
-  // ВАЖНО: sendSignalingMessage сам использует HTTP fallback если WS не подключён!
-  if (callerKey != null) {
-    websocketService.sendSignalingMessage(
-      callerKey,
-      'call-rejected',
-      callId != null ? {'call_id': callId} : {},
-    );
-    DebugLogger.info('CALLKIT', '✅ Отправлен call-rejected к $callerKey');
-  } else {
-    DebugLogger.error('CALLKIT', '❌ callerKey null, не могу отправить call-rejected');
-  }
-}
-
-/// Открыть CallScreen после принятия звонка через CallKit
-/// autoAnswer=true означает что звонок уже принят через нативный UI
-void _openCallScreenFromCallKit(
-  String callerKey,
-  Map<String, dynamic>? extra, {
-  bool autoAnswer = true,
-  String? callId,
-}) {
-  // Получаем offer data если есть
-  Map<String, dynamic>? offerData;
-  final offerJson = extra?['offerData'] as String?;
-  if (offerJson != null) {
-    try {
-      offerData = json.decode(offerJson) as Map<String, dynamic>;
+      final prefs = await SharedPreferences.getInstance();
+      // Публичный ключ НЕ секрет (раздаётся через QR) — можно в SharedPreferences.
+      await prefs.setString(kPrefUserPubkey, pubkey);
+      await prefs.setInt(
+          kPrefMainAliveTs, DateTime.now().millisecondsSinceEpoch);
     } catch (_) {}
   }
-  
-  DebugLogger.info('CALLKIT', 'Открываю CallScreen, offer: ${offerData != null}, autoAnswer: $autoAnswer');
-  
-  final resolvedCallId = callId ??
-      (offerData != null ? CallIdStorage.extractCallId(offerData, callerKey) : null);
 
-  // Если приложение заблокировано (PIN) — сохраняем звонок как pending
-  // CallScreen откроется после разблокировки
-  if (authService.requiresUnlock) {
-    DebugLogger.info('CALLKIT', '🔒 Приложение заблокировано, сохраняю pending call');
-    _pendingCall = PendingCallData(
-      callerKey: callerKey,
-      offerData: offerData,
-      autoAnswer: autoAnswer,
-      callId: resolvedCallId,
-    );
-    return;
-  }
-  
-  // Открываем CallScreen сразу с autoAnswer
-  _navigateToCallScreen(callerKey, offerData, autoAnswer: autoAnswer, callId: resolvedCallId);
+  beat();
+  _pushHeartbeatTimer?.cancel();
+  _pushHeartbeatTimer =
+      Timer.periodic(const Duration(seconds: 4), (_) => beat());
+
+  PushConnectionService.start();
 }
 
-/// Навигация на CallScreen (используется напрямую и после разблокировки)
-void _navigateToCallScreen(
-  String callerKey,
-  Map<String, dynamic>? offerData, {
-  bool autoAnswer = false,
-  String? callId,
-}) {
-  final resolvedCallId = callId ??
-      (offerData != null ? CallIdStorage.extractCallId(offerData, callerKey) : null);
-  // Проверяем что нет уже активного звонка
-  if (CallStateService.instance.isCallActive.value) {
-    DebugLogger.warn('CALLKIT', 'Уже есть активный звонок, игнорирую');
-    _isProcessingCallKitAnswer = false; // Сбрасываем флаг
-    return;
-  }
-  
-  // КРИТИЧНО: Если Navigator ещё не инициализирован (приложение запускается из killed state),
-  // сохраняем pending call — он будет обработан в _checkActiveCallOnStart() или при первом frame
-  if (navigatorKey.currentState == null) {
-    DebugLogger.warn('CALLKIT', '⚠️ Navigator ещё null, сохраняю pending call');
-    _pendingCall = PendingCallData(
-      callerKey: callerKey,
-      offerData: offerData,
-      autoAnswer: autoAnswer,
-      callId: resolvedCallId,
-    );
-    _isProcessingCallKitAnswer = false;
-    return;
-  }
-  
-  // Очищаем буфер после использования
-  incomingCallBuffer.clearLastIncomingCall();
-  
-  DebugLogger.info('CALLKIT', '📞 Навигация на CallScreen для $callerKey, hasOffer=${offerData != null}, autoAnswer=$autoAnswer');
-  
-  // ВАЖНО: При возврате из background, Navigator может быть не готов к навигации.
-  // Ждём следующий кадр чтобы гарантировать что UI восстановлен.
-  // Также добавляем fallback таймер на случай если приложение в background и кадры не рендерятся.
-  bool callbackExecuted = false;
-  
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (callbackExecuted) return; // Защита от дублей
-    callbackExecuted = true;
-    
-    // Ещё раз проверяем состояние
-    if (CallStateService.instance.isCallActive.value) {
-      DebugLogger.warn('CALLKIT', 'Звонок уже активен после postFrame, пропускаю');
-      _isProcessingCallKitAnswer = false;
-      return;
-    }
-    
-    if (navigatorKey.currentState == null) {
-      // Если Navigator всё ещё null — сохраняем pending call для обработки при resumed
-      DebugLogger.warn('CALLKIT', '⚠️ Navigator null после postFrame, сохраняю pending call');
-      _pendingCall = PendingCallData(
-        callerKey: callerKey,
-        offerData: offerData,
-        autoAnswer: autoAnswer,
-        callId: resolvedCallId,
-      );
-      _isProcessingCallKitAnswer = false;
-      return;
-    }
-    
-    DebugLogger.info('CALLKIT', '📞 Открываю CallScreen (postFrame)');
-    navigatorKey.currentState!.push(MaterialPageRoute(
-      builder: (context) => CallScreen(
-        contactPublicKey: callerKey,
-        offer: offerData,
-        autoAnswer: autoAnswer,
-        callId: resolvedCallId,
-      ),
-    ));
-    
-    // Скрываем CallKit UI после успешной навигации
-    FlutterCallkitIncoming.endAllCalls();
-    
-    // Очищаем persistent storage после успешной навигации
-    PendingCallStorage.instance.clear();
-    
-    // Сбрасываем флаг после успешной навигации
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _isProcessingCallKitAnswer = false;
-    });
-  });
-  
-  // Fallback: если callback не выполнился за 2 секунды (приложение в background),
-  // pending call уже сохранён в storage через _handleCallKitAccept
-  Future.delayed(const Duration(seconds: 2), () {
-    if (!callbackExecuted) {
-      DebugLogger.warn('CALLKIT', '⏰ PostFrame callback не выполнился за 2с, pending call уже в storage');
-      callbackExecuted = true;
-      // RAM fallback на случай если storage не работает
-      _pendingCall = PendingCallData(
-        callerKey: callerKey,
-        offerData: offerData,
-        autoAnswer: autoAnswer,
-        callId: resolvedCallId,
-      );
-      _isProcessingCallKitAnswer = false;
-    }
-  });
-}
-
-/// Обработать отложенный звонок после разблокировки
-void processPendingCallAfterUnlock() {
-  final pending = _pendingCall;
-  _pendingCall = null;
-  
-  if (pending == null) return;
-  
-  if (!pending.isValid) {
-    DebugLogger.warn('CALLKIT', '⏰ Pending call устарел (>${30}s), игнорирую');
-    return;
-  }
-  
-  DebugLogger.info('CALLKIT', '🔓 Обработка pending call после разблокировки, autoAnswer=${pending.autoAnswer}');
-  _navigateToCallScreen(
-    pending.callerKey,
-    pending.offerData,
-    autoAnswer: pending.autoAnswer,
-    callId: pending.callId,
-  );
-}
-
-/// Проверка активных CallKit звонков при возврате из background
-/// Fallback на случай если pending call был потерян, но CallKit показывает активный звонок
-Future<void> _checkActiveCallOnResumed() async {
-  // Если уже есть активный звонок или обрабатывается ответ — выходим
-  if (CallStateService.instance.isCallActive.value || _isProcessingCallKitAnswer) {
-    return;
-  }
-  
+/// Переключить активный API-сервер (prod/test) и переподключить main-WS на новый
+/// хост. Персист в prefs; push-изолят подхватит новый хост при следующем коннекте
+/// (пока приложение живо, он держит сокет закрытым). Хост вне allowlist игнорируется.
+Future<void> switchApiServer(String host) async {
+  await AppConfig.setActiveHost(host);
+  // disconnect ПЕРВЫМ: connect() — no-op, если сокет уже Connected/Connecting.
   try {
-    final calls = await FlutterCallkitIncoming.activeCalls();
-    if (calls.isEmpty) return;
-    
-    DebugLogger.info('LIFECYCLE', '📞 Найден активный CallKit звонок при resumed');
-    
-    // Блокируем дубли
-    _isProcessingCallKitAnswer = true;
-    
-    // Конвертируем первый звонок
-    final rawCall = calls.first;
-    Map<String, dynamic> call;
-    if (rawCall is Map<String, dynamic>) {
-      call = rawCall;
-    } else if (rawCall is Map) {
-      call = _convertToStringDynamicMap(rawCall);
-    } else {
-      DebugLogger.error('LIFECYCLE', 'Неизвестный тип call: ${rawCall.runtimeType}');
-      _isProcessingCallKitAnswer = false;
-      return;
-    }
-    
-    // Парсим extra
-    final extra = _extractExtraFromBody(call);
-    String? callerKey = extra?['callerKey'] as String?;
-    
-    // Fallback на буфер
-    if (callerKey == null) {
-      callerKey = incomingCallBuffer.lastCallerKey;
-    }
-    
-    if (callerKey != null) {
-      DebugLogger.info('LIFECYCLE', '📞 Открываю CallScreen для активного звонка (resumed)');
-      final callId = call['id'] as String?;
-      
-      Map<String, dynamic> callExtra = extra ?? {};
-      if (callExtra['offerData'] == null) {
-        final bufferOffer = incomingCallBuffer.lastOfferData;
-        if (bufferOffer != null) {
-          callExtra['offerData'] = json.encode(bufferOffer);
-        }
-      }
-      callExtra['callerKey'] = callerKey;
-      
-      _openCallScreenFromCallKit(callerKey, callExtra, callId: callId);
-    } else {
-      DebugLogger.warn('LIFECYCLE', '⚠️ callerKey is null при resumed, пропускаю');
-      _isProcessingCallKitAnswer = false;
-    }
-  } catch (e) {
-    DebugLogger.error('LIFECYCLE', 'Ошибка проверки CallKit при resumed: $e');
-    _isProcessingCallKitAnswer = false;
+    websocketService.disconnect();
+  } catch (_) {}
+  final pubkey = cryptoService.addressBase64;
+  if (pubkey != null && pubkey.isNotEmpty) {
+    websocketService.connect(pubkey);
   }
 }
+
+/// Инициализация CallKit для обработки нативного UI входящих звонков
 
 void _listenForMessages() {
   final handler = IncomingMessageHandler(
@@ -780,6 +390,12 @@ void _listenForMessages() {
         DebugLogger.info('CALL', '📞 Игнорирую call-offer из WS: уже есть активный звонок');
         return;
       }
+      // Тот же call_id, что уже захвачен другим путём (уведомление/CallKit или
+      // дубль WS+HTTP) — не открываем второй экран.
+      if (!_claimCallNavigation(callId)) {
+        DebugLogger.info('CALL', '📞 Игнорирую дубль call-offer из WS по call_id');
+        return;
+      }
       navigatorKey.currentState?.push(MaterialPageRoute(
         builder: (context) => CallScreen(
           contactPublicKey: contactPublicKey,
@@ -790,10 +406,15 @@ void _listenForMessages() {
     },
     emitSignaling: (msg) => signalingStreamController.add(msg),
     emitChatUpdate: (senderKey) => messageUpdateController.add(senderKey),
-    isAppInForeground: () => isAppInForeground,
+    // Под локом (requiresUnlock) НЕ считаем приложение foreground для показа
+    // входящего: иначе handler открыл бы CallScreen напрямую поверх/под локскрином
+    // (недетерминированно, обходит лок). При locked -> ветка CallKit + pending,
+    // а ответ обрабатывается после ввода PIN Orpheus (processPendingCallAfterUnlock).
+    isAppInForeground: () => isAppInForeground && !authService.requiresUnlock,
     // КРИТИЧНО: передаём проверку активного звонка И обработки CallKit
     isCallActive: () => CallStateService.instance.isCallActive.value || _isProcessingCallKitAnswer,
   );
+  incomingMessageHandler = handler;
 
   websocketService.stream.listen((messageJson) async {
     try {
@@ -806,12 +427,60 @@ void _listenForMessages() {
   });
 }
 
+/// Слить конверты, сохранённые push-изолятом при убитом/фоновом приложении, через
+/// тот же обработчик входящих (расшифровка + строгий mutual-add + запись в БД +
+/// дедуп по message_id). Идемпотентно: повторный прогон уже сохранённого сообщения
+/// отсеивается дедупом. Не блокирует старт — гоняется в фоне.
+///
+/// Гейт по локу/duress: под PIN-локом не сливаем (иначе handleDecoded пишет и шлёт
+/// уведомления с именем контакта ещё до ввода PIN); под duress не сливаем (иначе
+/// реальные сообщения, которые duress должен ПРЯТАТЬ, были бы записаны/уничтожены).
+/// Очередь при этом не трогаем — сольём после настоящей разблокировки ([_onUnlocked])
+/// или на следующем resume/старте. Удаляем ТОЛЬКО реально обработанные конверты.
+bool _inboxDraining = false;
+
+Future<void> _drainPendingInbox() async {
+  final handler = incomingMessageHandler;
+  if (handler == null) return;
+  if (authService.requiresUnlock || authService.isDuressMode) return;
+  if (_inboxDraining) return; // не допускаем параллельные сливы (старт+resume)
+  _inboxDraining = true;
+  try {
+    final pending = await PendingInboxStorage.instance.peekAll();
+    if (pending.isEmpty) return;
+    DebugLogger.info('PENDING_INBOX', 'Обработка ${pending.length} отложенных сообщений...');
+    final processed = <String>{};
+    for (final item in pending) {
+      // duress мог включиться посреди слива (ввели duress-PIN) — останавливаемся,
+      // необработанное остаётся в очереди для нормального режима.
+      if (authService.isDuressMode) break;
+      try {
+        await handler.handleDecoded(item.envelope);
+        processed.add(item.raw); // помечаем обработанным только при успехе
+      } catch (e) {
+        DebugLogger.error('PENDING_INBOX', 'Ошибка обработки конверта: $e');
+      }
+    }
+    await PendingInboxStorage.instance.removeProcessed(processed);
+  } catch (e, stackTrace) {
+    DebugLogger.error('PENDING_INBOX', 'drain error: $e');
+    Sentry.captureException(e, stackTrace: stackTrace);
+  } finally {
+    _inboxDraining = false;
+  }
+}
+
 class _IncomingCryptoAdapter implements IncomingMessageCrypto {
   _IncomingCryptoAdapter(this._crypto);
   final CryptoService _crypto;
   @override
-  Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload) {
-    return _crypto.decrypt(senderPublicKeyBase64, encryptedPayload);
+  Future<String> decrypt(String senderEncKeyBase64, String encryptedPayload) {
+    return _crypto.decrypt(senderEncKeyBase64, encryptedPayload);
+  }
+
+  @override
+  Future<bool> verifyIdentityBundle(String address, String enc, String sig) {
+    return _crypto.verifyIdentityBundle(address, enc, sig);
   }
 }
 
@@ -822,6 +491,21 @@ class _IncomingDatabaseAdapter implements IncomingMessageDatabase {
   @override
   Future<void> addMessage(ChatMessage message, String contactPublicKey) {
     return _db.addMessage(message, contactPublicKey);
+  }
+
+  @override
+  Future<void> addContactIfMissing(String publicKey, {String? encryptionKey}) {
+    return _db.addContactIfMissing(publicKey, encryptionKey: encryptionKey);
+  }
+
+  @override
+  Future<bool> isContact(String publicKey) {
+    return _db.isContact(publicKey);
+  }
+
+  @override
+  Future<String?> getContactEncryptionKey(String publicKey) {
+    return _db.getContactEncryptionKey(publicKey);
   }
 
   @override
@@ -839,6 +523,16 @@ class _IncomingDatabaseAdapter implements IncomingMessageDatabase {
   Future<int> deleteMessagesByTimestamps(String contactKey, List<int> timestamps) {
     return _db.deleteMessagesByTimestamps(contactKey, timestamps);
   }
+
+  @override
+  Future<int> deleteMessagesByMessageIds(String contactKey, List<String> messageIds) {
+    return _db.deleteMessagesByMessageIds(contactKey, messageIds);
+  }
+
+  @override
+  Future<bool> messageExistsByMessageId(String contactKey, String messageId) {
+    return _db.messageExistsByMessageId(contactKey, messageId);
+  }
 }
 
 class _IncomingNotificationsAdapter implements IncomingMessageNotifications {
@@ -853,8 +547,8 @@ class _IncomingNotificationsAdapter implements IncomingMessageNotifications {
   }
 
   @override
-  Future<void> showMessageNotification({required String senderName}) {
-    return NotificationService.showMessageNotification(senderName: senderName);
+  Future<void> showMessageNotification() {
+    return NotificationService.showMessageNotification();
   }
 }
 
@@ -867,8 +561,39 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _isLicensed = false;
   bool _isCheckCompleted = false;
+  static const String _licenseCacheKey = 'license_active';
+
+  /// Кэш последнего ПОДТВЕРЖДЁННОГО сервером статуса лицензии — без срока
+  /// давности (аудит LOGIC-8). Модель простая: лицензия проверяется на сервере;
+  /// если отозвана — WS-листенер мгновенно выставит `_isLicensed=false`, а если
+  /// сети нет — приложение доступно по кэшу. Никакого учёта времени/grace-периода:
+  /// не тратим ресурсы и батарею на постоянную слежку за возрастом кэша.
+  Future<void> _loadCachedLicense() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final active = prefs.getBool(_licenseCacheKey) ?? false;
+      if (active && mounted && !_isCheckCompleted) {
+        setState(() {
+          _isLicensed = true;
+          _isCheckCompleted = true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// Сохраняет последний подтверждённый сервером статус лицензии (без отметки времени).
+  Future<void> _persistLicense(bool active) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_licenseCacheKey, active);
+    } catch (_) {}
+  }
   late bool _keysExist;
   bool _isLocked = false;
+  // Lock was deferred because the app went background while a call was
+  // active/pending (call UI must stay reachable without PIN). Re-armed in
+  // _onCallActiveChanged when the call ends and in the resumed backstop.
+  bool _lockPendedByCall = false;
   Timer? _inactivityTimer;
   DateTime _lastUserActivity = DateTime.now();
   StreamSubscription<String>? _licenseSubscription;
@@ -877,17 +602,49 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Начальное значение foreground-флага (приватность имени звонка): true только
+    // если приложение реально стартует на переднем плане.
+    DeviceSettingsService.setAppInForeground(
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed);
     _keysExist = _hasKeys;
     _isLocked = authService.requiresUnlock;
     RawKeyboard.instance.addListener(_handleRawKeyEvent);
+    CallStateService.instance.isCallActive.addListener(_onCallActiveChanged);
     _registerUserActivity('init');
     
     // Подписываемся на изменения локали
     LocaleService.instance.addListener(_onLocaleChanged);
     
+    // Останавливаем сеть В НАЧАЛЕ wipe: иначе входящее сообщение может
+    // пересоздать БД+ключ во время очистки, а сокет остаться под стёртой личностью.
+    AuthService.onWipeStarted = () {
+      try {
+        websocketService.disconnect();
+      } catch (_) {}
+      // Гасим heartbeat (иначе он перезапишет старый pubkey обратно в prefs
+      // после prefs.clear() и сервис переподключится под стёртой личностью) и
+      // останавливаем постоянный сервис доставки.
+      try {
+        _pushHeartbeatTimer?.cancel();
+        _pushHeartbeatTimer = null;
+      } catch (_) {}
+      try {
+        PushConnectionService.stop();
+      } catch (_) {}
+      // Panic-wipe/duress: возвращаем клиент на прод, чтобы стёртая личность не
+      // пересоздавалась против тестового сервера.
+      try {
+        AppConfig.resetHostToProd();
+      } catch (_) {}
+    };
+
     // Central wipe handler — called from ALL wipe paths
     // (delete account, wipe code, auto-wipe, panic wipe)
     AuthService.onWipeCompleted = () {
+      // Сеть уже остановлена в onWipeStarted; на всякий случай закрываем ещё раз.
+      try {
+        websocketService.disconnect();
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _keysExist = false;
@@ -898,10 +655,29 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       }
     };
     
-    print("🔑 Keys exist: $_keysExist | Public key: ${cryptoService.publicKeyBase64?.substring(0, 20) ?? 'NULL'}...");
-    print("🔒 Locked: $_isLocked | PIN enabled: ${authService.config.isPinEnabled}");
+    // Не пишем в logcat префикс публичного ключа и состояние PIN (аудит QUAL-1/OPS-6).
+    DebugLogger.info('APP', 'Keys exist: $_keysExist');
+    DebugLogger.info('APP', 'Locked: $_isLocked');
 
-    // Слушаем статус лицензии
+    // Проверка лицензии (подписка на WS + 10с таймаут-фолбэк). Вынесено в метод,
+    // чтобы пере-армить после создания аккаунта: иначе после wipe+создания в одной
+    // сессии подписка уже отменена, а таймаут израсходован -> _isCheckCompleted
+    // навсегда false -> приложение виснет на тёмном экране загрузки.
+    _startLicenseCheck();
+
+    // Подключаем WebSocket здесь, ПОСЛЕ регистрации _licenseSubscription,
+    // чтобы не пропустить license-status из-за race condition с broadcast stream.
+    if (_keysExist && !_isLocked && cryptoService.addressBase64 != null) {
+      websocketService.connect(cryptoService.addressBase64!);
+    }
+  }
+
+  /// Проверка лицензии: слушает license-status по WS + 10с таймаут-фолбэк на показ
+  /// экрана лицензии. Идемпотентно (отменяет прошлую подписку). Вызывается при старте
+  /// И после создания нового аккаунта — иначе после wipe+создания в одной сессии
+  /// подписка уже отменена, а таймаут израсходован, и экран лицензии не показывается.
+  void _startLicenseCheck() {
+    _licenseSubscription?.cancel();
     _licenseSubscription = websocketService.stream.listen((message) {
       try {
         // Быстрый фильтр — не парсим JSON на каждом сообщении.
@@ -914,6 +690,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             _isLicensed = (data['status'] == 'active');
             _isCheckCompleted = true;
           });
+          _persistLicense(_isLicensed); // обновляем кэш для офлайн-запусков
           _licenseSubscription?.cancel();
           _licenseSubscription = null;
         } else if (data['type'] == 'payment-confirmed') {
@@ -922,11 +699,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             _isLicensed = true;
             _isCheckCompleted = true;
           });
+          _persistLicense(true);
           _licenseSubscription?.cancel();
           _licenseSubscription = null;
         }
       } catch (_) {}
     });
+
+    // Если лицензия уже подтверждалась ранее — пускаем в приложение сразу
+    // (не запирая офлайн-пользователя), онлайн-проверка идёт в фоне.
+    _loadCachedLicense();
 
     // Таймаут на проверку лицензии (10 секунд)
     // Если за это время не получили ответ — показываем экран лицензии
@@ -939,12 +721,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         });
       }
     });
-
-    // Подключаем WebSocket здесь, ПОСЛЕ регистрации _licenseSubscription,
-    // чтобы не пропустить license-status из-за race condition с broadcast stream.
-    if (_keysExist && !_isLocked && cryptoService.publicKeyBase64 != null) {
-      websocketService.connect(cryptoService.publicKeyBase64!);
-    }
   }
 
   void _onAuthComplete() {
@@ -952,18 +728,41 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // when Navigator rebuilds during the same frame as WelcomeScreen disposal.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      setState(() => _keysExist = true);
-      if (cryptoService.publicKeyBase64 != null) {
-        websocketService.connect(cryptoService.publicKeyBase64!);
+      setState(() {
+        _keysExist = true;
+        // Свежий аккаунт: лицензии ещё нет — проверку надо начать заново.
+        _isCheckCompleted = false;
+        _isLicensed = false;
+      });
+      if (cryptoService.addressBase64 != null) {
+        websocketService.connect(cryptoService.addressBase64!);
       }
+      // Пере-армить проверку лицензии — иначе после wipe экран лицензии не покажется
+      // (подписка была отменена, таймаут израсходован) и экран зависнет чёрным.
+      _startLicenseCheck();
     });
   }
 
   void _onUnlocked() {
     DebugLogger.info('APP', '🔓 App unlocked');
+    _lockPendedByCall = false;
     setState(() => _isLocked = false);
     _registerUserActivity('unlock');
-    
+
+    // Подключаем основной WebSocket при разблокировке. Старт-подключение выше
+    // гейтится на !_isLocked, а со строгим локом приложение часто СТАРТУЕТ
+    // заблокированным; на холодном старте события resumed нет (уже resumed), так
+    // что без этого основной WS не встаёт до ручного сворачивания-разворачивания
+    // (не работают presence и исходящие звонки). forceReconnectIfStale поднимает
+    // WS даже если он залип в Connecting после фона (частый кейс на Samsung).
+    if (_keysExist && cryptoService.addressBase64 != null) {
+      websocketService.forceReconnectIfStale(cryptoService.addressBase64!);
+    }
+
+    // Разблокировка настоящим PIN (не duress) — самое раннее место, где можно
+    // безопасно слить очередь push-изолята (под локом слив пропускался).
+    _drainPendingInbox();
+
     // Обработать отложенный звонок если есть
     // Используем небольшую задержку чтобы UI успел перестроиться
     Future.delayed(const Duration(milliseconds: 300), () {
@@ -973,6 +772,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   void _onDuressMode() {
     DebugLogger.warn('APP', '🔓 App unlocked in DURESS MODE');
+    _lockPendedByCall = false;
     setState(() => _isLocked = false);
     // В duress mode приложение работает, но показывает пустой профиль
   }
@@ -1000,7 +800,43 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     _licenseSubscription?.cancel();
     _inactivityTimer?.cancel();
     RawKeyboard.instance.removeListener(_handleRawKeyEvent);
+    CallStateService.instance.isCallActive.removeListener(_onCallActiveChanged);
     super.dispose();
+  }
+
+  /// Single point that actually engages the app lock (clears the deferred
+  /// flag so a stale "lock pended by call" can never linger past a real lock).
+  void _lockApp(String reason) {
+    _lockPendedByCall = false;
+    authService.lock();
+    if (mounted) setState(() => _isLocked = true);
+    DebugLogger.info('LIFECYCLE', '🔒 App locked ($reason)');
+  }
+
+  /// Звонок на время своего показа снимает keyguard (enableCallMode -> дать
+  /// ответить на заблокированном телефоне). По завершении звонка, если устройство
+  /// всё ещё под системной блокировкой, лочим и приложение — иначе после звонка
+  /// над локскрином мелькнёт интерфейс Orpheus (утечка). Если устройство уже
+  /// разблокировано (пользователь сам ввёл PIN во время звонка) — не мешаем.
+  /// Исключение: если лок был ОТЛОЖЕН из-за ухода в фон во время звонка
+  /// (_lockPendedByCall), лочим безусловно — иначе после несоединившегося или
+  /// завершённого в фоне звонка приложение остаётся разблокированным до
+  /// таймаута неактивности (обход PIN).
+  Future<void> _onCallActiveChanged() async {
+    if (CallStateService.instance.isCallActive.value) return; // звонок начался
+    if (!authService.config.isPinEnabled || _isLocked) {
+      _lockPendedByCall = false;
+      return;
+    }
+    if (_lockPendedByCall) {
+      _lockApp('after call, deferred by background during call');
+      return;
+    }
+    try {
+      if (await DeviceSettingsService.isDeviceLocked()) {
+        _lockApp('after call, device keyguard engaged');
+      }
+    } catch (_) {}
   }
 
   void _handleRawKeyEvent(RawKeyEvent event) {
@@ -1027,9 +863,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       if (!mounted) return;
       final elapsed = DateTime.now().difference(_lastUserActivity);
       if (elapsed >= timeout && authService.config.isPinEnabled && !_isLocked) {
-        authService.lock();
-        setState(() => _isLocked = true);
-        DebugLogger.info('LIFECYCLE', '🔒 App locked by inactivity timeout');
+        _lockApp('inactivity timeout');
       }
     });
   }
@@ -1041,18 +875,39 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     
     // Обновляем глобальный флаг состояния приложения
     isAppInForeground = (state == AppLifecycleState.resumed);
-    
+    // Дублируем в SharedPreferences: push-изолят читает это, чтобы решить, прятать
+    // ли имя звонящего на входящем (приватность на локскрине).
+    DeviceSettingsService.setAppInForeground(isAppInForeground);
+
     if (state == AppLifecycleState.resumed) {
       DebugLogger.info('LIFECYCLE', 'App in foreground, reconnecting WS...');
-      // Reconnect WebSocket on return to app
-      if (cryptoService.publicKeyBase64 != null) {
-        websocketService.connect(cryptoService.publicKeyBase64!);
+      // Reconnect WebSocket on return to app. forceReconnectIfStale вместо connect:
+      // после фона сокет часто мёртв, а статус залип в Connecting -> connect() был бы
+      // no-op и WS висел бы в Connecting; здесь форсируем свежий реконнект.
+      if (cryptoService.addressBase64 != null) {
+        websocketService.forceReconnectIfStale(cryptoService.addressBase64!);
       }
       // Clear notification tray when user opens the app
       NotificationService.hideMessageNotifications();
       // Check message auto-cleanup on return to foreground
       messageCleanupService.onAppResumed();
-      
+      // Слить сообщения, что push-изолят принял в узком окне «main стартует, но push
+      // ещё не закрыл сокет» — иначе они ждали бы следующего рестарта (гейт внутри
+      // пропустит слив, если под локом/duress).
+      _drainPendingInbox();
+
+      // Deferred-lock backstop: the app went background while a call was up
+      // and the call is already over — lock now, regardless of the inactivity
+      // window, BEFORE any pending-call/UI processing below.
+      if (_lockPendedByCall &&
+          !CallStateService.instance.isCallActive.value) {
+        if (authService.config.isPinEnabled && !_isLocked) {
+          _lockApp('on resume, deferred by call');
+        } else {
+          _lockPendedByCall = false;
+        }
+      }
+
       // КРИТИЧНО: Обработка отложенного звонка при возврате из background
       // Если пользователь принял звонок через CallKit, но Navigator был ещё не готов,
       // звонок сохранился в _pendingCall. Обрабатываем его сейчас.
@@ -1075,25 +930,40 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           authService.config.isPinEnabled &&
           !_isLocked &&
           DateTime.now().difference(_lastUserActivity) >= timeout) {
-        authService.lock();
-        setState(() => _isLocked = true);
-        DebugLogger.info('LIFECYCLE', '🔒 App locked on resume (inactivity timeout)');
+        _lockApp('on resume, inactivity timeout');
       } else {
         _resetInactivityTimer();
       }
     } else if (state == AppLifecycleState.paused) {
       DebugLogger.info('LIFECYCLE', 'Приложение в background');
-      
+
       final hasActiveCall = CallStateService.instance.isCallActive.value;
       final hasPendingCall = _pendingCall != null && _pendingCall!.isValid;
-      
+
       // ВАЖНО: сохраняем WebSocket в фоне, чтобы звонки доходили даже без CallKit/FCM.
       // Дедуп выполняется через call_id (CallIdStorage) в обработчике входящих сигналов.
       DebugLogger.info('LIFECYCLE', '📶 WebSocket остаётся подключённым в background');
-      
-      // В фоне не блокируем сразу — полагаемся на таймер неактивности.
+
       _inactivityTimer?.cancel();
-      if (hasPendingCall) {
+
+      // Строгая блокировка: как только приложение уходит в фон / гаснет экран —
+      // сразу лочим (при включённом PIN). Исключение — активный ИЛИ входящий
+      // звонок: экран звонка и приём должны остаться доступными без PIN.
+      // Но пропуск НЕ бесследный: помечаем лок отложенным (_lockPendedByCall),
+      // и он будет взведён при завершении звонка / на resume — иначе после
+      // звонка приложение открывается без PIN до таймаута неактивности.
+      if (authService.config.isPinEnabled &&
+          !_isLocked &&
+          !hasActiveCall &&
+          !hasPendingCall) {
+        _lockApp('on background, immediate');
+      } else if (authService.config.isPinEnabled &&
+          !_isLocked &&
+          (hasActiveCall || hasPendingCall)) {
+        _lockPendedByCall = true;
+        DebugLogger.info(
+            'LIFECYCLE', '🔒 Lock deferred: active/pending call in background');
+      } else if (hasPendingCall) {
         DebugLogger.info('LIFECYCLE', '📞 Есть pending call');
       }
     }
@@ -1108,8 +978,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       
-      // Локализация
-      locale: LocaleService.instance.selectedLocale,
+      // Локализация. ВАЖНО: отдаём effectiveLocale (всегда конкретная локаль), а НЕ
+      // selectedLocale. На «Авто» selectedLocale == null, а переход MaterialApp.locale
+      // в null у Flutter не всегда пере-резолвится вживую — язык «залипал» на прежнем
+      // (напр. оставался EN вместо системного RU). effectiveLocale на «Авто» сам
+      // подставляет системный язык из supportedLocales, поэтому смена применяется сразу.
+      locale: LocaleService.instance.effectiveLocale,
       supportedLocales: LocaleService.supportedLocales,
       localizationsDelegates: const [
         L10n.delegate,
@@ -1134,13 +1008,41 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         return const Locale('en');
       },
       
-      builder: (context, child) => Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) => _registerUserActivity('pointer'),
-        onPointerMove: (_) => _registerUserActivity('pointer'),
-        onPointerSignal: (_) => _registerUserActivity('pointer'),
-        child: child ?? const SizedBox.shrink(),
-      ),
+      builder: (context, child) {
+        // Страховочный клэмп системного шрифта: увеличение уважаем до 1.3×, выше —
+        // ограничиваем, чтобы очень крупный системный шрифт (font_scale 1.5–2.0) не
+        // ломал вёрстку целиком. Основа доступности — пофиксельная устойчивость
+        // (FittedBox и гибкие макеты); клэмп — только страховка от экстрима.
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: mq.textScaler.clamp(maxScaleFactor: 1.3),
+          ),
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (_) => _registerUserActivity('pointer'),
+            onPointerMove: (_) => _registerUserActivity('pointer'),
+            onPointerSignal: (_) => _registerUserActivity('pointer'),
+            child: Stack(
+              children: [
+                child ?? const SizedBox.shrink(),
+                // LockScreen рисуется ПОВЕРХ Navigator'а (всех запушенных маршрутов —
+                // звонка, чата), а не как home. Иначе любой pushed-маршрут перекрывает
+                // LockScreen-как-home и PIN приложения обходится (security). _buildHome
+                // при этом отдаёт пустой чёрный экран, чтобы контент под локом не строился.
+                if (_isLocked && _keysExist)
+                  Positioned.fill(
+                    child: LockScreen(
+                      onUnlocked: _onUnlocked,
+                      onDuressMode: _onDuressMode,
+                      onWipe: _onWipe,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
       home: _buildHome(),
     );
   }
@@ -1151,13 +1053,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       return WelcomeScreen(onAuthComplete: _onAuthComplete);
     }
     
-    // 2. Приложение заблокировано — экран блокировки
+    // 2. Приложение заблокировано — контент НЕ строим (данные не грузим под локом).
+    // Сам LockScreen рисуется оверлеем поверх всего в MaterialApp.builder выше,
+    // чтобы перекрывать и запушенные маршруты (звонок/чат) — иначе PIN обходится.
     if (_isLocked) {
-      return LockScreen(
-        onUnlocked: _onUnlocked,
-        onDuressMode: _onDuressMode,
-        onWipe: _onWipe,
-      );
+      return const Scaffold(backgroundColor: Colors.black);
     }
     
     // 3. Проверка лицензии не завершена — загрузка
@@ -1171,6 +1071,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
     
     // 5. Нет лицензии — экран лицензии
-    return LicenseScreen(onLicenseConfirmed: () => setState(() => _isLicensed = true));
+    return LicenseScreen(onLicenseConfirmed: () {
+      setState(() => _isLicensed = true);
+      _persistLicense(true);
+      // После активации лицензии убеждаемся, что WS поднят свежей сессией — иначе
+      // онлайн/presence мог не встать до перезапуска приложения (device-тест: у
+      // некоторых Samsung после активации онлайн не поднимался до рестарта).
+      if (cryptoService.addressBase64 != null) {
+        websocketService.forceReconnectIfStale(cryptoService.addressBase64!);
+      }
+    });
   }
 }

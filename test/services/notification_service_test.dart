@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:orpheus_project/services/notification_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeLocalBackend implements NotificationLocalBackend {
   final createdChannels = <({String id, String name, String description, Importance importance})>[];
@@ -88,6 +89,9 @@ void main() {
     late _FakeLocalBackend backend;
 
     setUp(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      // Уведомления резолвят язык по сохранённому app_locale (фоновый изолят без контекста).
+      SharedPreferences.setMockInitialValues({'app_locale': 'ru'});
       backend = _FakeLocalBackend();
       NotificationService.debugSetLocalBackendForTesting(backend);
     });
@@ -96,7 +100,7 @@ void main() {
       NotificationService.debugSetLocalBackendForTesting(null);
     });
 
-    test('showCallNotification: title=Входящий звонок, body=callerName, ongoing+fullScreenIntent', () async {
+    test('showCallNotification: обезличено — title=Входящий звонок, body=Закрытая связь (без имени)', () async {
       await NotificationService.showCallNotification(callerName: 'Alice');
 
       // каналы должны быть созданы при первой инициализации
@@ -111,7 +115,7 @@ void main() {
       expect(s.id, equals(1001));
       expect(s.channelId, equals('orpheus_incoming_call'));
       expect(s.title, equals('Входящий звонок'));
-      expect(s.body, equals('Alice'));
+      expect(s.body, equals('Закрытая связь')); // не имя звонящего
       expect(s.category, equals(AndroidNotificationCategory.call));
       expect(s.androidSmallIcon, equals('ic_stat_orpheus'));
       expect(s.ongoing, isTrue);
@@ -124,17 +128,19 @@ void main() {
       // не падает
     });
 
-    test('showMessageNotification: приватность — body=Новое сообщение (без текста)', () async {
-      await NotificationService.showMessageNotification(senderName: 'Bob');
+    test('showMessageNotification: обезличено — title=Orpheus, без отправителя, body=Новое сообщение', () async {
+      await NotificationService.showMessageNotification();
 
       expect(backend.shown, hasLength(1));
       final s = backend.shown.single;
       expect(s.channelId, equals('orpheus_messages'));
-      expect(s.title, equals('Bob'));
+      expect(s.title, equals('Orpheus')); // не отправитель
       expect(s.body, equals('Новое сообщение'));
       expect(s.category, equals(AndroidNotificationCategory.message));
       expect(s.androidSmallIcon, equals('ic_stat_orpheus'));
-      expect(s.groupKey, equals('orpheus_messages_group'));
+      // groupKey убран: одиночный grouped-child без summary давал пустой
+      // заголовок группы на Samsung One UI (задвоение уведомлений).
+      expect(s.groupKey, isNull);
     });
 
     test('hideMessageNotifications: cancelAll, ошибки игнорируются (best-effort)', () async {
@@ -154,7 +160,11 @@ void main() {
 
       expect(backend.shown.where((s) => s.channelId == 'orpheus_incoming_call').length, equals(3));
       expect(backend.shown.where((s) => s.channelId == 'orpheus_messages').length, equals(2));
-      expect(backend.shown.any((s) => s.body == 'Неизвестный'), isTrue);
+      // Обезличено: звонки — «Закрытая связь» (без имени), сообщения — «Новое сообщение».
+      expect(backend.shown.where((s) => s.channelId == 'orpheus_incoming_call')
+          .every((s) => s.body == 'Закрытая связь'), isTrue);
+      expect(backend.shown.where((s) => s.channelId == 'orpheus_messages')
+          .every((s) => s.body == 'Новое сообщение'), isTrue);
     });
 
     test('background handler policy: если есть notification payload — локальное уведомление не показываем', () {
@@ -214,7 +224,7 @@ void main() {
 
     test('ошибки backend.show не должны пробрасываться наружу (best-effort)', () async {
       backend.throwOnShow = StateError('boom');
-      await NotificationService.showMessageNotification(senderName: 'Eve');
+      await NotificationService.showMessageNotification();
       await NotificationService.showCallNotification(callerName: 'Mallory');
     });
   });

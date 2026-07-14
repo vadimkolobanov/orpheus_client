@@ -2,11 +2,12 @@
 
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:qr_code_dart_scan/qr_code_dart_scan.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:orpheus_project/l10n/app_localizations.dart';
 
 class QrScanScreen extends StatefulWidget {
-  /// Для widget-тестов: позволяет подменить виджет камеры (mobile_scanner),
+  /// Для widget-тестов: позволяет подменить виджет камеры (QR-сканер),
   /// чтобы тесты не падали на отсутствии platform plugin.
   ///
   /// Callback `onQrValue` нужно вызвать с распознанной строкой (publicKey).
@@ -21,7 +22,8 @@ class QrScanScreen extends StatefulWidget {
 class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMixin {
   bool _isScanned = false;
   bool _isProcessing = false;
-  
+  bool _cameraError = false;
+
   late AnimationController _scanLineController;
   late AnimationController _pulseController;
   late AnimationController _cornerController;
@@ -61,16 +63,11 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
     super.dispose();
   }
 
-  void _onDetect(BarcodeCapture capture) async {
+  void _onCapture(Result result) {
     if (_isScanned) return;
-
-    final List<Barcode> barcodes = capture.barcodes;
-    for (final barcode in barcodes) {
-      if (barcode.rawValue != null) {
-        await _handleQrValue(barcode.rawValue!);
-        break;
-      }
-    }
+    final value = result.text;
+    if (value.isEmpty) return;
+    _handleQrValue(value);
   }
 
   Future<void> _handleQrValue(String value) async {
@@ -89,6 +86,33 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
     }
   }
 
+  /// Экран ошибки камеры (нет доступа / сбой инициализации) вместо чёрного тупика.
+  Widget _buildCameraError(L10n l10n) {
+    return Container(
+      color: Colors.black,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.no_photography, color: Colors.white54, size: 56),
+          const SizedBox(height: 16),
+          Text(
+            l10n.cameraAccessDenied,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70, fontSize: 15),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: () => openAppSettings(),
+            icon: const Icon(Icons.settings),
+            label: Text(l10n.openSettings),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = L10n.of(context);
@@ -99,16 +123,23 @@ class _QrScanScreenState extends State<QrScanScreen> with TickerProviderStateMix
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Камера
-          widget.scannerBuilder != null
-              ? widget.scannerBuilder!(context, _handleQrValue)
-              : MobileScanner(
-                  controller: MobileScannerController(
-                    detectionSpeed: DetectionSpeed.noDuplicates,
-                    returnImage: false,
-                  ),
-                  onDetect: _onDetect,
-                ),
+          // Камера (QR-декодирование на чистом Dart через zxing_lib, без Google ML Kit)
+          if (widget.scannerBuilder != null)
+            widget.scannerBuilder!(context, _handleQrValue)
+          else if (_cameraError)
+            // Отказ в доступе к камере / сбой инициализации: раньше был тупик —
+            // чёрный экран с анимацией поверх (аудит UI-3).
+            _buildCameraError(l10n)
+          else
+            QRCodeDartScanView(
+              typeScan: TypeScan.live,
+              formats: const [BarcodeFormat.qrCode],
+              resolutionPreset: QRCodeDartScanResolutionPreset.high,
+              onCapture: _onCapture,
+              onCameraError: (error) {
+                if (mounted) setState(() => _cameraError = true);
+              },
+            ),
           
           // Затемнение и рамка
           CustomPaint(

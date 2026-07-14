@@ -1,0 +1,2151 @@
+# AI Worklog
+
+Журнал действий по изолированному треку `wl/dev` (независимая версия клиента,
+работаем на актуальном Flutter; upstream `master` не трогаем).
+
+---
+
+## 2026-07-14 — Регион по IP: сторонний HTTPS geo-сервис (решение владельца, без сервера)
+
+**Контекст:** ревизия модуля «Регион/Режим» на экране «Система». Multi-agent проверка (20 агентов)
+подтвердила: ip-api (ARCH-6) выпилен начисто, регион из локали никуда не передаётся; «Режим» —
+косметика (решение владельца: оставить). Владелец решил вернуть определение страны по IP через
+СТОРОННИЙ сервис (серверную GeoIP-фичу отклонил — бэкенд не трогаем).
+
+**Ресёрч (10 агентов):** рынок keyless geo-API + RU-доступность + live-пробы 12 эндпоинтов + дизайн.
+Ключевое: почти весь рынок за Cloudflare, который РКН троттлит с 06.2025 (обрезка ~16КБ/соединение,
+эскалация) — единственный крупный не-CF кандидат ipinfo.io (Google LB). ip-api.com: HTTPS до сих пор
+платный (живой 403). Отбраковано: ipapi.co (free «не для продакшена» + CF бот-челленджи), ip.sb (403
+на дефолтный UA), ipapi.is (ToS), ifconfig.co (протухшая база, 1 req/мин), ip2location (атрибуция).
+RU-доступность ipinfo/geojs/ipwho подтверждена check-host (Москва/СПб, 200). Пробы с машины владельца
+шли через VPN (Франкфурт) — не RU-замер, отмечено.
+
+**Сделано (решение владельца: цепочка из 3):** новый `lib/services/geo_service.dart` — цепочка
+ipinfo.io/country -> api.country.is -> get.geojs.io/v1/ip/country (две инфраструктуры), таймаут 4с,
+валидация `[A-Z]{2}`, редиректы отвергаются, чтение тела с жёстким капом 2КБ и отменой подписки
+(память ограничена даже на chunked/slow-drip), кэш 12ч (память+prefs, timestamp из будущего = stale),
+in-flight dedup, prefs-загрузка мемоизирована Future (нет гонки). Запрос ТОЛЬКО при открытии экрана
+«Система»; тап по карточке — forceRefresh (уже показанный IP-результат при этом не сбрасывается — без
+мигания/даунгрейда). status_screen: `_loadRegion` двухфазный (локаль мгновенно -> IP асинхронно),
+«Усиленный» = union(локаль, IP) — VPN не понижает. l10n: `regionLocalOnly` удалён (стал бы ложью),
++`regionSourceIp`/`regionSourceLocale`, `helpRegionsBullet1` переписан честно («один из нескольких
+независимых сервисов видит IP»). Oracle KB обновлена: 09-system-screen.md (механизм), 11-release-history.md
+(историческая запись помечена как изменённая) — при релизе заменить оба файла в базе Оракула.
+
+**Проверки:** адверсариальное ревью диффа (3 линзы) — 2 риска сервиса, риск UI-мигания, риск Oracle KB
+исправлены; инертный редирект-тест усилен (assert followRedirects=false); стейл-кэш после неудачного
+forceRefresh показывается как IP-источник — принятый компромисс (без спиннеров). `flutter analyze` —
+0 ошибок; `flutter test` — 382 passed (8 новых юнитов geo_service + union-кейс в виджет-тесте).
+
+**Тест-сборка:** бамп `1.1.7+31`, APK `orpheus-v1.1.7-b31-ip-region.apk` в папку Колобанов,
+установка на устройства владельца по adb (device-тест региона — с мобильных сетей РФ).
+
+---
+
+## 2026-07-14 — PIN-обход после звонков + задвоение уведомлений (fixed, +30, device-verified)
+
+**Симптомы (device, Samsung b28):** (1) приложение открывается без PIN — только после звонков;
+(2) в шторке два уведомления Orpheus («Protecting your connection» + пустое), изредка две карточки в recents.
+
+**Исследование:** multi-agent workflow, 13 агентов: 4 разведчика (lock-система, call-flow, Android-слой,
+git-форензика) -> 7 гипотез -> адверсариальная проверка каждой по коду (1 CONFIRMED, 1 PLAUSIBLE, 5 REFUTED).
+Опровергнуто в т.ч.: answer-over-lock сам разблокирует (нет — pending-механика корректна), cold-start без
+PIN (нет — `_isLocked` сеется из `requiresUnlock`), иконки 106dc6d/5b9322d (только ресурсы), taskAffinity
+(форкающие пути — мёртвый код).
+
+**Корень PIN (CONFIRMED):** единственный немедленный лок — `paused`-хендлер — гейтится на
+`!hasActiveCall && !hasPendingCall` (введено 5aeff60 «strict lock»); пропуск бесследный, ре-лок только по
+инактивити-таймауту (у владельца 5 мин) — `_onCallActiveChanged` требовал системный keyguard (после HOME
+не взведён). 0b9cc33 «caller patience» расширил окно: несоединившийся исходящий живёт до 45с watchdog.
+**Фикс:** флаг `_lockPendedByCall` (main.dart) — ставится при пропуске лока из-за звонка, взводит лок в
+`_onCallActiveChanged` (безусловно) и в resume-бэкстопе (мимо инактивити-окна); хелпер `_lockApp()`
+централизует лок+сброс флага. 0b9cc33 НЕ ревертился (дефект старше него).
+
+**Корень задвоения (PLAUSIBLE, оба кандидата закрыты):** (1) ongoing-FGS вендоренного callkit-плагина:
+стартует на каждый нативный ACCEPT, гасится только по ACTION_CALL_ENDED, который `endAllCalls()` шлёт
+лишь для звонков ещё в ACTIVE_CALLS (список «часто 0»); START_STICKY + stopWithTask=false. Отключено
+`callingNotification: showNotification=false` (оба showCallkitIncoming; свой CallAudioService id889 уже
+есть) + плагин hardening: stopService в DECLINE/TIMEOUT-ветках ресивера, stopSelf на null-intent рестарте.
+(2) groupKey `orpheus_messages_group` без setAsGroupSummary (латентно с февраля, мог проявиться после бампа
+flutter_local_notifications 17->22) — groupKey убран (id фиксированный, группа не нужна).
+
+**Hardening:** `_handleCallKitDecline` чистит `_pendingCall`; AuthService.init fail-closed через
+не-секретный маркер `orpheus_pin_was_enabled` (prefs) + `_configLoadFailed` (verifyPin -> invalid, иначе
+пустой конфиг пускал любым вводом; retry чтения 200мс; performWipe сбрасывает); requiresUnlock-гейт в
+`_checkActiveCallOnStart` (cold-start pending — через unlock, не прямой нав); биометрия ->
+`markUnlockedExternally()` (десинк `_isUnlocked`).
+
+**Адверсариал-ревью патча (3 агента):** блокер — устаревший тест groupKey (обновлён); minor — performWipe
+не сбрасывал `_configLoadFailed` (закрыт); осознанный over-lock: возврат в звонок + отбой в форграунде =
+PIN сразу (соответствует строгому локу, владельцу озвучено). Инварианты (answer-over-lock, cold-start
+звонок, duress, wipe, missed-call) — проверены, целы. Device-тест b30 на обоих телефонах: ok.
+
+**Follow-up (полный suite):** PIN-маркер через awaited SharedPreferences вешал 8 виджет-тестов
+(lock_screen/pin_setup/security_settings) под fake-async — немокнутый getInstance() не завершается,
+таймаут 10 мин (suite шёл 40 мин). Фикс: `_syncPinMarker` через unawaited (подвисший prefs не блокирует
+PIN-флоу и в проде), `_pinWasEnabled` с timeout 3с (init ждётся до runApp), в трёх тест-файлах
+`SharedPreferences.setMockInitialValues({})`. Итог: 365 + 32/32 по затронутым файлам, зелено.
+
+**Симптом (device-тест на b21, Samsung->Pixel):** первое «привет» на убитый/свёрнутый Pixel — уведомление
+пришло, а в чате сообщения нет; следующие сообщения ходят нормально. **Корень (разобран по коду, логи
+через adb недоступны — release не debuggable): регресс FCM -> постоянный foreground push-сервис.** При
+убитом приложении WS держит ТОЛЬКО push-изолят -> для сервера получатель «онлайн»
+(`send_personal_message` находит verified push-сокет, main.py:1054) -> сервер отдаёт сообщение live и
+НЕ кладёт в offline (main.py:2581: `if msg_type=="chat" and not is_online`). Push-изолят расшифровать/
+записать в зашифрованную БД не может -> показывал уведомление и ТЕРЯЛ текст. Открываешь -> offline пусто
+-> потеря. Решающий факт: уведомление БЫЛО = сообщение дошло до Pixel через push, но не сохранилось.
+
+**Фикс (клиент-only, вариант A — не зависит от Вадима/сервера):** новый `PendingInboxStorage`
+(SharedPreferences-очередь сырых E2E-конвертов); push-изолят в `_onFrame` для личных chat/new_message
+кладёт `decoded` в очередь; main при разблокировке/старте/resume сливает через
+`incomingMessageHandler.handleDecoded` (тот же путь: расшифровка + mutual-add + БД + дедуп по message_id).
+handler вынесен в глобал. Слив НЕДЕСТРУКТИВНЫЙ (peekAll + removeProcessed — удаляем только обработанное:
+переживает краш mid-drain и гонку append/drain между изолятами), гейт по requiresUnlock/isDuressMode
+(под локом не пишем реальные сообщения и не шлём уведомления с именем до PIN; под duress не уничтожаем
+то, что duress должен прятать), очистка бесплатно через panic-wipe (prefs.clear). Комнаты не трогаем
+(история дотягивается по HTTP /api/rooms/{id}/messages).
+
+**Адверсариал-ревью прогнан, дефекты закрыты:** деструктивный drainAll -> недеструктивный peek/remove;
+duress mid-drain -> break по isDuressMode + гейт; двойные уведомления под локом -> гейт requiresUnlock;
+resume-окно handoff -> drain на resumed. Приняты как известные: legacy без message_id (наш клиент всегда
+шлёт Uuid v4, в clean-slate мире неактуально), метаданные конверта в prefs до 14 дней (payload E2E-шифр,
+прецедент PendingCallStorage), вытеснение очереди не-контактом (лимит 500, mutual-add клиентский —
+push allow-list уведомлений и так нет, отдельная тема). flutter test 373 passed, analyze 0 ошибок.
+
+**Сборка +22** (этот бамп): pending-inbox fix + клиентский signal-token S7 (6e73ade). APK в
+`Колобанов/02-Тестировщику`, накат на Samsung+Pixel через adb.
+
+**Device-тест b22: доставка в спящий работает** (алерт + сообщение в чате). Запрос владельца:
+уведомление показывало префикс ключа отправителя — сделать ПОЛНОСТЬЮ обезличенным (ни содержимого,
+ни отправителя). **Сделано (сборка +23):** `showMessageNotification` обезличен в единой точке
+(title 'Orpheus', body l10n.newMessage, фикс id 1002 -> одно уведомление, не выдаёт число собеседников);
+параметр `senderName` убран из всей цепочки (интерфейс `IncomingMessageNotifications`, адаптер в main,
+вызовы в handler, push-изолят больше не вычисляет/не передаёт префикс ключа) — структурно невозможно
+пропалить отправителя; префикс ключа убран и из файловых логов. Аудит утечек (агент): личное сообщение
+чисто на обоих изолятах, в уведомлении и в логах; звонки (CallKit нужна личность) и комнаты — вне
+scope, не трогали. flutter test 373 passed, analyze 0 ошибок. Смежное (НЕ трогали, вне запроса):
+call-путь пишет полный peer_pubkey в debug-файл через context — отдельная тема, если понадобится.
+
+**Device-тест b23 (звонки), два фикса (сборка +24):**
+(2/3) **Обезличивание звонков+комнат.** Владелец: звонок на заблокированном Pixel показал имя контакта =
+«дыра». Анализ: обезличивание звонящего было, но за флагом `app_in_foreground`, который на hard-kill
+протухает в true -> имя утекает; fallback-уведомление звонка вообще без гейта; handle светил префикс ключа;
+комнаты — roomName в title. Владелец выбрал «всегда скрыто». Фикс: `hideCallerIdentityOnIncoming` ->
+`!showCallerNameWhenLocked` (убрал foreground-зависимость, надёжно скрыто по умолчанию; opt-in тумблер
+сохранён -> имя на экране звонка после принятия); fallback + showCallNotification body -> `incomingEncryptedCall`;
+handle='' (через гейт); комнаты -> title 'Orpheus' + фикс id; убрал callerName из logcat-принта. Приём/отклонение
+не задеты (по call_id/callerKey в extra, не по имени) — проверено ревью.
+(4) **Запись звонка не появлялась в диалоге.** Call-log писался по МГНОВЕННОМУ `_callState==Connected`;
+ответ с лока на cold-start соединяется поздно через ICE-restart, отбой в момент Reconnecting -> запись
+пропадала. Фикс: липкий `_everConnected` (ставится в `_onConnected`, переживает Reconnecting), заменил
+мгновенную проверку в трёх точках teardown (_endCallButton/_onRemoteHangup/dispose). Ревью: дублей не
+добавляет (латч `_messagesSent`), Missed-ветка цела, `_onConnected` только от реального WebRTC-Connected.
+Известное pre-existing (вне scope): двойная запись call-log (локально + копия пиру) и семантика
+Outgoing/Incoming по «кто повесил трубку». flutter test 373 passed, analyze 0 ошибок. APK +24 -> оба устройства.
+
+**Device-тест b24 (звонки), ещё два (сборка +25):**
+(дубль) **Запись звонка задваивалась** на обеих сторонах (Connected-звонок). Корень: дизайн «пишем
+локально И шлём копию пиру» — раньше копия ТЕРЯЛАСЬ (плохая доставка), после наших фиксов доставки
+(pending-inbox, signal-token) стала доходить -> дубль вылез. Фикс: дедуп по call_id — и локальная
+запись, и peer-копия используют `_callId` как message_id; вторая отсекается штатным
+`messageExistsByMessageId` (обе стороны гонки; UNIQUE(contactPublicKey,messageId)+ignore как backstop).
+Ревью: для актуальных клиентов безопасно (call_id уникален per-звонок микросекундами, паритет сторон
+через offer['call_id']); деградация только для old-client без call_id (к старому дублю, не потеря).
+(момент-1) **Недозвон у инициатора = «Исходящий звонок»**, не отличить от дозвона («непонятно, взяли
+трубку»). Фикс (2 строки, без новых l10n): в Dialing/!everConnected ветках инициатор пишет "Missed call"
+(isSentByMe=true) -> рендер `_callStatusUiFor` показывает «Пропущенный / Исходящий» красным (call_made).
+flutter test 373 passed, analyze 0 ошибок. APK +25 -> оба устройства.
+Остаётся pre-existing вне scope: семантика Outgoing/Incoming по «кто повесил трубку» (не «кто инициировал»).
+
+**Device-тест b25 (звонки), три бага (сборка +26):**
+(1) **Направление звонка по «кто повесил трубку», а не по роли.** Звонок на ЗАЛОЧЕННЫЙ Pixel: у инициатора
+Samsung писалось «Входящий» (на разлоченный — верно «Исходящий»). Корень: `_onRemoteHangup` всегда писал
+«Incoming», `_endCallButton` — «Outgoing»; при ответе с локскрина отбой приходит с другой стороны. Фикс:
+единый `_writeCallLog()` пишет по РОЛИ (`_isOutgoing = offer==null && !autoAnswer`), а не по тому кто повесил;
+заменил разрозненную логику в 3 teardown-местах. Ревью (все 6 сценариев): корректно, дублей/пропусков нет
+(дедуп по call_id держит одну запись; латч _messagesSent — от двойной записи). Улучшил _isOutgoing по
+замечанию ревью (autoAnswer — для lost-offer incoming на cold-start, иначе пропущенный входящий мог стать
+исходящим).
+(2) **Подпись «Завершить» обрезалась снизу.** Overflow Column экрана звонка (высокий аватар+круги+визуализатор
++ нижний SizedBox 60). Сократил отступы: нижний 60->16, control_panel 40->24, верхний 40->24. SafeArea даёт
+нижний inset. Кнопка с подписью помещается.
+(3) **Листик в статусбаре -> щит.** Постоянный foreground-сервис (flutter_background_service) без явной иконки
+брал лончер (лист). Владелец выбрал ЩИТ. Создал `ic_bg_service_small.xml` (плагин ищет это имя) + заменил
+`ic_stat_orpheus.xml` («O»->щит) — единый монохромный щит во ВСЕХ статусбар-иконках (сервис, уведомления,
+CallAudioService, звонки). Проверить на устройстве что плагин подхватил ic_bg_service_small.
+flutter test 373 passed, analyze 0 ошибок. APK +26 -> оба устройства.
+
+**Device-тест b26 (сборка +27 + диагноз серверного бага):**
+(иконка, ИСПРАВЛЕНО +27) Щит из +26 НЕ применился: плагин `flutter_background_service_android` 6.3.1
+поставляет СВОЙ `ic_bg_service_small.png` в density-папках (hdpi/mdpi/xhdpi/xxhdpi), а мой был vector в
+generic `drawable/` — Android для конкретной плотности предпочитает density-match PNG плагина. Фикс:
+сгенерировал PNG-щит (Pillow, полигон) в app `drawable-{mdpi..xxxhdpi}/ic_bg_service_small.png` — app res
+перебивает library res. Применится после перезапуска сервиса (force-stop/ребут; чистая установка — сразу).
+(звонок cold-start, ДИАГНОЗ — НЕ исправлено, ждёт логов) Первый звонок после ПОЛНОГО закрытия обоих
+приложений: инициатор сбрасывается, отвечающий висит без медиа; второй звонок ок. Корень (по анализу
+кода) — СЕРВЕРНЫЙ stale-session: inbound-сигналинг (call-answer+ICE) идёт ТОЛЬКО по WS инициатора, а на
+cold-start его серверная сессия протухшая/флапает (push-изолят держал сессию в kill-окне; сервер держит
+мёртвую). Ответ роутится в старый мёртвый сокет -> инициатор не получает answer -> ICE Failed -> teardown;
+отвечающий висит в Connecting с бесполезными ICE-restart. Второй звонок: сессии свежие, Pixel разблокирован
+(нет 6с-ожидания WS/PIN). Наш session-takeover (S8 в серверной wl/dev) снимает siblings только >45с — свежий
+kill (сессия молодая) не покрывает. Митигации: серверная (BACKEND_TASK_WS_SESSIONS §4.1-A fan-out ко ВСЕМ
+живым сессиям + быстрая чистка мёртвых, или снизить takeover-порог для звонков); клиентская (caller-side
+answer-watchdog как у отвечающего + WS-guard перед call-offer на cold-start). ЖДЁМ ЛОГИ (владелец шарит
+через экран отладки, оба телефона) для подтверждения перед правкой звонков (критичный путь).
+
+## 2026-07-14 — Cold-start первый звонок: глубокий анализ 3 агентами + Фаза 1 (клиент, +28)
+
+**Глубокий анализ (workflow, 3 агента: серверный/клиентский/security).** Корень — routing-target, не крипто:
+на cold-start свежий сокет инициатора ещё проходит PoP, verified только старый мёртвый push-сокет; сервер
+«доставляет» call-answer в него (на полуживом TCP send не падает -> delivered>0 -> НЕ кладёт в offline ->
+ответ потерян). Оптимальный вариант — ГИБРИД, клиентский primary поверх уже-живущей серверной базы
+(S8 takeover + fan-out + offline-persist). Серверные варианты либо опасны (снижение порогов 45с/75с бьёт по
+РФ/РКН-юзерам — ОТКЛОНЕНО), либо тяжёлые (ACK — v2). Security-долги (не блокируют): DoS offline-очереди
+(нет cap, ice не дедупится), флип SIGNAL_REQUIRE_POP (рано — клиенты без токена).
+
+**Фаза 1 СДЕЛАНА (клиент, +28, коммит следующий):** (a) WS-guard в `_startOutgoingCall` — перед offer ждём
+Connected (=pop-ok) до 4с (форсим реконнект только если Disconnected/AuthFailed, не рвём идущий PoP;
+по таймауту звоним, offer идёт по HTTP); свежий сокет verified ДО ответа -> fan-out доставит на живой.
+(b) Терпение: pre-connect ICE-Failed (!_everConnected) НЕ рвёт звонок — собеседник сам делает ICE-restart
+(его watchdog 4/6с), инициатор только ОТВЕЧАЕТ (нет glare!), 45с backstop. Ревью (7/8 correct): нашло
+реальный дефект — пропущен post-loop `!mounted/_isDisposed` guard (dispose в последние 150мс -> initiateCall
+после dispose -> повторный захват микрофона + spurious offer); ИСПРАВЛЕНО. flutter test 373, analyze 0.
+**Резерв caller-side ICE-restart watchdog — НЕ делаю** (WS-guard+терпение должны хватить; наивный watchdog =
+glare-дедлок; анализ пометил «только если field-тест покажет»). **Фаза 2 (сервер offline DoS cap+dedup) —
+следующая.** SIGNAL_REQUIRE_POP флип — НЕ трогаю (рано).
+
+**Фаза 2 СДЕЛАНА (сервер, коммит 62b2ad5 wl/dev, автодеплой, 181 тест):** DoS офлайн-очереди —
+`MAX_OFFLINE_MESSAGES_PER_PAIR`=500 (trim старейших в save_offline) + `offline_call_sweeper` (120с,
+активно чистит протухшие call-сигналы, не ждёт реконнекта; chat не трогает). CI зелёный.
+
+**Иконка статусбара -> фирменный щит Орфея (+29).** Владелец попросил заменить простой щит на брендовый.
+`assets/images/logo.svg` = контур щита с аудио-эквалайзером внутри. Монохромная (белая) версия:
+vector `ic_stat_orpheus.xml`+`ic_bg_service_small.xml` (щит stroke из SVG-path + 5 баров fill) для
+уведомлений/звонков; density-PNG `ic_bg_service_small.png` (mdpi..xxxhdpi, PIL) для постоянного сервиса
+(перебивают плагинские, как в +27). Читаемость в 48px проверена. Применяется после перезапуска сервиса.
+
+---
+
+## 2026-07-13 (2) — Инцидент «PoP-lockout» разобран; клиент: статус AuthFailed; сервер: PR #16
+
+**Разбор инцидента (логи app-logs-217525):** «сервер недоступен с мобильного интернета» оказался
+САМОБЛОКИРОВКОЙ, а не сетью. Сервер с mandatory-PoP (в проде с вечера 09.07, PR #15, без grace-режима —
+премиса «живых клиентов нет» была ложной) требует `pop-proof` ПЕРВЫМ фреймом; v1.1.6 сразу шлёт
+`register-fcm` → мгновенный молчаливый kick 1008 → вечный реконнект ~1/сек (1861 коннект/час с одного
+устройства; второе на 12с-цикле push-изолята). Лог доказал: телефон достукивается до api.orpheus.click
+и по WiFi, и по мобильной сети — водораздел «работает/нет» шёл по ВЕРСИИ приложения (+20 с PoP проходит
+везде), а не по типу сети. `check-update` отдаёт `version_code=0` (версий в админке нет) — старые клиенты
+не могут даже узнать об обновлении. Память обновлена (pop-epic-progress, calls-cross-network-turn,
+backend-repo-github: бэкенд = GitHub `vadimkolobanov/Orpheus`, доступен через gh).
+
+**Сервер (PR #16 `feat/pop-fail-observability`, ветка запушена, в master НЕ мержил):** (1) `log_event`
+на каждый PoP-fail с причиной (`wrong_first_frame`+тип фрейма / `bad_signature` / `address_mismatch` /
+`timeout` / `invalid_json` / `socket_error`) — раньше кик был немым; (2) фрейм `pop-error` с кодом причины
+перед `close(1008)`; (3) tarpit — отвергнутый сокет додерживается до конца 10с-окна хендшейка (дренаж
+фреймов) → реконнект-цикл старых клиентов замедляется ~1/сек → ~1/11с без изменений клиента. pytest:
+168 passed (165 + 3 новых). Адверсариал-ревью: багов не подтверждено (starlette-семантика, ресурсы,
+sweeper, взаимодействие с клиентом +20 — чисто).
+
+**Клиент (этот коммит):** новый статус `ConnectionStatus.AuthFailed` — серия из 3 подряд проваленных
+PoP-хендшейков (pop-error ИЛИ закрытие после отправленного proof без pop-ok, счёт раз за цикл) означает
+«отказ авторизации, не сеть»: ретраи на максимальном backoff (30с), смена сети/resume backoff НЕ сбрасывают,
+карточка «Системы» показывает «Авторизация отклонена», на контактах одноразовый баннер + автопроверка
+обновлений (EN/RU). Обработка `pop-error` (свой close, код сохраняется в `lastPopErrorCode`); в onDone
+логируются `closeCode`/`closeReason` (во время инцидента details были пусты). Push-изолят: экспоненциальный
+backoff 8с→5мин вместо редиала каждые 4с. Тесты: 4 новых (порог/стрим/disconnect), suite 366 passed,
+analyze 0 ошибок.
+
+**Дальше по плану:** релиз 1.1.7+21 (бамп, APK, админка `required=false` — решение владельца: мягкое
+обновление; регистрацию версии в админке владелец делает сам), потом хвосты: lockout-алерт на сервере,
+rate-limit, HTTP-PoP для `/api/signal`, session takeover, кто долбит `/api/support/stats` с 401.
+Уточнение по устройствам: залоченный Xiaomi — НЕ владельца (у владельца Samsung + Pixel); это стороннее
+тест-устройство (вероятно, тестировщика/Колобанова).
+
+**Бамп 1.1.7+21 (этот коммит):** версия поднята для сборки с AuthFailed + PoP-фиксами; APK собирается
+`flutter build apk --release`, уходит в `Колобанов/02-Тестировщику` и в админку (загрузка/регистрация —
+владелец, позже). `debugFileLogging` оставлен `true` — это тест-линия 1.1.7, реальный релиз = 1.1.8.
+
+**Хвосты S2/S5/S7/S8/S9 (позже в этот же день).** ВАЖНО: PR #16 закрыт vadimkolobanov БЕЗ мержа и
+без комментов (08:34 UTC) — прод так и живёт с немым PoP-киком; новые PR не открываю, ветки запушены,
+владелец разбирается с Вадимом. Сервер (ветка `feat/ws-hardening` поверх `feat/pop-fail-observability`,
+коммит 7203cf9, pytest 179 passed): S2 lockout-детектор (>=60 PoP-отказов за 5 мин -> одна error-запись,
+cooldown 30 мин), S5 rate-limit WS-хендшейков до accept (per-key 30/мин, per-IP 120/мин через
+X-Forwarded-For, поверх tarpit), S8 session takeover (promote снимает siblings без активности >45с —
+чинит залипший presence после kill: мёртвый сокет прятал is_first), S7 сервер: pop-ok несёт 12ч HS256
+bearer, /api/signal проверяет; фаза 1 МЯГКАЯ (без токена — warning-лог), enforcement за SIGNAL_REQUIRE_POP.
+Клиент (этот коммит, S7): оба изолята сохраняют signal_token из pop-ok в prefs (kPrefSignalPopToken),
+HTTP-фолбэк /api/signal шлёт его в body; пойдёт в сборку +22. S9 расследован: 401-поллер
+/api/support/stats = брошенная разлогиненная вкладка админки на orpheus.click (бейдж в AdminLayout
+поллит раз в 30с без проверки токена, Chrome-throttling даёт ровно 1/мин); фикс на стороне САЙТА
+(одна строка: не поллить без токена); бонус-находка: в прод-бандле AdminGuard остался debug-маячок
+fetch на 127.0.0.1:7242 — убрать при пересборке сайта. Бэкенд по S9 исправен.
+
+---
+
+## 2026-07-13 — TURN оживлён, кросс-сетевой звонок работает; РФ «белые списки» на мобильном
+
+**TURN (coturn на 194.87.151.56, Timeweb) починен, звонок подтверждён.**
+- Корень поломки: в `turnserver.conf` `listening-port` указан ДВАЖДЫ (3478 и 443); coturn берёт только
+  ПОСЛЕДНЕЕ (443) → на 3478 не слушал, а nat-редирект `443→3478` бил в мёртвый порт. Фикс на сервере:
+  закомментить второй `listening-port=443`, рестарт → coturn на 3478 (TCP+UDP). Схема коллеги (Vadim, Вариант Б:
+  coturn на 3478 + редирект 443→3478) сохранена. coturn под юзером turnserver не может биндить привил. 443
+  (`bind: Permission denied`) — ещё довод за 3478.
+- Живой кросс-сетевой звонок: Pixel (РФ WiFi) ↔ Samsung (WiFi+VPN, другой NAT) — СОЕДИНИЛСЯ. В логах Pixel
+  собрались host+srflx+**relay** кандидаты (TURN allocate работает). Было «0 relay/srflx» — TURN мёртв.
+- Клиент `webrtc_service.dart`: мульти-URL `turn:…:3478` (UDP, рабочий РФ) + `:3478?transport=tcp` +
+  `:443?transport=tcp` (фолбэк). WebRTC сам берёт живой транспорт.
+
+**РФ-фильтрация (эмпирика с телефонов — важно для архитектуры):**
+- Инверсия премисы коллеги: на домашнем WiFi UDP 3478 к серверу РАБОТАЕТ, а TCP 443 к нашему IP DPI режет
+  (tcpdump на сервере: 0 внешних SYN на 443). Маскировка под TCP:443 в РФ НЕ проходит, UDP — проходит.
+- Мобильный под **«белым списком»** (реальная госпрактика РФ: реестр соц-значимых с 09.2025, в Москве массово
+  с 03.2026): на соте MegaFon работают ТОЛЬКО whitelisted рос-сервисы (Госуслуги/Яндекс/Mail.ru/Ozon), а всё
+  иностранное и не-из-списка (Apple/Wikipedia/Google/Telegram/Cloudflare/наши IP) — блок по назначению. Обхода
+  НЕТ (ни VPN, ни CDN, ни туннель — Amnezia на соте не встаёт). Это госфайрвол, не наш конфиг. Приняли как
+  ограничение: WiFi/обычный мобильный — ок; под белым списком мобильный не работает.
+- (Сам VPN на WiFi работает — Samsung вышел через нем. IP, звонок через relay прошёл. На соте VPN блокируется.)
+
+**Мелкий UI-фикс:** карточка «Регион» (`status_screen`) показывала «RU» дважды (`subtitle=_country` дублировал
+код вместо названия) — убран дубль. analyze status_screen — 0 ошибок (pre-existing `_reconnectCount` warning не трогал).
+
+**ОСТАЛОСЬ на завтра:** (1) две плашки Orpheus в шторке (fg-сервис одно уведомление id 887; второе — от
+отдельного механизма/native, копнуть `push_connection_service`/native); (2) geo-IP: владелец выбрал через
+СВОЙ бэкенд + Режим по IP — клиентская часть готов сделать, нужен серверный эндпоинт (задача коллеге);
+(3) мульти-транспорт архитектура (CDN-фронт для WS) — на мобильном под белым списком не спасёт, актуально
+для менее фильтрованных сетей. flutter test не гонял (менялись комменты webrtc + region-карточка).
+
+---
+
+## 2026-07-12 — Диагноз «звонки не соединяются» + техдолг post-PoP (A/B)
+
+**Симптом (device-тест):** звонок звонит, трубку берут, но соединения нет (ICE Failed).
+
+**Диагноз (3 Explore-агента сдиффили master↔wl/dev + рантайм-пробы с телефона):** причина СЕТЕВАЯ,
+не код. Телефоны были в РАЗНЫХ сетях (WiFi ↔ мобильный интернет), а в конфиге WebRTC единственный
+ICE-сервер — недостижимый TURN `194.87.151.56`, STUN нет вообще. Между двумя NAT без STUN/TURN пробить
+нечем (host-кандидаты приватны). Подтверждено: звонок на ОДНОЙ WiFi без VPN соединился, звук отличный.
+«Раньше работало» = оба были на одной WiFi (прямой host-коннект). Фикс кросс-сети — серверный (оживить
+coturn на 194.87.151.56: bind не на localhost, открыть udp/3478 + tcp fallback + relay-диапазон).
+
+**Заодно устранён техдолг, найденный при разборе (реальные латентные баги, НЕ этот симптом):**
+- **B (валидация контакта):** `_isValidPublicKey` проверял стандартный base64 от 32 байт — принимал
+  старый X25519-ключ и ронял настоящий Ed25519-адрес с символами `-`/`_`. Добавлен единый
+  `CryptoService.isValidAddress` (base64url, 43 симв./32 байта), диалог добавления через него.
+- **A (teardown мимо gate):** `hang-up`/`call-rejected` выведены из-под строгого mutual-add
+  (`_callTeardownTypes` в `incoming_message_handler`) — активный звонок всегда можно закрыть; реальное
+  закрытие фильтруется по пиру в CallScreen.
+- **C (окно `Authenticating`):** не баг — важные сигналы штатно доставляет HTTP-fallback, потери нет.
+- **call_screen:** `_sendCallStatusMessageToContact` резолвит X25519 enc-ключ перед шифрованием
+  (раньше шифровал «на адрес» после миграции).
+
+Тесты: +2 (валидатор адреса, teardown от не-контакта). **flutter test — 362 passed, analyze — 0 ошибок.**
+
+**Device-тест (12.07) подтвердил диагноз:** валидный адрес добавляется; звонок не-взаимному дропается;
+взаимная пара с ВПН на одном телефоне НЕ соединяется (host-кандидаты уходят в tun → нет прямого пути,
+relay нет); ВПН off + одна сеть → соединяется. То есть сетевой диагноз доказан на устройстве.
+
+**Доп. фикс по замечанию владельца:** на экране «Профиль» счётчик «сообщения/отправлено» считал
+записи звонков за переписку (они лежат в таблице `messages`). Добавлен общий набор маркеров
+`ChatMessage.callEventTexts` + `isCallEvent`; `getProfileStats` исключает call-события из счётчиков
+(в чате они и так рисуются call-иконкой — `chat_screen`). analyze — 0 ошибок.
+
+**UI-аудит по скринам (Samsung, RU).** Корень обрезок — на Samsung крупный системный шрифт
+(`font_scale 1.3`) + больший размер экрана (density override 640 vs 600); RU-текст длиннее EN и
+резался в «...». Правки (устойчивы к любому масштабу): (1) `AppButton` — подпись в `FittedBox(scaleDown)`
+вместо `ellipsis` (чинит «Отм…»/«Доба…» и все диалоговые кнопки разом); (2) имя ассистента в строке
+Оракула — тоже `FittedBox` (полное «Оракул Орфея» ужимается, а не режется); (3) RU-подсказка поля
+ключа укорочена до «Ключ или QR»; (4) убран ставший неиспользуемым `import dart:convert` в
+`contacts_screen`. Глобальный клэмп `textScaler` НЕ делал — предложен владельцу отдельно. analyze — 0 ошибок.
+
+**Ещё по замечанию владельца:** кнопка «Поделиться» на «Профиле» обрезала низ букв при 1.3× —
+она была в жёсткой `SizedBox(height: 50)` (сырой `ElevatedButton.icon`, не `AppButton`). Заменил на
+`minimumSize: Size(0, 50)` — растёт под текст. Прочесал проект: паттерн `SizedBox(height,Button)` был
+только тут; в теме кнопок `minimumSize` (не `fixedSize`), системного клиппера нет. Убрал заодно
+неиспользуемый импорт `auth_service` в `settings_screen`. analyze — 0 ошибок.
+
+**Страховочный клэмп системного шрифта (по решению владельца: A + клэмп 1.3).** В `MaterialApp.builder`
+(`main.dart`) обёртка `MediaQuery(textScaler: mq.textScaler.clamp(maxScaleFactor: 1.3))` — охватывает
+контент, оверлей LockScreen и pushed-маршруты. Увеличение до 1.3× уважаем, выше режем (страховка от
+1.5–2.0×). Основа — пофиксельная устойчивость (`FittedBox`); клэмп 1.3 Samsung (ровно 1.3×) не трогает.
+analyze — 0 ошибок.
+
+**EN-аудит (Samsung, EN, 1.3×).** Крупных обрезок нет — все правки переносятся на английский (имя
+«Orpheus Oracle» целиком, «Share» без обрезки, кнопки «Cancel»/«Add», метки «Call · Outgoing»
+локализованы). Две мелочи починены: (1) `status_screen._formatUptime` хардкодил кириллические `ч/м/с`
+— в EN светилось «20c»; вынес единицы в l10n (`unitHourShort/MinuteShort/SecondShort`, EN `h/m/s`,
+RU `ч/м/с`); (2) `enterName` укорочен («Enter name» / «Введите имя») — длинный hint обрезался в поле
+при 1.3×. analyze — 0 ошибок (pre-existing `_reconnectCount` не трогал — вне задачи).
+
+**Баг «Авто»-языка (по замечанию владельца).** При выборе «Системный/Auto» язык залипал на прежнем
+(остался EN, хотя телефон RU — проверено adb: `persist.sys.locale=ru-RU`, `system_locales=ru-RU`).
+Корень: `MaterialApp.locale = LocaleService.selectedLocale` (на Auto = `null`); переход локали в `null`
+у Flutter не пере-резолвится вживую (`_onLocaleChanged` делает setState, State и MaterialApp — один,
+резолв-колбэк корректный, но null-путь не срабатывал live). Фикс: `locale: effectiveLocale` —
+всегда конкретная локаль (Auto+system-ru → `ru`), переключение применяется сразу. analyze — 0 ошибок.
+
+---
+
+## 2026-07-10 — Строгий mutual-add для сообщений и звонков (продуктовое решение)
+
+**Задача (владелец):** high-risk-модель — принимать сообщения/звонки ТОЛЬКО от добавленных контактов;
+не-контакты дропать целиком. Раньше неизвестный отправитель авто-добавлялся, его сообщение
+расшифровывалось и показывалось (поведение оригинального Orpheus).
+
+**Ключевое (перепроверено перед реализацией):** сервер zero-knowledge — о контактах не знает,
+enforcement только на получателе. В **фоне (killed-app) зашифрованная БД ненадёжна** (`getContact` там
+best-effort с таймаутом), поэтому фоновый гейт нельзя по БД — иначе звонок от реального контакта отвалится.
+
+**Реализация (client-only):**
+- **Foreground** (`incoming_message_handler.handleDecoded`): после проверок sender добавлен гейт
+  `if (!await _db.isContact(senderKey)) return;` — дропает chat/call-offer/ice/answer/hang-up/
+  delete-for-both от не-контактов (без расшифровки/показа/авто-добавления). Комнаты/Оракул сюда не
+  приходят (свои пути), support-reply обработан выше.
+- **Background** (`notification_service.handleBackgroundPush`): гейт для peer-типов (call-offer/chat/
+  new_message) по **allow-list** адресов контактов из secure storage; комнаты (`room-*`)/support не гейтим.
+- **Allow-list**: `DatabaseService` пишет адреса контактов в secure storage (`kContactAllowlistKey`,
+  Keystore-шифр) при add/delete; `DatabaseService.loadContactAllowlist()` (static) читает без БД — для изолята.
+- `isContact()` + адаптер в main.dart. Тесты: `test/services/incoming_message_handler_test.dart` —
+  строгий гейт (не-контакт chat+call → дроп, контакт → проходит). Allow-list синкается разово при первом
+открытии БД (геттер `database`) — покрывает существующие контакты после апгрейда. **flutter test — 360 passed, analyze 0.**
+
+## 2026-07-09 — PoP эпик: клиентский крипто-фундамент (Ed25519 идентичность), шаг 7/14
+
+**Контекст:** эпик mandatory proof-of-possession для WS (закрывает имперсонацию по known-pubkey,
+находка аудита). Серверная сторона уже готова (ветка сервера `feat/pop-ed25519`, 165 тестов).
+Дизайн — `docs/POP_WEBSOCKET_DESIGN.md` §7–8. Живых клиентов нет → clean-slate, mandatory.
+
+**Сделано (ветка `feat/pop-ed25519`):** `lib/services/crypto_service.dart` переведён на модель
+одного root-seed. Из 32-байтного `orpheus_root_seed` через HKDF-SHA256 (salt `orpheus-hkdf-v1`,
+info-метки на ed/x) выводятся **Ed25519** (сетевой АДРЕС `addressBase64` = b64url ed_pub + подпись
+PoP) и **X25519** (`encryptionKeyBase64` = enc-ключ, ECDH-путь `encrypt/decrypt` без изменений).
+Новое API: `signPopProof(nonce, ts)` (домен-разделённая подпись хендшейка) и `identityBundle()`
+(самоподписанная связка адрес↔enc для directory/QR). `init/generateNewKeys/importPrivateKey/
+getPrivateKeyBase64/deleteAccount` перевязаны на seed; legacy X25519-ключи чистятся.
+
+**Интероп ДОКАЗАН:** `test/crypto_pop_test.dart` сверяет эталонный вектор, вычисленный на сервере
+(Python `cryptography` HKDF + PyNaCl Ed25519 + X25519). Адрес, enc-ключ, pop-подпись и bind-подпись
+совпадают байт-в-байт. `flutter test` — 2 passed. Значит Dart-подписи проверяются на Python-сервере.
+Зависимостей не добавляли (`package:cryptography` уже умеет Ed25519/HKDF/X25519).
+
+**Шаг 9a (сделан):** PoP-хендшейк в `websocket_service` — статус `Authenticating` между `Connecting`
+и `Connected`; после открытия сокета клиент ждёт `pop-challenge`, подписывает `signPopProof(nonce, ts)`,
+шлёт `pop-proof`, и только на `pop-ok` становится `Connected` (стартует ping-pong + слив pending).
+Таймаут хендшейка 12с. Компилируется (`dart analyze` — только преждние `avoid_print`-инфо).
+
+**Шаги 8,10,11,12,13 (СДЕЛАНЫ) — клиентская фаза завершена:**
+- **Свитч идентичности (12):** `cryptoService.publicKeyBase64` → `addressBase64` во всех routing/account
+  местах (main.dart WS-коннект/реконнект + push-heartbeat + switchApiServer, license/support/rooms/
+  telemetry/call/purchase/room_chat/settings/status/main_callkit). Идентичность = Ed25519-адрес везде.
+- **Контакты (11):** `Contact.encryptionKey` (X25519) + колонка в БД (v9 миграция) + `getContactEncryptionKey`;
+  `addContactIfMissing(pubkey, {encryptionKey})` дописывает enc при узнавании.
+- **Расшифровка (12):** `incoming_message_handler` резолвит X25519 enc-ключ отправителя из inline-bundle
+  сообщения (`senc`/`ssig`, проверка самоподписи `verifyIdentityBundle`) или сохранённого контакта;
+  `sendChatMessage` прикрепляет свой подписанный enc-bundle inline; чат шифруется на `contact.encryptionKey`
+  (роутинг — по адресу). Новый `IdentityDirectoryService` (резолв `GET /api/identity` с проверкой подписи).
+- **Изолят (10):** `push_connection_service` читает root_seed из secure storage, деривит Ed25519 и проходит
+  PoP-хендшейк (иначе сервер отклонял бы фоновое подключение).
+- **Публикация (8):** на регистрации/импорте клиент публикует связку в directory (`POST /api/identity`).
+- Тесты: обновлены фейки/схемы (contacts.encryptionKey, новые методы интерфейсов). `flutter test` — **359 passed**, `dart analyze` — 0 ошибок. Интероп-вектор Dart↔Python — зелёный.
+
+**НЕ покрыто автотестами (нужна ручная проверка):** e2e на устройстве (register → publish → connect+PoP →
+сообщение от незнакомца → звонок) + сборка/установка APK. **Cert pinning (9b)** вынесен отдельным
+контролем — слепой деплой без проверки на устройстве может закирпичить связь. QR по-прежнему несёт адрес
+(offline in-person add дорезолвит enc через directory/inline) — bundle-QR как follow-up.
+
+## 2026-07-08 — Фикс: ответ на звонок с локскрина не соединялся (glare)
+
+**Симптом (device-тест, 2 телефона):** A звонит B; B отвечает **с заблокированного
+экрана** (нативный CallKit) → соединение НЕ встаёт, обе стороны отваливаются по
+таймауту. В разблокированном состоянии (in-app экран «Ответить») звонок соединялся.
+
+**Диагностика (лог B):** при ответе с лока приложение стартует «с нуля»
+(`PANIC: Service initialized` + свежий WS-коннект), и вместо ответа логирует
+`--- [WebRTC] INITIATING CALL (OFFER) ---` → шлёт СВОЙ `call-offer`. A при этом висит
+на `⏳ ICE Queued (Waiting for SDP)` (ждёт answer, которого нет) → оба таймаутят (glare).
+
+**Корневая причина (разбор кода, 3 агента + синтез):** роль offer/answer выбирается
+ТОЛЬКО по наличию offer (`CallSessionController.initialStateFor`: `autoAnswer && hasOffer`
+-> Connecting; иначе `Dialing`). SDP offer звонящего ехал к отвечающему **только внутри
+native `extra` CallKit**; на cold-start с лока `extra` не доезжает до свежего listener'а
+(`activeCalls()` пуст, RAM-буфер — другого изолята), offer==null -> `Dialing` ->
+`initiateCall()`. Т.е. отвечающий становился звонящим.
+
+Сделано (4 файла, локально):
+- `pending_call_storage.dart`: disk-кэш offer по `callId` (`cacheOffer`/`loadCachedOffer`,
+  TTL 90с, сверка callId). Это НЕ триггер авто-открытия — только хранилище offer.
+- `notification_service.dart` (`_showNativeIncomingCall`, push-изолят): при показе
+  входящего кладёт offer в disk-кэш.
+- `main_callkit.dart` (`_handleCallKitAccept` + `_checkActiveCallOnStart`): если offer
+  не пришёл через `extra`/буфер — достаёт из disk-кэша по `callId`.
+- `call_screen.dart` (`_initCallSequence`): guard — при `autoAnswer` проверяем ПЕРВЫМ;
+  offer==null -> чистый обрыв (`_onError`), НИКОГДА не `initiateCall` (страховка от glare).
+
+**Проверено на устройстве (сборка +20):** ответ с лока → `--- [WebRTC] ANSWERING CALL ---`
+→ `WS SEND [call-answer]` → ICE `Connected`/`Completed`, `ICE-STATS sent/recv` (медиа в обе
+стороны). Разблокированный путь и исходящий звонок не задеты.
+
+Версия `1.1.7+19` -> `1.1.7+20`. `flutter analyze` — 0 ошибок, `flutter test` — 357/357.
+
+---
+
+## 2026-07-08 — Удаление комнаты (владелец) + освежён офлайн-changelog
+
+**Контекст:** коллега по бэкенду закрыл серверные задачи №2–№5 (кроме оплаты).
+Разведка (3 агента) показала: №2 (WS-сессии) — клиентский код менять НЕ нужно
+(сервер подстроился под существующий контракт, костыли оставляем до device-теста);
+№3/№4 — клиент уже готов, только верификация; №5 (удаление комнаты) — единственная
+разблокированная клиентская работа. Владелец выбрал: №5 + полировка фолбэка changelog.
+
+Сделано:
+- **№5. Удаление комнаты у всех (owner-only).** Сервер поднял
+  `POST /api/rooms/{id}/delete` (проверяет владельца). На клиенте:
+  - `RoomsService.deleteRoom(roomId)` — клон `leaveRoom` (POST, `X-Pubkey`, 200-гейт).
+  - `room_chat_screen`: пункт меню «Удалить комнату» — guard `widget.room.isOwner
+    && !_isOrpheusRoom`, последним в меню (самое деструктивное); `_confirmDeleteRoom`
+    с `Icons.delete_forever` + `isDanger`. Успех -> `Navigator.pop`, список сам
+    перезагружается через `loadRooms` (локальной таблицы комнат нет).
+  - l10n EN+RU: `deleteRoom`, `deleteRoomTitle`, `deleteRoomDesc`, `deleteConfirm`.
+  - Известный follow-up: участник в открытой удалённой комнате сам не вылетает
+    (нет обработки WS-события `room-deleted`) — увидит пропажу при refresh.
+- **№4. Офлайн-фолбэк changelog.** `config.dart:changelogData` был EN и устарел
+  (до 1.1.4). Схлопнут в один нейтральный RU-плейсхолдер, версия берётся из
+  `appVersion` (не устареет при бампах). Показывается только когда сервер
+  недоступен/пуст; основной путь (RU с сервера) не трогали. Тест `config_test`
+  (наличие полей/непустая версия) проходит.
+
+Версия `1.1.7+18` -> `1.1.7+19`. `flutter analyze` — 0 ошибок, `flutter test` — 357/357.
+
+**НЕ трогал:** костыль `forceReconnectIfStale` после активации (снять только после
+device-подтверждения серверного фикса №2). Верификация №2/№3/№4 на устройстве — за
+владельцем/тестировщиком (чеклист есть в отчёте разведки).
+
+---
+
+## 2026-07-08 — Активация лицензии впускает в приложение по HTTP-ok
+
+**Проблема (device-тест, критично):** пользователь вводит промокод, сервер
+активирует лицензию (`activate-promo` -> ok; повторный ввод -> «уже использована»),
+но приложение НЕ пускает внутрь — ждёт пуш `license-status: active` по WebSocket,
+которого сервер после активации не шлёт (и не переотправляет на реконнекте). Итог:
+лицензия списана, а юзер откинут обратно на экран лицензии.
+
+Сделано:
+- `license_screen`: после HTTP-ok от `activate-promo` сразу вызываем
+  `widget.onLicenseConfirmed()` (вход), не дожидаясь WS-пуша. Обработчик
+  идемпотентен (`setState` + persist), guard по `mounted`.
+- Клиентское прикрытие серверного бага. Корректная доставка `license-status`
+  (сразу после активации + переотправка на каждом реконнекте) — задача бэкенда,
+  зафиксирована в `docs/SERVER_TASKS_SUMMARY.md` §2 и `BACKEND_TASK_WS_SESSIONS.md`.
+
+Версия `1.1.7+17` -> `1.1.7+18`. `flutter analyze` — 0 ошибок.
+
+---
+
+## 2026-07-08 — Скриншоты в тест-сборках (FLAG_SECURE off)
+
+**Задача:** тестировщику нужны скриншоты экранов для отчётов, но релизное окно
+защищено `FLAG_SECURE` (скриншот выходит чёрным). Снять защиту нужно ТОЛЬКО в
+тест-сборках, не ослабляя релиз.
+
+Сделано:
+- Нативный `setScreenSecure(enabled)` в `MainActivity` (MethodChannel, UI-thread):
+  `addFlags`/`clearFlags(FLAG_SECURE)`.
+- `DeviceSettingsService.setScreenSecure` — Dart-обёртка (no-op вне Android).
+- В `main` при старте: `setScreenSecure(!AppConfig.debugFileLogging)` — тест-сборка
+  снимает флаг (скрины разрешены), релиз держит нативный `FLAG_SECURE` с первого
+  кадра. Отдельного тумблера нет — переиспользован флаг файловых логов
+  `debugFileLogging`.
+
+Часть сборки `1.1.7+18` (бамп версии — вместе с фиксом активации лицензии).
+`flutter analyze` — 0 ошибок.
+
+---
+
+## 2026-07-07 — Переключение API-сервера (прод/тест) в тест-сборках
+
+**Задача:** команда подняла отдельный тестовый бэкенд, чтобы серверные изменения
+не задевали прод. Нужно переключать клиент между прод и тестовым сервером без
+пересборки — прямо на экране лицензии (до входа), чтобы гонять весь флоу
+(регистрация/лицензия/оплата) против теста.
+
+Сделано:
+- **Runtime-хост**: `AppConfig.serverIp`/`apiHosts` из `const` -> геттеры поверх
+  `_activeHost` (сохраняется в `SharedPreferences`; allowlist из двух хостов:
+  `api.orpheus.click` / `dev.orpheus.click`). Поскольку `httpUrl`/`webSocketUrl`
+  резолвят хост заново на каждый вызов, почти все call-site'ы подхватили
+  runtime-хост без правок. `loadActiveHost()` на старте до сети,
+  `resetHostToProd()` на wipe/duress.
+- **Переключение** (`switchApiServer` в `main`): persist -> `disconnect()` ->
+  `connect()` (переезд main-WS на новый хост; `connect` — no-op при Connected,
+  поэтому disconnect первым).
+- **Push-изолят**: отдельный процесс со своим `AppConfig`; после `prefs.reload()`
+  хидратит хост из prefs и форсит редайл при смене (`_connectedHost`). Пока
+  приложение живо, его сокет закрыт, поэтому рестарт сервиса не нужен.
+- **UI** (`license_screen`): long-press по заголовку за `debugFileLogging` ->
+  диалог прод/тест, «Проверить связь», «Применить», «Сбросить на прод»; постоянный
+  баннер `TEST SERVER` при не-прод хосте. `release_notes` больше не хардкодит хост.
+- **Баг device-теста**: «Проверить связь» показывала прод недоступным — бил в
+  `/health`, которого на бэке нет (404). Теперь бьёт `/api/public/releases` и
+  считает доступностью любой HTTP-ответ. (Тестовый `dev.orpheus.click` пока не в
+  DNS — ждёт подъёма серверной части.)
+- l10n EN+RU (11 ключей), +4 юнит-теста на runtime-переключение.
+
+Версия `1.1.7+15` -> `1.1.7+17` (промежуточный +16 отозван из-за бага /health).
+`flutter analyze` — 0 ошибок, `flutter test` — 357/357.
+
+---
+
+## 2026-07-05 — Персистентные логи для тест-сборок + WS-реконнект после активации
+
+**Проблема:** при device-тесте у Samsung после активации лицензии не поднимался
+онлайн до перезапуска приложения; а логи прокручивались из logcat-буфера (историю
+не поднять после рестарта). Владелец попросил: писать логи в файл, чтобы переживали
+рестарт, и чтобы тестировщик мог выгрузить их из приложения и прислать (без ПК).
+
+Сделано:
+- **Файловое логирование** (`DebugLogger.enableFileLogging`): все логи -> файл
+  `<supportDir>/orpheus_debug.log` (append + ротация ~4МБ), переживают рестарт.
+  Включается из `main` за флагом `AppConfig.debugFileLogging` (перед релизом -> false).
+- **Перехват `print`**: `runApp` обёрнут в Zone (`_runOrpheus`) -> `print` сервисов
+  (WS/WebRTC, которые НЕ через debugPrint) теперь попадают в лог/файл. Ошибки Zone
+  тоже логируются.
+- **Шаринг файла**: кнопка «Поделиться» в скрытом экране отладки (5 тапов по
+  заголовку «Профиль») теперь шарит ФАЙЛ логов целиком (полная история). Тестировщик
+  выгружает и присылает — диагностика без подключения телефона.
+- Sentry `release` больше не захардкожен на 1.1.6+12 -> `AppConfig.appVersion`.
+- **WS после активации лицензии**: `onLicenseConfirmed` теперь форсирует
+  `forceReconnectIfStale` — свежая сессия, онлайн встаёт без рестарта (клиентское
+  прикрытие серверного бага сессий).
+
+Версия `1.1.7+14` -> `1.1.7+15`. `flutter analyze` — 0 ошибок.
+
+---
+
+## 2026-07-05 — Визуальный QA (Samsung One UI): пачка RU-overflow фиксов + редактирование заметок
+
+Владелец прислал ~13 скринов с визуальными багами (RU-текст длиннее EN -> вылезает).
+Разобрано и починено:
+- «1 контактов» -> `contactsCount`/`messagesCount` plural (`status_screen`).
+- «Усиленный» криво переносился -> `FittedBox(scaleDown)` на value `_InfoCard`.
+- Бейдж «4-значный» уезжал за край -> `Row`->`Wrap` (`security_settings_screen`).
+- Кнопки диалогов («Копировать»/«Ротировать»/«Очистить»/«Выйти») вылезали ->
+  корень в `AppButton`: `Text(label)` без ограничения -> `Flexible`+ellipsis (общий
+  фикс для всех кнопок) + короткие подписи `rotateConfirm`/`panicClearConfirm`/
+  `leaveConfirm` для кнопок подтверждения в комнатах.
+- Список комнат показывал сырой `SYS:HISTORY_CLEARED` -> helper `_roomPreview`
+  маппит SYS-коды в локализованный текст (как чат через `_mapSystemMessage`).
+- Диалог «Настройка уведомлений» обрезал карточку шага -> `insetPadding` шире (RU
+  меньше переносится, шаги влезают).
+- Чейнджлог на английском (#3) и удаление комнаты у всех (#10) -> в серверные задачи
+  роадмапа (нужны админ-changelog RU + endpoint `POST /rooms/{id}/delete` owner-only).
+
+Плюс **редактирование заметок**: добавлен `DatabaseService.updateNote`, пункт
+«Редактировать» в меню заметки для manual-заметок + диалог правки текста
+(`notes_vault_screen._editNote`). Пересланные/Oracle не редактируются (метка источника).
+
+l10n: +`editNote`/`rotateConfirm`/`panicClearConfirm`/`leaveConfirm` (EN+RU), gen-l10n.
+Версия `1.1.7+13` -> `1.1.7+14`. `flutter analyze` — 0 ошибок.
+
+---
+
+## 2026-07-05 — Device-тест раунд 2: зомби-звонки после wipe, ринг-таймаут, бэйдж, ICE-диагностика + бамп версии
+
+Логи обоих телефонов (Samsung↔Pixel):
+
+- **Зомби-звонки на стёртом телефоне (критично).** Push-изолят — отдельный процесс со
+  своим кэшем prefs; без `reload()` не видел `prefs.clear()` вайпа -> держал WS под
+  СТАРЫМ pubkey -> сервер слал звонки на телефон без аккаунта, тот пытался их
+  обрабатывать (WebRTC без ключей, WS мёртв). Фикс B: `reload()` на каждом тике
+  (`push_connection_service._evaluate`). Фикс A (защита в глубину): гейт в
+  `_navigateToCallScreen` — нет ключей -> звонок игнорируется, CallKit гасится.
+  Владелец верифицировал: стёртый телефон больше не отвечает.
+- **Ринг-таймаут:** исходящий звонок звонил бесконечно (нет ответа -> нет авто-отбоя;
+  стёртая сторона даже отклонить не может). Добавлен `_outgoingRingWatchdog` 45с в
+  `call_screen`.
+- **Бэйдж иконки (Samsung One UI):** канал push-сервиса имел `showBadge=true` ->
+  постоянное foreground-уведомление всегда вешало отметку на иконку. Пересоздан
+  `orpheus_connection_v2` с `showBadge=false` (каналы Android неизменяемы).
+- **ICE-диагностика:** на `Connected` логируем выбранную кандидат-пару (host/srflx/
+  relay) + байты + RTT (`webrtc_service._logSelectedCandidatePair`) — выяснить,
+  упирается ли звонок в TURN (единственный сервер 194.87.151.56, креды-тест). Важное
+  наблюдение из логов: звонок на восстановленный аккаунт РЕАЛЬНО соединяется (ICE+
+  PeerConnection Connected), но флапает Connected<->Disconnected — сетевая
+  нестабильность (в русле серверной задачи по WS-сессиям).
+- **Версия:** `1.1.6+12` -> `1.1.7+13`. Раньше не бампалась ни разу — билды были
+  неотличимы; версия показывается из `PackageInfo` (реальный pubspec).
+
+`flutter analyze` — 0 ошибок. Сборка доставлена на оба телефона и тестировщику.
+
+---
+
+## 2026-07-05 — Device-тест: чёрный экран create-account после wipe + зависание таймера локаута
+
+Два бага с живого теста на Pixel (владелец), оба исправлены + доставлены на устройство:
+
+1. **Чёрный экран «создать аккаунт» после wipe.** По логам аккаунт создавался (ключи,
+   WS-коннект) — не крэш, а баг перехода UI. Корень: проверка лицензии
+   (`_licenseSubscription` + 10с таймаут) настраивается в initState одноразово;
+   подписка отменяется на первом license-status, таймаут срабатывает раз. После
+   wipe+создания аккаунта в ОДНОЙ сессии переарма нет -> `_isCheckCompleted` навсегда
+   false -> вечный тёмный экран загрузки. Фикс: вынес в `_startLicenseCheck()`,
+   пере-армлю в `_onAuthComplete` (+ сброс флагов лицензии для свежего аккаунта).
+
+2. **Таймер локаута замирал на ~29с** (не двигался до перезапуска приложения).
+   Periodic-таймер отсчёта мог осиротеть (LockScreen — оверлей в MaterialApp.builder;
+   пересборка/гонка), перезапуск не гарантировался. Фикс: `_ensureLockoutTimer()` —
+   самовосстановление, вызывается из `build` на каждом кадре (залочены + таймер не
+   активен -> (пере)запуск; разлочены -> отмена).
+
+Плюс аудит полноты panic-wipe (отдельный агент): стирание исчерпывающее — ключ БД
+уничтожается (шифртекст невосстановим), secure storage и prefs очищены, возврат в
+first-run; в RAM остаются лишь несекретные остатки (чистятся при закрытии процесса).
+`flutter analyze` — 0 ошибок. Тест-сборка со скринами доставлена на Pixel, владелец
+подтвердил «вроде всё ок».
+
+---
+
+## 2026-07-05 — Оплата лицензии в приложении: USDT-TRC20 (клиентская часть)
+
+Владелец выбрал self-hosted **USDT-TRC20 (TRON)** как основной способ оплаты: in-app,
+**без мессенджеров** (TG-бот отклонён — Telegram конкурент), без посредников. Свежий
+HD-адрес на инвойс, серверный вотчер через **TronGrid** (свою ноду не поднимаем),
+активация на solidified. **Цены — с сервера** (клиент не хардкодит).
+
+Клиент (эта работа):
+- `services/purchase_service.dart` — тарифы / создание инвойса / статус заказа.
+- `screens/purchase_screen.dart` — выбор тарифа -> экран оплаты (QR адреса + сумма
+  USDT + крупное предупреждение «только TRC-20/TRON» + таймер + копирование) ->
+  поллинг статуса (основной путь, т.к. WS флапает) + WS-бонус -> авто-разблокировка
+  через `onLicenseConfirmed`.
+- Кнопка «Купить лицензию» на `license_screen` (основное действие, код — запасное) +
+  пункт в настройках (продление).
+- l10n EN/RU добавлены и сгенерированы. `flutter analyze` — 0 ошибок.
+
+Контракт бэкенда + антифрод — `docs/USDT_TRON_SPEC.md`; серверная инструкция для
+кодера — `docs/SERVER_USDT_TRON_IMPL.md`. End-to-end тест — после поднятия вотчера.
+
+---
+
+## 2026-07-03 — Fix: моя регрессия — ответ на залоченном выкидывал на PIN устройства
+
+Владелец: звонок на заблокированный телефон, поднимаешь трубку -> выкидывает на PIN
+ТЕЛЕФОНА (системный keyguard), на звонящем звонок продолжается. Причина: мой прошлый
+keyguard-фикс (убрал requestDismissKeyguard ради post-call флеша) сломал ответ —
+без снятия keyguard экран звонка не выходит поверх локскрина, устройство требует PIN.
+
+Первая попытка (вернуть requestDismissKeyguard) НЕ помогла — device-тест: ответ всё
+равно выкидывал на PIN, звонок не поднимался. НАСТОЯЩИЙ корень: в начале сессии убрал
+`android:showWhenLocked` из манифеста (был ВСЕГДА), сделал runtime через enableCallMode
+— но тот зовётся из CallScreen.initState, ПОЗЖЕ запуска активити; окно успевает выйти
+под keyguard -> PIN. А requestDismissKeyguard как раз показывал PIN-промпт.
+
+Первый заход onCreate-гейта НЕ помог — device-тест: ответ всё равно на PIN. Запустил
+multi-agent аудит (плагин + наш код + канонический паттерн). ТОЧНЫЙ корень: плагин
+flutter_callkit_incoming при accept форграундит приложение через
+getLaunchIntentForPackage + SINGLE_TOP|REORDER_TO_FRONT|CLEAR_TOP (без NEW_TASK). Наш
+MainActivity singleTop -> живой (свёрнутый) экземпляр ПЕРЕИСПОЛЬЗУЕТСЯ: приходит
+onNewIntent/onStart/onResume, а onCreate НЕ вызывается. Мой onCreate-гейт при живом
+приложении не срабатывал -> showWhenLocked не встал -> окно под keyguard -> PIN.
+setShowWhenLocked биндится к ActivityRecord и влияет на СЛЕДУЮЩУЮ компоновку, не
+перекрывает уже показанный keyguard ретроактивно.
+
+Итоговый fix (MainActivity.kt): `enableCallMode()` под `hasActiveCall()` теперь в
+`onStart()` (выполняется раньше onResume и на холодном, и на тёплом пути — единственный
+хук, покрывающий все пути ответа) + `onNewIntent()` (setIntent для роутинга); onCreate-
+гейт оставлен для killed cold-start. Убрал requestDismissKeyguard. Листенер
+`CallStateService.isCallActive` в main.dart оставлен (post-call app-lock).
+
+ИЗВЕСТНЫЙ ОСТАТОК (follow-up): плагинный `CallkitIncomingActivity.onAcceptClick` сам
+зовёт `requestDismissKeyguard` -> на secure-устройстве возможен PIN при ответе с
+ПОЛНОЭКРАННОГО ринга. Лечится ответом с heads-up уведомления (getAcceptPendingIntent,
+там requestDismissKeyguard нет). Урок: keyguard/lockscreen-флоу хрупкий, правки только
+с device-проверкой ОБОИХ сценариев (ответ И post-call).
+
+## 2026-07-05 — Полиш answer-over-lock: ускорение + убрать CallKit-иконку
+
+Владелец подтвердил: ответ на локе РАБОТАЕТ (PIN Orpheus -> ~7с -> Connected, звук,
+переживает сворачивание). Лог: ANSWERING -> +6с ICE-restart -> +1с Connected. Два
+полиша по запросу:
+1. Ускорение: watchdog ICE-restart 6с -> 4с (первая попытка), повтор 8с -> 6с. На
+   обычном звонке no-op (Connected раньше). -> соединение на локе ~5с вместо ~7с.
+2. Убрать иконку CallKit во время ожидания PIN: `_handleCallKitAccept` при
+   `authService.requiresUnlock` (звонок ушёл в pending) зовёт `endAllCalls()` — иконка/
+   таймер уходят, а ответ покрыт PendingCallStorage (сохранён выше) + RAM _pendingCall.
+   Killed-случай не полагается на этот путь (там activeCalls). CallEnded-очистка
+   застрахована: чистит call_id/claim только если нет _pendingCall и не идёт
+   _isProcessingCallKitAnswer (иначе сломала бы handoff). Проверки: analyze 0, test 353.
+
+## 2026-07-05 — Вариант А: живучесть основного WS (корень флаки Samsung)
+
+Взялись за корень (после чекпоинта). 3 точечные правки websocket_service + main.dart:
+1. connect-watchdog 20с -> 8с: на флаки-сотовой connect зависал, и 20с держали WS в
+   Connecting слишком долго -> быстрее сдаёмся, быстрее реконнект.
+2. Новый `forceReconnectIfStale(pubkey)`: если WS НЕ Connected — форсируем свежий
+   реконнект (закрыть возможно-мёртвый сокет + connect со сбросом backoff). Обычный
+   `connect()` делает no-op при Connecting, а после фона сокет часто мёртв, статус
+   залип в Connecting (реконнект-таймер не тикал в фоне) -> висели до watchdog/backoff.
+3. main.dart resume + `_onUnlocked` зовут `forceReconnectIfStale` вместо `connect`
+   (если уже Connected — не трогаем, живость держит ping-pong).
+Ожидание: после лока/фона основной WS у Samsung встаёт за пару секунд, сенды идут
+Connected -> разблокирует presence И answer-over-lock. Проверки: analyze 0 errors,
+test 353. Требует device-теста на Samsung.
+
+## 2026-07-05 — ЧЕКПОИНТ answer-over-lock (владелец: Б, потом вернёмся к А)
+
+Зафиксировали состояние. Сделано и закоммичено: форк плагина (нет системного PIN),
+security-оверлей LockScreen (нет обхода PIN приложения), детерминированный путь
+(isAppInForeground && !requiresUnlock), WS-wait перед pending-ответом, ICE-restart
+watchdog. НЕ сходится: надёжное соединение при ответе на локе — КОРЕНЬ = флаки WS у
+Samsung (постоянно Disconnected, медленный reconnect). Обычные звонки на
+разблокированном работают полностью. Вернуться = вариант А (надёжность WS Samsung).
+Проверки: analyze 0 errors (554 info/6 warn — предсуществующий tech-debt: avoid_print,
+deprecated). Добавил `analyzer.exclude: third_party/**` (вендоренный плагин не линтим).
+
+## 2026-07-05 — Вариант A: ICE-restart watchdog после отложенного ответа
+
+Device: после форка+security+WS-wait ответ на локе доходит (ANSWERING, call-answer
+по WS Connected), но НИ одного входящего ICE-кандидата от звонящего -> нет Connected.
+Корень: звонящий шлёт кандидаты сразу после offer, а залоченный/стартующий приёмник
+готов их принять лишь через ~12с; сервер не очередует -> ранние кандидаты звонящего
+теряются. Обычный звонок (быстрый ответ) не страдает.
+
+Fix (A): в `_acceptCall` после `answerCall` ставим `_answerConnectWatchdog` — если за
+6с не Connected, вызываем `_performIceRestart` (приёмник инициирует ICE-restart:
+createOffer из stable валиден -> шлёт 'ice-restart' -> звонящий отвечает
+'ice-restart-answer' и ПЕРЕ-шлёт свои кандидаты через уже поднятый WS -> connect).
+Вторая попытка через +8с. Отмена в _onConnected и dispose. Для быстрого ответа
+watchdog не срабатывает (уже Connected). Проверки: analyze 0, test 353. Требует
+device-проверки: ответ на локе -> PIN -> через ~6с звонок соединяется со звуком.
+
+## 2026-07-05 — SECURITY: PIN приложения обходился запушенным маршрутом поверх лока
+
+Владелец: разблокировал устройство (PIN телефона) -> открылся чат Orpheus В ОБХОД
+PIN Orpheus. Корень архитектурный: `LockScreen` возвращался как `home` (_buildHome),
+а CallScreen/чат пушатся через navigatorKey ПОВЕРХ home -> любой pushed-маршрут
+перекрывал лок. Call-флоу (openCallScreen при залоченном) это и запустил.
+
+Fix: LockScreen рисуется оверлеем в `MaterialApp.builder` (Stack поверх child =
+Navigator), а не как home; `_buildHome` под локом отдаёт чёрный Scaffold (контент не
+строится). Оверлей перекрывает ЛЮБЫЕ pushed-маршруты -> PIN не обойти. Проверки:
+analyze 0, test 353. Требует device-проверки: залочить с открытым чатом ->
+разблокировать устройство -> должен быть PIN Orpheus, не чат.
+
+## 2026-07-05 — Fix: pending-ответ соединялся до поднятия WS -> звонок не устанавливался
+
+Device (форк): ответ на заблокированном Samsung теперь показывает PIN Orpheus (не
+системный) — владелец: «в целом ок». Но после ввода PIN звонок не соединялся. Лог:
+после разблокировки pending обработан -> ANSWERING -> `call-answer → Status:
+Connecting` (WS ещё не поднят). Samsung ОТПРАВИЛ answer + свои ICE (WS+HTTP), но НИ
+одного входящего кандидата от звонящего — потому что входящие приходят ТОЛЬКО по WS
+(HTTP-fallback лишь на отправку), а WS был Connecting. Итог: нет Connected.
+
+Fix: `processPendingCallAfterUnlock` теперь async и ЖДЁТ `websocketService.currentStatus
+== Connected` (поллинг 150мс, таймаут 6с) перед `_navigateToCallScreen`/авто-ответом.
+Так приёмник успевает подключить WS и получить кандидаты звонящего. Проверки:
+analyze 0, test 353. Требует device-проверки: ответ на заблокированном -> PIN Orpheus
+-> ввод -> звонок СОЕДИНЯЕТСЯ со звуком.
+
+## 2026-07-05 — Вариант Б: локальный форк flutter_callkit_incoming (убран dismissKeyguard)
+
+Владелец выбрал форк плагина (Б1, локальная копия). Исходник плагина 3.1.3:
+`CallkitIncomingActivity.onAcceptClick()` после запуска нашего приложения зовёт
+`dismissKeyguard()` -> `requestDismissKeyguard` -> на secure Samsung жёсткий PIN.
+
+Сделано: вендорил `flutter_callkit_incoming-3.1.3` в `third_party/` (без example),
+удалил ТОЛЬКО вызов `dismissKeyguard()` в onAcceptClick (метод оставлен, просто не
+зовётся). Подключил через `dependency_overrides: path` в pubspec.yaml; обычная
+`^3.1.3` в dependencies ОСТАВЛЕНА, чтобы `flutter pub outdated` видел upstream-апдейты.
+`flutter pub get` -> "3.1.3 from path ... (overridden)".
+
+Трекинг обновлений: `tool/check_callkit_fork.ps1` (сравнивает базу форка с pub.dev,
+exit 1 если новее) + `third_party/flutter_callkit_incoming/ORPHEUS_FORK.md` (диф +
+инструкция переприменения). Требует device-проверки: ответ на заблокированном
+Samsung И Pixel — открывается ли звонок поверх лока БЕЗ системного PIN.
+
+## 2026-07-05 — Fix: Samsung жёстко на PIN при ответе — отключаем полноэкранный ринг
+
+Device: Pixel (GrapheneOS) после onStart-фикса отвечал (звонок Connected), но Samsung
+(One UI) при ответе жёстко выкидывал на PIN, ANSWERING нет. Лог Samsung: звонок через
+PUSH-изолят (killed), CallKit показан, при ответе — SecKeyguardClock (системный
+keyguard). Подтвердило предсказанный остаток: полноэкранный ринг плагина
+(`CallkitIncomingActivity.onAcceptClick`) зовёт requestDismissKeyguard ДО запуска
+MainActivity -> на secure Samsung PIN блокирует раньше моих MainActivity-фиксов.
+
+Fix: `isShowFullLockedScreen: false` в обоих CallKitParams. РЕЗУЛЬТАТ device-теста:
+НЕ помогло — PIN остался на ОБОИХ (Samsung и Pixel), причём Pixel регрессировал (с
+true+onStart звонок хотя бы соединялся). ОТКАЧЕНО обратно на true.
+
+СТАТУС answer-over-lock: НЕ решено на уровне нашего кода. Перепробовано (все на
+device): манифест showWhenLocked (убран, security), runtime enableCallMode (поздно),
+requestDismissKeyguard (сам показывает PIN), onCreate-гейт (miss при warm), onStart/
+onNewIntent (Pixel соединялся, но UX «разлоченный орфей»; Samsung PIN),
+isShowFullLockedScreen:false (не помог, откат). Нативный лог Pixel показывал
+`setOccluded(true)` (окно ВЫШЛО поверх keyguard), но ANSWERING не доходил. Упирается
+в плагинный requestDismissKeyguard + OEM keyguard (Samsung One UI жёстче). Решения на
+выбор владельца: (A) «разблокировать чтобы ответить» (надёжно, убрать над-лок-механику);
+(B) форк плагина (вырезать requestDismissKeyguard); (C) отложить. Ждём решения.
+
+## 2026-07-03 — Fix: перезвон в пределах 30с не звонит — уникальный call_id исходящего
+
+Device-лог: приёмник (Pixel) регистрировал ОДИН И ТОТ ЖЕ callId
+`call-09615d7b-59436753` три раза подряд для разных звонков. Причина:
+`generateFallbackCallId` строит id как `call-{hash}-{now~/30000}` — 30-секундное окно,
+поэтому все звонки в пределах 30с получают одинаковый id. Исходящий звонок
+(call_screen.dart:134-139, offer==null) брал именно его от СВОЕГО ключа. CallKit
+дедупит по id -> повторный звонок с тем же id не показывает новый ринг (симптом
+владельца: «сбрасываю на самсунге и перезваниваю с самсунга — не звонит»).
+
+Fix: `CallIdStorage.generateUniqueCallId` (полный microsecondsSinceEpoch вместо
+30с-окна) для исходящего. Звонящий кладёт id в offer через `_attachCallId`
+(проверено), приёмник берёт его из offer -> уникальный id на каждый звонок.
+generateFallbackCallId оставлен для приёмного fallback (нужен детерминизм WS/push,
+когда id не пришёл). Зависимость: сервер должен сохранять поле call_id в
+релее offer — проверяем на device. Проверки: analyze 0, test 353.
+
+## 2026-07-03 — Fix: второй звонок не проходит — освобождаем call_id на ВСЕХ завершениях
+
+После раунда 2 задвоение ушло, но device-лог показал: `CallIdStorage: отклоняю новый
+call-...688` — `trySetActiveCall` отклоняет ДРУГОЙ call_id, пока активен предыдущий,
+а `clear()` в раунде 2 добавлен только в CallScreen.dispose (отвеченные звонки).
+Незавершённые иначе входящие (отклонение/таймаут/сброс собеседником до ответа /
+CallKit-ended) оставляли id висеть до TTL 15с -> следующий звонок «занято».
+Fix: `CallIdStorage.clear()` (+ `_resetCallNavigationClaim()`) добавлен во все пути
+завершения: `CallEventActionCallEnded` (main_callkit), `_handleCallKitDecline`
+(decline+timeout), и входящий hang-up/call-rejected (incoming_message_handler).
+Дизайн-заметка: занятость «в звонке» гейтит isCallActive (реальное состояние экрана,
+handler:126), а registry нужен только для межизолятного дедупа одного call_id;
+trySetActiveCall НЕ трогал (аудит предупреждал про same-id=true). Проверки: analyze 0,
+test 353.
+
+## 2026-07-03 — Fix: двойной экран звонка, раунд 2 (device-тест выявил ещё 2 причины)
+
+После call_id-claim (раунд 1) владелец на device всё равно увидел ДВА экрана: первый
+CallKit «Закрытая связь», второй — реальное имя без блока. Лог: `🔔 Local notification
+tap: {type:incoming_call, caller_name:Самсунг, ...}` — fullScreenIntent-уведомление на
+локскрине САМО запускало активити -> onIncomingCallFromNotification -> второй экран.
+То есть на один фоновый offer handler поднимал ДВА аффорданса: showCallNotification
+(incoming_message_handler:172, реальное имя, БЕЗ приват-гейта) + _showCallKitIncoming
+(:182, «Закрытая связь»). Claim дедупит Flutter-навигацию, но не саму пару
+CallKit-UI + notification-auto-launch.
+Fix A: убрал showCallNotification из фоновой ветки WS-пути — оставил только CallKit
+(он и так поверх локскрина + приват-подпись). Убирает задвоение и утечку имени.
+
+Второй симптом «сразу второй звонок не проходит»: `CallIdStorage.trySetActiveCall`
+отклоняет ДРУГОЙ call_id пока активен предыдущий, а активный id НЕ очищался при
+завершении — `CallIdStorage.clear()` был мёртвым кодом (0 вызовов, аудит подтвердил),
+id висел до TTL 15с.
+Fix B: вызвал `CallIdStorage.clear()` в CallScreen.dispose. Проверки: analyze 0,
+test 353.
+
+## 2026-07-03 — Fix: двойной экран звонка (multi-agent аудит участка)
+
+Симптом владельца: входящий открывает ДВА окна звонка (одно за другим); плюс сразу
+после — второй звонок «идёт у звонящего, но на приёмнике не отображается».
+
+Запущен Workflow-аудит (3 агента-картографа: доставка / дедуп / call_id + синтез).
+Корень: дедуп навигации опирается на `CallStateService.isCallActive`, который
+ставится ПОЗДНО — в `CallScreen.initState` (call_screen.dart:122), кадром позже
+push. Оба входа навигации гейтятся только на нём: (A) WS-foreground push
+(main.dart openCallScreen) и (B) `_navigateToCallScreen` (main_callkit.dart), причём
+B ещё и откладывает push в addPostFrameCallback — окно гонки шире. `call-offer`
+уходит одним и тем же call_id и по WS (websocket_service.dart:413), и по HTTP
+(:418) -> сервер релеит обе копии -> две доставки. `CallIdStorage.trySetActiveCall`
+пропускает ОДИНАКОВЫЙ call_id (call_id_storage.dart:60-65), а isDuplicate/
+getActiveCallId/clear — мёртвый код. Осиротевший второй экран оставлял
+isCallActive=true -> следующий звонок игнорировался (симптом «второй не показывается»).
+
+Фикс: синхронный CLAIM по call_id (`_claimCallNavigation`, main.dart) на входе обоих
+путей навигации, ДО отложенного push. Dart однопоточный, между проверкой и
+присвоением нет await -> конкурентные вызовы в одном кадре сериализуются, первый
+захватывает, остальные отклоняются. TTL 15с самозаживляется. Edge: если Navigator
+null в postFrame и звонок ушёл в pending — claim освобождается (`_resetCallNavigationClaim`),
+иначе pending-replay отклонил бы сам себя. Пункт «reset в dispose» пропущен
+(циклический импорт call_screen->main; каждый звонок = новый call_id, TTL покрывает).
+Проверки: analyze 0, test 353. Требует device-подтверждения (один экран + второй
+звонок доходит).
+
+## 2026-07-03 — Fix: интерфейс мелькал над локскрином после звонка (приватность)
+
+Симптом владельца: после сброса звонка на заблокированном телефоне на миг виден
+интерфейс Orpheus над локскрином. Причина: `enableCallMode` (MainActivity.kt) кроме
+`setShowWhenLocked(true)` звал `requestDismissKeyguard` (+ FLAG_DISMISS_KEYGUARD в
+legacy) — СНИМАЛ keyguard на время звонка. После завершения keyguard уже снят -> кадр
+с UI приложения виден, пока строгий лок не сработает. Фикс: убрал снятие keyguard;
+setShowWhenLocked показывает экран звонка поверх локскрина и он интерактивен, а
+keyguard остаётся снизу и возвращается сразу после звонка. (KeyguardManager всё ещё
+используется для isDeviceLocked.)
+
+Открытый вопрос (issue A, ловим логом): Pixel->Samsung на заблокированном — экран
+звонка мигает и пропадает рингтон. Гипотеза: двойная навигация / конфликт CallKit-UI
+и рингтон-экрана; фикс авто-ответа "проявил" (раньше autoAnswer:true проскакивал экран).
+
+## 2026-07-03 — Fix: основной WS не поднимался после разблокировки (моя регрессия)
+
+Симптом владельца: Samsung не видит Pixel онлайн + звонок с Samsung не уходит
+(Pixel Samsung видит). Лог Samsung: foreground, HTTP работает (badge fetched),
+push-WS подключён, но НИ одного `WS: Попытка` основного изолята. Владелец: «свернул-
+развернул — поднялось».
+
+Причина (косвенно моя): строгий лок (lock on background) -> приложение часто
+СТАРТУЕТ заблокированным. Старт-connect основного WS (main.dart:537) гейтится на
+`!_isLocked` -> пропускается. На холодном старте события `resumed` нет (уже resumed),
+так что reconnect в resumed-ветке (line 644) тоже не срабатывает. А `_onUnlocked`
+WS НЕ переподключал -> основной WS лежал до ручного сворачивания-разворачивания.
+Отсюда: нет presence, исходящие звонки не уходят (входящие держит push-изолят).
+
+Фикс: в `_onUnlocked` вызываем `websocketService.connect(pubkey)` (идемпотентен:
+если уже Connected/Connecting -> no-op, line 112-115). Проверки: analyze 0, test 353.
+
+## 2026-07-03 — SECURITY-fix: заблокированный телефон авто-отвечал на звонок
+
+Симптом владельца (device-тест): входящий на ЗАБЛОКИРОВАННЫЙ телефон сам поднимал
+трубку (на разлоченный — нет). Лог приёмника: `🔔 Local notification tap:
+{type:incoming_call,...}` -> сразу `--- [WebRTC] ANSWERING CALL ---`.
+
+Причина: `NotificationService.onIncomingCallFromNotification` (main.dart:220) звал
+`_navigateToCallScreen(..., autoAnswer: true)`. Уведомление входящего показывается с
+`fullScreenIntent: true` (notification_service.dart:558); на локскрине система САМА
+запускает full-screen активити и дёргает этот колбэк БЕЗ нажатия -> autoAnswer:true ->
+трубка поднималась автоматически (собеседник мог слышать окружение). На разлоченном
+fullScreenIntent не авто-запускается, ответ идёт через CallKit-кнопку -> бага нет.
+
+Фикс: тап/полноэкранный показ уведомления -> `autoAnswer: false` (открываем звонящий
+экран, ждём «Ответить»). Реальный CallKit accept (`_handleCallKitAccept`,
+main_callkit.dart:253) остаётся `autoAnswer: true` — там это корректно (юзер нажал
+«Ответить»). Проверки: analyze 0, test 353. Требует device-подтверждения.
+
+## 2026-07-03 — Приватность имени звонящего на локскрине (по запросу владельца)
+
+Владелец: показывать имя контакта на локскрине — утечка (видно, КТО звонит).
+Дизайн: заблокировано -> нейтральная подпись «Закрытая связь» / «Secure connection» (без
+имени/ключа), разблокировано -> имя; + настройка-флаг (по умолчанию ВЫКЛ).
+
+Сделано:
+- Нативно: `MainActivity` settings-канал -> `isDeviceLocked` (KeyguardManager.isKeyguardLocked).
+- `DeviceSettingsService`: `isDeviceLocked()` + флаг `showCallerNameWhenLocked` (SharedPrefs).
+- Оба пути показа CallKit применяют гейт: `notification_service._showNativeIncomingCall`
+  (push) и `incoming_message_handler._showCallKitIncoming` (WS). При locked && !флаг ->
+  nameCaller = l10n.incomingEncryptedCall, handle = '' (не светим и префикс ключа).
+- l10n: incomingEncryptedCall, callerNameOnLockTitle/Desc (en+ru, gen-l10n).
+- UI: тумблер в `security_settings_screen` (_buildSwitchTile + async load флага).
+- Публичный `NotificationService.incomingEncryptedCallLabel()` (WS-путь не лезет к
+  @visibleForTesting notificationL10n).
+
+Требует device-проверки: locked -> нейтральная подпись; unlocked -> имя; флаг ON ->
+имя на locked. Проверки: analyze 0, test 353.
+
+**Fix после device-теста:** первая версия использовала keyguard-проверку через
+method-channel — но входящий на ЗАБЛОКИРОВАННОМ телефоне обрабатывается в ОТДЕЛЬНОМ
+push-изоляте, где канал к MainActivity недоступен -> isDeviceLocked падал в catch,
+возвращал false -> имя показывалось (лог: «звонок от Самсунг»). Переведено на флаг
+`app_in_foreground` в SharedPreferences: пишет main-изолят по lifecycle
+(+ начальное значение в initState), читают оба пути показа через
+`hideCallerIdentityOnIncoming()` с `prefs.reload()` (prefs кешируются per-isolate).
+Имя показываем ТОЛЬКО когда Orpheus реально на переднем плане; лок/сворачивание/
+убито -> нейтрально. Флаг настройки перекрывает.
+
+## 2026-07-03 — Device-тест звонков: улов багов (Samsung<->Pixel)
+
+Прогон звонков между двумя телефонами. Подтверждено рабочим: полноэкранный входящий
+ПОВЕРХ локскрина (фикс showWhenLocked не сломал звонки), звук двусторонний.
+
+Найдено 3 бага:
+- **B (починен): имя звонящего = префикс ключа.** Push-путь показа CallKit
+  (`notification_service._showNativeIncomingCall`) брал имя из пуша (сервер имён не
+  знает) -> префикс ключа "4UhYCcXl". Фикс: резолв локального имени из БД
+  (getContact.name, best-effort, timeout 1с, фолбэк на префикс). WS-путь
+  (`incoming_message_handler`) это уже делал.
+- **A (в работе): задвоенное уведомление «In call» на звонящем** (Orpheus + префикс
+  ключа) — foreground-сервис + CallKit? Нужны логи звонящего (Samsung).
+- **C (в работе, критично): экран звонка авто-закрывается при гашении экрана.** Лог:
+  Connected -> ICE Disconnected -> Failed за ~17с после лока. Реконнект не пережил
+  background (троттлинг таймеров/деградация связи) -> onError -> onFatal -> _safePop
+  закрыл экран -> показался home. Пользователь принял за «окно не восстановилось».
+  Нужен отдельный тест реконнекта в FOREGROUND (смена сети без гашения экрана),
+  чтобы отделить логику реконнекта от проблемы бэкграунда.
+
+## 2026-07-03 — Fix: чужой call-rejected рвал соединённый звонок (device-тест)
+
+Симптом владельца: звонок на заблокированный телефон «один сигнал и вырубился».
+Лог: звонок Connected -> через ~1с звонящий Dispose+hang-up. Причина: обработчик
+сигналов `hang-up`/`call-rejected` (call_screen.dart:437) звал `_onRemoteHangup()`
+БЕЗ проверки call_id -> завершал ЛЮБОЙ звонок. Устаревший `call-rejected` от
+предыдущего захода (тайаут-reject локскрина, долетевший поздно по HTTP-fallback)
+приходил во время нового соединённого звонка и убивал его. Отправители call_id
+прикрепляют (`{'call_id': callId}` / `_attachCallId`). Фикс: игнорируем отбой,
+если его call_id задан и НЕ равен текущему `_callId`; при отсутствии call_id —
+как раньше (старые клиенты). Проверки: analyze 0, test 353.
+
+## 2026-07-03 — Fix: дубль answer ломал WebRTC-негоциацию (device-тест звонков)
+
+Device-тест звонка (Samsung<->Pixel): в логе `E flutter: setRemoteDescription:
+Failed to set remote answer sdp: Called in wrong state: stable` из
+`webrtc_service.handleAnswer`. Причина: сигналы шлются по WS И по HTTP-fallback →
+answer приходит дважды; второй раз PC уже в stable → необработанное исключение,
+из-за которого первая негоциация закрывалась и звонок соединялся только с ретрая
+(симптом владельца «оборвался тут же, на Pixel продолжает звонить»). Фикс:
+`handleAnswer` применяет answer только при signalingState == have-local-offer
+(дедуп дубликата, корректно работает и для ice-restart-answer) + try/catch.
+
+Аудио в звонке при этом работало (Connected -> Completed, ~55с разговора),
+двусторонний звук подтверждён. Требует device-ретеста: входящий на ЗАБЛОКИРОВАННЫЙ
+телефон (в логе показался как local-notification, а не full-screen CallKit —
+отдельно понаблюдать). Проверки: analyze 0.
+
+---
+
+## 2026-07-03 — BT-разрешение: priming вместо пугающего диалога (device-тест)
+
+Пользователь при звонке увидел системный диалог «устройства поблизости… определять
+относительное положение» и встревожился. Проверил итоговый манифест: только
+`BLUETOOTH_CONNECT` (+ legacy BLUETOOTH), НИКАКИХ BLUETOOTH_SCAN / LOCATION /
+NEARBY_WIFI. Т.е. это генерик-формулировка группы «Nearby devices» от Android,
+показывается даже для CONNECT; слежки нет. Разрешение нужно только для вывода звука
+звонка в BT-гарнитуру (запрашивалось молча в `webrtc_service.initialize`).
+Владелец выбрал «оставить + priming». Сделано: убрал `bluetoothConnect` из тихого
+запроса webrtc (там только микрофон); в `call_screen` добавил `_maybePrimeBluetooth`
+— разовый (prefs-флаг) поясняющий диалог ПЕРЕД системным запросом, показывается с
+задержкой после выдачи микрофона. Проверки: analyze 0, test 353.
+
+---
+
+## 2026-07-03 — Fix: приложение поверх системного локскрина (device-тест)
+
+Симптом: просыпаешь заблокированный телефон — сразу виден Orpheus, минуя PIN
+устройства. Причина: `AndroidManifest.xml` объявлял `android:showWhenLocked="true"`
++ `android:turnScreenOn="true"` БЕЗУСЛОВНО на MainActivity, хотя onCreate-комментарий
+и enableCallMode/disableCallMode задумывали рантайм-управление «только во время
+звонка». Манифестные флаги — забытый вестигиальный код. Убраны из манифеста →
+дефолт уважает keyguard, показ поверх блокировки остаётся через рантайм
+`enableCallMode` (call_screen initState). ТРЕБУЕТ device-проверки: (а) разбудил
+локскрин — виден keyguard телефона, не Orpheus; (б) ВХОДЯЩИЙ ЗВОНОК всё ещё
+показывается поверх локскрина (рантайм-путь).
+
+---
+
+## 2026-07-03 — Строгая блокировка на background (по запросу владельца)
+
+`didChangeAppLifecycleState`: в ветке `paused` теперь сразу `authService.lock()` +
+`_isLocked=true` при `isPinEnabled` (раньше только отменяли таймер, лок ставился на
+resume по elapsed). Исключение — `hasActiveCall || hasPendingCall` (звонок должен
+остаться доступен). Заодно задействована переменная `hasActiveCall`, которая висела
+unused после сплита main.dart. Проверки: analyze 0, test 353.
+Продуктовый нюанс (озвучен владельцу): звонок на УЖЕ залоченное фоновое приложение
+потребует PIN для ответа.
+
+---
+
+## 2026-07-03 — Device-тест на живых устройствах: найдены и починены баги
+
+Прогон release-APK на Samsung + Pixel 7 Pro (GrapheneOS). Подтверждено рабочим:
+de-Google (WS-коннект без GMS на чистом GrapheneOS), Oracle/AI + markdown,
+все меню настроек, лицензия-активация, анти-скриншот (FLAG_SECURE), авто-лок по
+неактивности (лог: armed 60s -> locked ровно через 60s).
+
+**Критический баг (release-блокер) — потеря аккаунта при рестарте.** Причина
+исследована агентом (source-verified): дефолтный key-шифр v10
+`RSA_ECB_OAEPwithSHA_256andMGF1Padding` генерит ключ с digest только SHA-256, но
+расшифровывает с MGF1=SHA-1 → строгий KeyMint (Titan M2 / Knox — НЕ
+GrapheneOS-специфика, Samsung тоже падал) отклоняет unwrap приватным ключом на
+новом процессе. Запись публичным ключом (софтверно) проходит → "пишется, не
+читается после рестарта". Наши resetOnError:false + migrateOnAlgorithmChange:false
+превращали это в тупик "нет данных". Фикс (`secure_storage_options.dart`):
+keyCipherAlgorithm -> `RSA_ECB_PKCS1Padding` (не задет MGF1, тихий — важно для
+фонового чтения ключа БД из push-изолята), resetOnError:true, бамп reset-флага.
+Подтверждено на Pixel: закрыл -> открыл -> аккаунт+PIN на месте.
+
+**UI-баги (тоже device-only):**
+- Онбординг + бета-дисклеймер (`home_screen`): нескролящийся Column + barrierDismissible:false
+  -> кнопка за экраном на маленьком экране/крупном шрифте. Фикс: SingleChildScrollView.
+- Экран лицензии (`license_screen`): AppBar с явной кнопкой "назад" на корневом гейте
+  -> Navigator.pop в пустой стек -> чёрный экран. Фикс: leading только при Navigator.canPop.
+- Setup-диалог уведомлений/питания (`device_settings_service`): весь на хардкод-английском
+  + каждый шаг делал Navigator.pop перед открытием настроек Android (диалог исчезал).
+  Фикс: локализация RU/EN (~17 строк) + убран Navigator.pop (диалог переживает поход в настройки).
+
+**Апстрим:** завести баг в juliansteenbakker/flutter_secure_storage (OAEP-ключ должен
+авторизовать оба digest ИЛИ MGF1=SHA-256). Нельзя починить из Dart — отсюда обход через PKCS1.
+
+Проверки: analyze 0 ошибок, test 353 passed, device-тест на 2 устройствах.
+
+---
+
+## 2026-07-03 — Консолидированный device-чеклист перед релизом
+
+`docs/DEVICE_TEST_CHECKLIST.md` — собраны все device-gated пункты, накопленные за
+сессию (то, что нельзя проверить сборкой/тестами): звонки (callkit 3 + контроллер +
+реконнект при смене сети + микрофон в фоне + звонок из убитого состояния),
+уведомления (local_notifications 22), биометрия/PIN/LOGIC-6 (local_auth 3, монотонная
+блокировка), de-Google (доставка без GMS), лицензия оффлайн, minSdk 24 (Android 6
+дропнут). Ссылается на SECURE_STORAGE_V10_CHECKLIST.md. Матрица OEM/версий Android.
+UI-1 (доступность) и UI-2 (цвета) — отложены по решению владельца.
+
+---
+
+## 2026-07-03 — ARCH-3: разбит god-файл main.dart (1298 → 760)
+
+Блок CallKit + навигации звонка (`_initCallKit`, `_checkActiveCallOnStart`,
+`_handleCallKitAccept/Decline`, `_openCallScreenFromCallKit`, `_navigateToCallScreen`,
+`processPendingCallAfterUnlock`, `_checkActiveCallOnResumed` — строки 272-807)
+вынесен в `main_callkit.dart` через `part`/`part of`. Физический split, одна
+библиотека (глобалы/приваты main.dart доступны в part-файле), ноль изменений
+логики. Проверки: analyze 0 ошибок (1 предсуществующий unused-local warning вне
+блока), test 353 passed, debug APK собран.
+
+С этим ARCH-3 закрыт целиком: все три god-файла разгружены (contacts_screen 1310→433,
+call_screen build() 287→90 + логика в контроллер, main 1298→760).
+
+---
+
+## 2026-07-03 — ARCH-3/#1 шаг 3 (Stage B): перепровязка call_screen на контроллер
+
+Виджет `_CallScreenState` переведён на `CallSessionController`.
+
+Приём низкого риска: поля состояния (`_callState/_debugStatus/_networkState/
+_wsStatus/_isReconnecting/_reconnectAttempts`) стали ГЕТТЕРАМИ-делегатами к
+контроллеру -> все ЧТЕНИЯ (десятки, включая UI) не тронуты, меняли только ЗАПИСИ.
+- Создание контроллера в initState (+ `_WebRtcCallOps` — реализация CallOps поверх
+  WebRTCService/сигналинга); `addListener(_onControllerChanged)` ПОСЛЕДНИМ (чтобы
+  синхронные нач. правки сети/WS не дёргали setState в initState).
+- Переходы (`onConnecting/onConnected/onRemoteHangup/onError`), 3 подписки
+  (сеть/WS/onIceRestartNeeded), входящий ICE-restart (`setDebugStatus`) -> контроллер.
+- Удалены `_handleNetworkLost/_handleNetworkRestored/_attemptIceRestart` (в
+  контроллере); осталась WebRTC-операция `_performIceRestart` за `CallOps`.
+- dispose: removeListener + controller.dispose (стопит запланированные повторы).
+
+**Адверсариал-ревью Stage B поймало 2 РЕАЛЬНЫХ регресса реконнекта — исправлены:**
+1. (#1, major) запланированный повтор при ws-down ставился на 2с < дебаунса 3с ->
+   всегда съедался, реконнект умирал после 1 попытки. Фикс: split на debounced
+   `attemptIceRestart` (внешние триггеры) + `_runIceRestart` (повторы, минуя дебаунс).
+2. (#2) внутренний max-attempts путь звал `controller.onError` минуя `_safePop` ->
+   экран не закрывался. Фикс: callback `onFatal` (единый путь авто-закрытия для
+   прямых ошибок И исчерпания попыток).
+Плюс `_notify()` с гуардом `_isClosed` (нет throw notifyListeners после dispose).
+
+**Повторное ревью фиксов:** оба регресса CONFIRMED-FIXED, `_notify`-гуард sound.
+Нашло один НОВЫЙ минорный race: раз повторы минуют дебаунс, внешний триггер мог
+совпасть с запланированным повтором -> две параллельные цепочки. Закрыто флагом
+`_iceRestartInFlight` (try/finally вокруг `_runIceRestart`). На фиксы+гвард добавлено
+4 теста (повтор не дебаунсится, onError->onFatal, exhaustion->onFatal, in-flight гвард).
+
+**ОСТАЁТСЯ (device-gated, перед релизом):** прогон реального звонка — слышимость,
+реконнект при смене Wi-Fi<->cellular, звонок из убитого состояния, авто-закрытие.
+
+Проверки: analyze 0 ошибок, test 353 passed, debug APK собран, адверсариал-ревью x2.
+
+---
+
+## 2026-07-03 — ARCH-3/#1 шаг 2: CallSessionController + тесты (dead code)
+
+Поэтапный вынос логики звонка (по выбору владельца: сначала контроллер+тесты как
+отдельный модуль, потом перепровязка виджета — чтобы rewire шёл по проверенному коду).
+
+Создано:
+- `lib/services/call_session_controller.dart` — `CallSessionController extends
+  ChangeNotifier`: домен-enum `CallState`, машина состояний (initialStateFor,
+  onNetworkLost/Restored, onConnected, onRemoteHangup, onError, statusText) и
+  политика ICE-restart (attemptIceRestart: дебаунс 3с, лимит 5 попыток, повторы
+  через инжектируемый scheduler, ожидание WS). Внешние операции за узким
+  инъектируемым `CallOps` (restartIce) — это и есть peer-интерфейс из TEST-4.
+  Часы и планировщик тоже инжектятся -> всё юнит-тестируемо.
+- `test/services/call_session_controller_test.dart` — 17 тестов: initialStateFor,
+  statusText-маппинг, guard onNetworkLost (только из Connected), сброс на
+  onConnected, Rejected/Failed, инкремент попыток, дебаунс, исчерпание->Failed,
+  ws-not-connected->повтор, восстановление WS->рестарт, no-op вне реконнекта.
+
+Логика 1-в-1 с виджетом (мирроринг прочитанного `_CallScreenState`). Контроллер
+НЕ подключён к call_screen — dead code, нулевой риск для живого пути звонка.
+
+**Следующий шаг (Stage B):** перепровязать `_CallScreenState` на контроллер
+(setState -> слушатель, глобалы -> реализация CallOps поверх WebRTCService/
+websocketService), затем адверсариал-ревью + прогон звонка на устройстве.
+
+Проверки: analyze 0 ошибок, test 347 passed (+17).
+
+---
+
+## 2026-07-03 — ARCH-3/#1 шаг 1: разбит build() экрана звонка (287 строк)
+
+Первый (безопасный) шаг рефактора call_screen (вариант #1 — вынос логики в
+контроллер). Монстр-`build()` (287 строк) разбит на `_buildStatusSection()`,
+`_buildAvatar()`, `_buildAudioVisualizer()`, `_buildDebugOverlay()`. Чистая
+экстракция под-виджетов — дерево идентично, логика не тронута. build() теперь ~90
+строк. Проверки: analyze 0 ошибок, test 330 passed, debug APK собран.
+
+Следующие шаги #1: (шаг 2) безопасные извлечения (статус-сообщения в чат, медиа-
+контролы); (шаг 3) вынос машины состояний + сигналинга + ICE-restart в
+`CallSessionController` С НОВЫМИ юнит-тестами (закрывает TEST-4) + адверсариал-ревью.
+
+---
+
+## 2026-07-03 — ARCH-3: разбит god-файл contacts_screen (1310 → 433)
+
+Приватные виджет-классы (`_ContactRow`, `_Avatar`, `_UnreadPill`, `_AddContactDialog`,
+`_ContactActionsSheet`, `_ActionTile`, `_DeleteContactDialog`, `_OracleContactRow`,
+`_OracleAvatar`, `_AddContactHint`) вынесены в `contacts_screen_widgets.dart` через
+`part`/`part of` — физический split, одна библиотека, ноль изменений видимости/логики.
+Экран (state) теперь 433 строки вместо 1310. Проверки: analyze 0 ошибок, test 330 passed.
+
+---
+
+## 2026-07-03 — ARCH-1: разрыв цикла AuthService ↔ DatabaseService (крупный рефактор)
+
+**Задача:** разорвать циклическую зависимость двух ядровых сервисов безопасности
+(БД читала `AuthService.instance.isDuressMode`, auth импортировал БД для wipe).
+
+**Сделано (инверсия зависимости, поведение не меняется):**
+- `database_service.dart`: убран `import auth_service`; геттер
+  `_isDuressMode => AuthService.instance.isDuressMode` → плоское поле
+  `bool _isDuressMode = false` + `setDuressMode(bool)`. БД про AuthService не знает.
+- `auth_service.dart`: единый `_setDuressMode(value)` = поле + push в
+  `DatabaseService.instance.setDuressMode`. Все 6 переходов duress (verifyPin
+  success/duress, disableDuressCode, lock, exitDuressMode, performWipe) идут через него.
+- Цикл разорван: остаётся ОДНОнаправленная auth→database (была и раньше, для wipe).
+
+**Перепроверка критичного (по просьбе владельца):** запущен адверсариал-ревьюер на
+duress-корректность. Вердикт — в проде утечки НЕТ, поведение эквивалентно: набор
+guard-методов не менялся; push синхронный/атомарный с auth-флагом (нет гонки);
+duress рантайм-only (не персистится → оба стартуют false); БД — единственный
+consumer скрытия данных. Единственная находка — тест-гигиена (fail-safe): тест-инстанс
+через createForTesting пушит в DB-синглтон → добавлен `tearDown` со сбросом в
+`auth_service_test.dart`.
+
+**Проверки:** analyze 0 ошибок; test 330 passed (включая duress); + адверсариал-ревью.
+
+---
+
+## 2026-07-02 — UI-9: отладочный лог-оверлей звонка спрятан в release
+
+`call_screen.dart`: скрытая кнопка (тап по «Secure Call») открывала оверлей с
+сигналинг/ICE-логами. Переключатель (`onTap`) и рендер оверлея (`if (...)`)
+загейчены за `kDebugMode` — в release недоступны. Импорт `foundation` (kDebugMode).
+Проверки: analyze 0 ошибок.
+
+QUAL-9 (инлайн-changelog в config.dart) НЕ трогал: `changelogData` — живой
+offline-fallback в updates_screen (+ config_test), удаление сломает офлайн-changelog.
+Правило config.dart запрещает *добавлять* записи, а не хранить fallback.
+
+---
+
+## 2026-07-02 — LOGIC-6: блокировка брутфорса по монотонным часам
+
+**Задача:** прогрессивная блокировка PIN считалась по `DateTime.now()` — обходится
+переводом системных часов вперёд.
+
+**Сделано (минимальный, низкорисковый фикс — хардним только сам гейт):**
+- Нативно: `MainActivity` → метод `getElapsedRealtime` в settings-канале
+  (`SystemClock.elapsedRealtime`). Dart-обёртка `lib/services/monotonic_clock.dart`
+  (`MonotonicClock.elapsedRealtimeMs()` → int?, null при ошибке).
+- `security_config.dart`: поле `lastFailedElapsedMs` (persist) + метод
+  `isLockedOutMonotonic(nowElapsedMs)` — по монотонным часам, с fallback на wall-clock
+  `isLockedOut` (если null или ребут: nowElapsed < сохранённого).
+- `auth_service.dart`: инъекция `monotonicNow` (тест-seam), запись elapsedRealtime в
+  `_incrementFailedAttempts`, гейт `verifyPin` → `isLockedOutMonotonic(await _monotonicNow())`.
+- lock_screen НЕ трогали: его `isLockedOut` для UI (косметика) — под тампером покажет
+  клавиатуру, но verifyPin отклонит; для обычного юзера wall==mono, консистентно.
+- Тесты: 5 новых на `isLockedOutMonotonic` (тампер/ребут/fallback); в 3 виджет-теста
+  добавлен `monotonicNow: () async => 0` (реальный канал не резолвится под fake-async).
+
+**Проверки:** analyze 0 ошибок; test 330 passed (+5); debug APK — ок.
+
+---
+
+## 2026-07-02 — DEP-3: flutter_markdown → flutter_markdown_plus
+
+`flutter_markdown` заброшен (Flutter-команда прекратила поддержку). Заменён на
+поддерживаемый форк `flutter_markdown_plus` ^1.0.7 (drop-in: `MarkdownBody`/
+`MarkdownStyleSheet`/`onTapLink` идентичны, сменился только импорт в
+`ai_assistant_chat_screen.dart`). Убрано единственное discontinued-предупреждение.
+Проверки: analyze 0 ошибок, test 325 passed.
+
+---
+
+## 2026-07-02 — Обновление всех зависимостей + ADR по secure_storage
+
+Задача владельца: зафиксировать решение по secure_storage в доках и обновить ВСЕ
+зависимости.
+
+**ADR:** `docs/DECISIONS/0004-secure-storage-v10-migration.md` — зафиксирован выбор
+(честный переход на современные шифры v10, данные v9 в жертву).
+
+**Фаза 1 (в пределах мажоров, `flutter pub upgrade`, без ломающих изменений):**
+flutter_webrtc 1.2→1.5.2 (DEP-12), cryptography 2.7→2.9, dio 5.9→5.10, http 1.5→1.6,
+audioplayers 6.5→6.8, path_provider/shared_preferences/uuid/cupertino_icons/
+flutter_native_splash — патчи; dev: build_runner 2.10→2.15, mockito 5.6→5.7,
+sqflite_common_ffi 2.3→2.4. Проверки: analyze 0 ошибок, test 325 passed, debug APK — ок.
+
+**Фаза 2 (мажоры) — СДЕЛАНО.** Обновлены все мажоры разом; breaking changes по
+каждому пакету исследованы параллельным workflow (10 агентов, по source-тегам +
+GitHub changelogs), правки применены по точным новым API.
+
+Правки кода:
+- **flutter_callkit_incoming 2→3:** `CallEvent` — sealed class с подклассами
+  (`CallEventActionCallAccept(:final callKitParams)` и т.д.) вместо `event.event/body`;
+  onEvent переписан на pattern-matching (main.dart), хендлеры не тронуты — форма body
+  реконструируется хелпером `_callKitParamsToBody`. `textAccept/textDecline` переехали
+  из `CallKitParams` в `AndroidParams` (notification_service + incoming_message_handler).
+  `activeCalls()` → `List<CallKitParams>` (доступ `.id`/`.extra` вместо `['id']`/`['extra']`).
+- **flutter_local_notifications 17→22:** `initialize/show/cancel` — позиционные →
+  именованные параметры (5 мест в notification_service). Конструкторы не менялись.
+- **local_auth 2→3:** `authenticate(options: AuthenticationOptions(stickyAuth:...))` →
+  плоские `persistAcrossBackgrounding:`/`biometricOnly:` (lock_screen, security_settings,
+  settings).
+- **share_plus 10→13:** `Share.share(...)` → `SharePlus.instance.share(ShareParams(...))`
+  (deprecation, 2 места).
+- Без правок кода: permission_handler 12, connectivity_plus 7, device_info_plus 13,
+  package_info_plus 10, rxdart 0.28, sentry_flutter 9, flutter_lints 6 (API не задет).
+
+Build/toolchain (форсят зависимости):
+- **minSdk 23 → 24** (`maxOf(24, flutter.minSdkVersion)`) — Android 6.0 больше не
+  поддерживается (форсят local_notifications 22 + local_auth 3). Продуктовое решение.
+- desugar_jdk_libs 2.0.4 → 2.1.4 (local_notifications 19+).
+- AGP 8.9.1 → 8.12.1, Gradle wrapper 8.12 → 8.13, Kotlin 2.1.0 → 2.2.20
+  (форсят connectivity_plus/device_info_plus/package_info_plus/share_plus).
+
+**ТРЕБУЕТ ПРОВЕРКИ НА УСТРОЙСТВЕ (5 мажоров notifications + callkit rewrite):**
+входящий звонок из убитого состояния (CallKit из push-сервиса), full-screen с локскрина,
+показ/тап уведомлений + каналы, биометрия, вход по PIN; на Android 13/14/15 и OEM.
+API 23 (Android 6.0) устройства теперь не поддерживаются.
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 325 passed; `flutter build
+apk` (debug) — см. коммит.
+
+---
+
+## 2026-07-02 — DEP-1: flutter_secure_storage 9 → 10 (безопасный мост)
+
+**Задача:** подготовить апгрейд самого security-критичного пакета (хранит
+X25519-ключи, хэши PIN/duress/wipe, ключ шифрования БД) с чеклистом под девайс.
+
+**Research (multi-agent, по source-тегам v9.2.4/v10.3.1 + live GitHub issues):**
+v10 стабилен (10.3.1), но ДЕФОЛТНЫЙ путь 9→10 = документированная потеря данных
+для нашей конфигурации (дефолтные опции, невосстановимые ключи): v10 сменил шифры
+(ключ PKCS1→OAEP, данные CBC→GCM) и по умолчанию `resetOnError: true` +
+`migrateWithBackup: false` → сбой авто-миграции безвозвратно стирает storage
+(issues #1043, #1079 — в проде, unrecoverable). Мы использовали
+`const FlutterSecureStorage()` без опций — худший случай.
+
+**Решение владельца:** данными можно пожертвовать (закрытая бета) → делаем ЧЕСТНЫЙ
+переход на современные шифры, а не временный мост.
+
+**Сделано (реальная миграция на современные шифры):**
+- `pubspec.yaml`: `^9.0.0` → `^10.3.1`.
+- `lib/services/secure_storage_options.dart`: единые опции (современные шифры v10
+  по умолчанию — OAEP + GCM; `resetOnError: false`, `migrateOnAlgorithmChange: false`)
+  + общий `appSecureStorage`. Плюс `ensureSecureStorageMigrated()` — одноразовый
+  детерминированный `deleteAll()` (флаг `secure_storage_v10_reset_done` в prefs).
+- `main.dart`: `ensureSecureStorageMigrated()` вызывается ДО первого чтения ключей
+  (перед `cryptoService.init()`). Так старый формат v9 стирается ДО того, как v10
+  попробует свою (крашащую) авто-миграцию.
+- Все 3 места (crypto_service, auth_service, database_service) → `appSecureStorage`.
+- API read/write/delete/deleteAll не менялся; `minSdk` 23 (v10 требует 23) — без бампа.
+- `docs/SECURE_STORAGE_V10_CHECKLIST.md` переписан под этот путь (главный тест —
+  обновление v9→v10 ПОВЕРХ: старт без краша, старый аккаунт чисто стёрт, новый
+  заводится, вход по PIN, wipe).
+
+**Последствие (согласовано):** существующие бета-пользователи теряют старый аккаунт,
+создают новый. Никакого костыля/deprecated-шифра — сразу v11-совместимый формат.
+См. [[secure-storage-v10-bridge]].
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 325 passed; `flutter
+build apk` (debug) — успешно (нативный v10.3.1, compileSdk 36). Поведение на железе
+подтверждается чеклистом — до этого не релизить существующим пользователям.
+
+---
+
+## 2026-07-02 — PERF-1 (финал): пагинация начальной загрузки чата
+
+**Задача:** остаток PERF-1 — при открытии чата грузилась вся история. Инкрементальный
+append для входящих уже был сделан ранее; здесь — начальная загрузка страницами.
+
+**Сделано:**
+- `database_service.dart`: `getMessagesForContactLatest(key, limit)` (последние N,
+  ORDER BY DESC LIMIT + reverse→ASC) и `getMessagesForContactBefore(key, beforeMs, limit)`
+  (старше метки, для подгрузки вверх). Оба поверх индекса `(contactPublicKey, timestamp)`.
+- `chat_screen.dart`: `_loadChatHistory` грузит последнюю страницу (50); scroll-listener
+  `_onScroll` у `maxScrollExtent` (reverse=true → старое сверху) вызывает `_loadOlder`,
+  который prepend-ит старую страницу (дедуп по messageId). Prepend при reverse=true
+  скролл-стабилен. `_hasMoreOlder`/`_isLoadingOlder` гварды.
+
+**ТРЕБУЕТ ПРОВЕРКИ НА УСТРОЙСТВЕ:** плавность подгрузки вверх и отсутствие «прыжков»
+на реальной длинной истории (логика скролл-стабильна by design, но UX стоит увидеть).
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 325 passed.
+
+---
+
+## 2026-07-02 — PROD-5: меню «…» в чате вместо one-tap очистки
+
+**Задача:** кнопка «…» (иконка меню) сразу открывала подтверждение очистки истории —
+вводило в заблуждение и опасно.
+
+**Сделано:** `chat_screen.dart` — `_showChatMenu()` (bottom sheet): «Информация о
+контакте» + «Очистить историю». `_showContactInfo()` показывает имя + полный
+публичный ключ (SelectableText, для сверки против MITM) + подсказку `verifyKeyHint`
++ копирование. Кнопка «…» теперь зовёт меню, а не очистку напрямую. Добавлены
+l10n-ключи `contactInfo`/`verifyKeyHint` (EN/RU). Крипто не задействовано — просто
+показ хранимого ключа (сверка ключей = базовая защита от MITM для E2E).
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 325 passed.
+
+---
+
+## 2026-07-02 — PROD-4: время последнего сообщения в строке контакта
+
+**Решение владельца:** показывать ТОЛЬКО время + сортировку, БЕЗ текста
+последнего сообщения (приватность: контент не светим на главном экране; duress).
+
+**Сделано:**
+- `contact_model.dart`: добавлено поле `lastMessageTime` (epoch ms, не персистится).
+- `database_service.getContacts()`: уже сортировал по `MAX(m.timestamp)` — теперь
+  это значение возвращается в модель (0 → null).
+- `contacts_screen.dart` `_ContactRow`: вместо хвоста pubkey — компактное
+  локализованное время (`_formatLastTime`: сегодня → HH:mm, этот год → «12 июн.»,
+  иначе dd.MM.yyyy). У контактов без переписки строка времени скрыта.
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 325 passed.
+
+---
+
+## 2026-07-02 — PROD-3: поиск по контактам
+
+**Сделано:** `contacts_screen.dart` — иконка поиска в AppBar (toggle), поле поиска
+над списком, фильтр по имени в памяти. При активном поиске Оракул и empty-hint
+скрыты, пустой результат → `noContactsFound`. Добавлены l10n-ключи
+`searchContactsHint`/`noContactsFound` (EN/RU), перегенерирован l10n.
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 325 passed.
+
+---
+
+## 2026-07-02 — Desktop Link удалён (PROD-1/ARCH-5/SEC-9), вариант A
+
+**Задача:** решить судьбу Desktop Link. Решение владельца — удалить сейчас (вариант A),
+переделать безопасно потом, после клиента и сервера.
+
+**Сделано:**
+- Удалены `lib/screens/desktop_link_screen.dart`, `lib/services/desktop_link_service.dart`,
+  `lib/services/desktop_link_server.dart`, `lib/models/desktop_session_model.dart`,
+  `test/services/desktop_link_service_test.dart`.
+- Убраны 13 l10n-ключей `desktopLink*` из `app_en.arb`/`app_ru.arb`, перегенерирован l10n.
+- Доки обновлены: CLAUDE.md, docs/ARCHITECTURE.md, docs/PROJECT_STRUCTURE.md.
+- В памяти проекта — план возврата (безопасный протокол) в `desktop-link-future`.
+
+**Почему:** экран был недостижим из UI (мёртвый груз в каждой сборке), протокол
+небезопасен (открытый HTTP-обмен токеном, WS-сервер без auth на anyIPv4:8765,
+неиспользуемый desktop_pubkey). Десктоп-приложение само ещё «в разработке» — паринговать
+не с чем. panic-wipe остаток сессии уже чистил (deleteAll).
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 325 passed (−3 теста
+удалённого сервиса); висячих ссылок на desktop_link в коде нет.
+
+---
+
+## 2026-07-02 — PROD-6: онбординг при первом запуске
+
+**Задача:** новый пользователь попадал на пустой экран без объяснения, как
+подключиться. Добавить лёгкий one-time онбординг (QR/ID → контакт → PIN).
+
+**Сделано:**
+- `home_screen.dart`: `_maybeShowOnboarding()` — диалог из 3 подсказок (ключ/QR,
+  добавить контакт, PIN), гейт `onboarding_seen_v1` в SharedPreferences, показ
+  один раз после бета-дисклеймера, перед device-settings. Хелпер `_onboardingTip`.
+- Строки inline-двуязычные (EN/RU) — консистентно с соседними one-time диалогами
+  в этом же экране (бета-дисклеймер, device-settings), стиль через дизайн-токены
+  (AppColors.action/AppRadii/AppButton).
+- `beta_disclaimer_test.dart`: в моки добавлен `onboarding_seen_v1: true`, чтобы
+  онбординг не всплывал во время теста дисклеймера.
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 328 passed.
+
+---
+
+## 2026-07-02 — PROD-2/QUAL-3: тумблер биометрии сделан настоящим
+
+**Задача:** тумблер биометрии показывал «включено», но ничего не сохранял
+(`// TODO` в `_toggleBiometrics`), значение отскакивало на перерисовке.
+
+**Сделано:**
+- `auth_service.dart`: добавлен `setBiometricEnabled(bool)` (по паттерну
+  `setPanicGestureEnabled`) — пишет `isBiometricEnabled` в `SecurityConfig` и
+  сохраняет через `_saveConfig()`.
+- `security_settings_screen.dart._toggleBiometrics`: при включении после успешной
+  биометрии сохраняет флаг (`setBiometricEnabled(true)`), при отказе — тумблер
+  остаётся выключенным; при выключении — `setBiometricEnabled(false)`.
+- Разблокировка уже читала `config.isBiometricEnabled` (`lock_screen._tryBiometricAuth`),
+  поэтому фича работает end-to-end без правок экрана блокировки.
+
+**Проверки:** `flutter analyze` — 0 ошибок; auth-тесты зелёные.
+
+---
+
+## 2026-07-02 — PERF-2: индекс messages.timestamp
+
+**Задача:** авто-очистка истории (`WHERE timestamp < ?`) делала полный скан —
+составной индекс `(contactPublicKey, timestamp)` не применялся, т.к. в WHERE нет
+ведущего столбца `contactPublicKey`.
+
+**Сделано:** `database_service.dart` — добавлен отдельный
+`CREATE INDEX idx_messages_timestamp ON messages(timestamp)` в `_createMessagesTable`
+(для новых БД) и миграция `if (oldVersion < 8)` (для существующих). Версия БД 7→8.
+CLAUDE.md: «версия 6» → «версия 8 (SQLCipher)».
+
+**Проверки:** `flutter analyze` — 0 ошибок; тесты БД и message_cleanup — зелёные.
+
+---
+
+## 2026-07-02 — OPS-2: постоянный applicationId (click.orpheus.app)
+
+**Задача:** сменить `com.example.orpheus_project` на нормальный reverse-DNS id
+до первого релиза (после релиза не меняется; сторы банят com.example).
+
+**Сделано:**
+- `android/app/build.gradle.kts`: `applicationId = "click.orpheus.app"`
+  (reverse-DNS домена orpheus.click — выбран владельцем).
+- Изменён ТОЛЬКО applicationId. `namespace`/Kotlin-package/имена MethodChannel
+  (`com.example.orpheus_project/*`) оставлены прежними — они внутренние, магазину
+  не видны, а их переименование = крупный риск ради косметики. FileProvider
+  authority (`${applicationId}.fileprovider` / runtime `packageName`) остаётся
+  консистентной автоматически.
+- Смена стала тривиальной после удаления Firebase (не нужна перерегистрация
+  google-services).
+
+**Проверка:** `flutter build apk` (debug) — успешно; `aapt dump badging` →
+`package: name='click.orpheus.app'`.
+
+---
+
+## 2026-07-02 — Микрофон при свёрнутом приложении во время звонка
+
+**Задача:** восстановить поведение «говорить, когда приложение свёрнуто во время
+звонка». После отказа от FCM единый постоянный сервис стал `specialUse` и по
+правилам Android 14 (while-in-use, boot/background-старт) не может держать
+микрофон. Решение — отдельный короткоживущий нативный `microphone`-сервис,
+запускаемый из видимой Activity ответа (паттерн Signal/Molly WebRtcCallService).
+
+**Сделано:**
+- Нативный `android/.../CallAudioService.kt` — foreground-сервис типа `microphone`:
+  `startForeground(..., FOREGROUND_SERVICE_TYPE_MICROPHONE)` на API 29+, с
+  try/catch (сбой старта не роняет звонок), канал `orpheus_call_audio` (LOW),
+  `STOP`-экшен. Держит микрофон, пока приложение свёрнуто во время разговора.
+- `MainActivity.kt`: в `CALL_CHANNEL` добавлены `startCallAudio(title)` /
+  `stopCallAudio` (через `ContextCompat.startForegroundService`, best-effort).
+- Манифест: `<service .CallAudioService foregroundServiceType="microphone" exported=false>`
+  (permission `FOREGROUND_SERVICE_MICROPHONE` уже был).
+- Dart: `CallNativeUiService.startCallAudio/stopCallAudio`; вызовы в
+  `call_screen.dart` — старт в `initState` (видимая Activity → старт mic-FGS
+  легален), стоп в `dispose`.
+
+**Почему из CallScreen:** microphone-FGS можно стартовать ТОЛЬКО из foreground
+(видимый экран). CallScreen при ответе — видимая Activity, поэтому старт легален
+и сервис НЕ «прилипает» как запрещённый. Если старт всё же отклонён — тихий
+фолбэк: обычный звонок при видимом экране получает микрофон и без FGS.
+
+**ТРЕБУЕТ ПРОВЕРКИ НА УСТРОЙСТВЕ:** реально ли микрофон продолжает работать при
+сворачивании во время звонка на Android 12/13/14/15 и на строгих OEM.
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 328 passed;
+`flutter build apk` (debug) — успешно (Kotlin-сервис компилируется, манифест
+сливается).
+
+---
+
+## 2026-07-02 — Лицензия: убран grace-период кэша (по решению)
+
+**Задача:** упростить модель офлайн-лицензии. Раньше офлайн-доступ давался только
+если последняя онлайн-проверка была не старше 21 дня (grace-период с отметкой
+времени). Решено убрать таймаут полностью: лицензия проверяется на сервере
+(онлайн-отзыв мгновенно выключает), а без сети приложение доступно по кэшу.
+
+**Сделано:**
+- `main.dart`: удалены `_licenseGrace` (21 день) и ключ `license_checked_at`
+  (отметка времени). `_loadCachedLicense` пускает офлайн по `license_active==true`
+  без проверки возраста; `_persistLicense` пишет только флаг, без времени.
+- Онлайн-отзыв работает как раньше: WS `license-status` со `status!=active`
+  выставляет `_isLicensed=false` и перезаписывает кэш → офлайн запрётся тоже.
+
+**Мотивация (со слов владельца):** лишние вычисления, слежка за временем, расход
+ресурсов/батареи. Теперь ничего не «тикает».
+
+**Проверки:** `flutter analyze lib/main.dart` — 0 ошибок.
+
+---
+
+## 2026-07-02 — Де-гуглизация, фаза 3: QR без ML Kit + отказ от FCM
+
+**Задача:** убрать последние проприетарные привязки к Google — закрытый ML Kit в
+QR-сканере и Firebase Cloud Messaging (пуши). Курс: клиент без сервисов Google.
+
+**Сделано (QR):**
+- `mobile_scanner` (тянул закрытый `com.google.mlkit:barcode-scanning`) → `qr_code_dart_scan`
+  (декодирование на чистом Dart через `zxing_lib`, поверх официального `camera`-плагина;
+  ноль GMS/ML Kit). `qr_scan_screen.dart`: `MobileScanner` → `QRCodeDartScanView`,
+  `onDetect(BarcodeCapture)` → `onCapture(Result)`, ошибка камеры через `onCameraError`.
+
+**Сделано (FCM → постоянный foreground-сервис):**
+- Удалены `firebase_core`, `firebase_messaging` (pubspec); плагин
+  `com.google.gms.google-services` (оба build.gradle.kts); `google-services.json`;
+  firebase-правила ProGuard; FCM-meta-data в манифесте; кастомный `BootReceiver.kt`
+  (стартовал Activity — запрещено на Android 10+; автозапуск теперь через boot-receiver
+  плагина flutter_background_service).
+- `notification_service.dart`: FCM background handler (`firebaseMessagingBackgroundHandler(RemoteMessage)`)
+  → публичный `handleBackgroundPush(Map)`; `init()` без FCM (только локальные уведомления +
+  Android 13 permission); убраны `fcmToken`, `onTokenUpdated`, FCM-обработчики.
+- `websocket_service.dart`: убран `_sendFcmToken()` / сообщение `register-fcm` — WS-сокет
+  сам теперь является push-каналом.
+- Новый `push_connection_service.dart`: постоянный foreground-сервис (`flutter_background_service`,
+  тип `specialUse`, autoStart + autoStartOnBoot). В сервисном isolate — WS-слушатель, который
+  приводит WS-кадры к плоскому виду (как раньше FCM data) и вызывает те же
+  `_showNativeIncomingCall` / `_handleBackgroundMessage` через `handleBackgroundPush`.
+- `background_call_service.dart` → тонкий фасад над `PushConnectionService` (flutter_background_service
+  одноинстансный, поэтому «сервис на время звонка» сведён к смене текста постоянного уведомления;
+  звонок больше не стартует/останавливает отдельный сервис).
+- `main.dart`: старт сервиса + heartbeat main-изолята (`push_main_alive_ts`) и публикация
+  публичного ключа (`push_user_pubkey`, не секрет) в SharedPreferences для координации;
+  на panic-wipe гасим heartbeat и сервис.
+- `call_id_storage.dart`: `sourceFcm`→`sourcePush`, `tryShowCallKitForFcm`→`tryShowCallKitForPush`.
+
+**Архитектура пушей (почему так):** тип `specialUse` — единственный без лимита времени
+(dataSync ограничен ~6ч/сутки на Android 15) и разрешённый к автозапуску при загрузке
+(microphone/dataSync — нельзя). Микрофон в постоянный сервис не влить: boot-стартованный
+сервис не может держать while-in-use микрофон (Android 14) — активный звонок обслуживает
+видимый CallScreen. Координация main↔сервис через heartbeat, чтобы не было двух сокетов на
+один pubkey.
+
+**КОНТРАКТ БЭКЕНДА (отдельный репозиторий — требуется правка на сервере):**
+- Клиент больше НЕ шлёт WS-сообщение `{"type":"register-fcm","token":...}`. Сервер должен
+  перестать требовать/использовать FCM-токены и **не** пытаться доставлять через FCM.
+- Оффлайн-доставку сервер должен отдавать в WS-сокет при (ре)коннекте (chat уже дедупится по
+  `message_id`; call-offer хранить с коротким TTL и уникальным `call_id`/`server_ts_ms`).
+- `/api/signal` и `/api/logs/batch` не трогать — уже FCM-free.
+
+**ТРЕБУЕТ ПРОВЕРКИ НА УСТРОЙСТВЕ (нельзя валидировать из репозитория):**
+- Доставка входящего звонка/сообщения при УБИТОМ приложении (свайп из recents) — задержка
+  перехвата сервисом ≈ порог heartbeat (12с) + тик (4с). Настроить пороги на реальной сети.
+- Автозапуск сервиса после ребута (boot-start `specialUse` разрешён, но OEM могут блокировать).
+- Xiaomi/Huawei/Oppo/Vivo/Samsung: исключение из энергосбережения (уже есть DeviceSettingsService)
+  + ручной автозапуск — без них OEM-киллеры рвут сервис (программного обхода нет).
+- Микрофон при сворачивании приложения ВО ВРЕМЯ звонка (постоянный сервис — specialUse без mic).
+  Если критично — вынести звонковый микрофон в отдельный нативный `microphone`-сервис
+  (запуск из видимой Activity ответа) — задокументированный follow-up.
+
+**Проверки:** `flutter analyze` — 0 ошибок; `flutter test` — 328 passed; `flutter build apk`
+(debug и release) — успешно (нативные `camera_android_camerax`, слияние манифеста `specialUse`,
+Gradle без google-services). Проверено: release-APK содержит **ноль** классов
+`com.google.firebase` / `com.google.mlkit` / `com.google.android.gms`.
+
+**Синхронизация доков:** обновлены README (нет google-services.json), docs/ARCHITECTURE.md
+(boot sequence без Firebase + раздел «Пуши без Google»), WORKSPACE_STRUCTURE.md, CLAUDE.md и
+устаревшие комментарии «FCM-изолят» → «сервисный изолят».
+
+---
+
+## 2026-07-02 — Де-гуглизация, фаза 1: privacy-правки (без крупной миграции)
+
+**Задача:** первый пакет правок по курсу «клиент без сервисов Google» + смежные
+утечки наружу. Безопасные изменения, не трогающие крупные потоки (звонки/пуши).
+
+**Сделано:**
+- `android/app/build.gradle.kts` — удалён `firebase-analytics` + `firebase-bom`
+  (из Dart не используется, слал события на app-measurement.com по умолчанию).
+- `lib/main.dart` — `SentryFlutter.init` теперь под opt-in флагом `telemetry_enabled`
+  (по умолчанию наружу ничего); `environment` = `kReleaseMode ? production : development`.
+- `lib/screens/status_screen.dart` — регион по локали устройства вместо
+  plaintext-запроса к ip-api.com (ARCH-6); удалён неиспользуемый http-клиент/параметр.
+- `lib/services/notification_service.dart` — `_sendBackgroundTelemetry` уважает
+  opt-in и больше не шлёт `peer_pubkey`/сырой payload (регресс SEC-2).
+- `test/widgets/status_screen_test.dart` — убран ip-api мок (регион теперь локальный).
+
+**Проверки:** `flutter analyze` — 0 ошибок; целевые тесты зелёные.
+
+---
+
+## 2026-07-02 — Де-гуглизация: шрифты Inter забандлены локально
+
+**Задача:** курс на клиент без сервисов Google (решение владельца). Первый шаг —
+убрать рантайм-загрузку шрифтов с серверов Google; параллельно запущен полный
+аудит проприетарных зависимостей (multi-agent workflow).
+
+**Сделано:**
+- Пакет `google_fonts` удалён из `pubspec.yaml`. Раньше Inter мог тянуться в
+  рантайме с `fonts.gstatic.com` — сетевой след к Google для privacy-мессенджера.
+- Inter 4.1 (официальный релиз rsms/inter, лицензия OFL) забандлен статикой:
+  `assets/fonts/Inter-{Regular,Medium,SemiBold,Bold}.ttf` + `OFL.txt`, объявлен
+  в `pubspec.yaml` (`family: Inter`, веса 400/500/600/700 — все, что использует тема).
+- `lib/theme/app_theme.dart`, `lib/theme/app_tokens.dart` — `GoogleFonts.inter(...)`
+  → `TextStyle(fontFamily: 'Inter', ...)`; `GoogleFonts.interTextTheme(base)` →
+  `base.apply(fontFamily: 'Inter')` (двойное применение family устранено).
+
+**Проверки:** `flutter analyze` — 0 ошибок (616 issues, было 638); `flutter test` —
+327 passed / 0 failed.
+
+---
+
+## 2026-07-01 — Bootstrap среды и guardrails (Фаза 0–1)
+
+**Задача:** поднять рабочую среду для нового участника, собрать/запустить клиент,
+поставить guardrails против поломок. Трек изолированный (ветка `wl/dev`).
+
+**Сделано:**
+- Установлен Flutter 3.44.4 (stable), связан с Android SDK (Android Studio уже стоял).
+- Проект собран (`app-debug.apk`) и запущен на эмуляторе — полная инициализация без
+  ошибок (Firebase, FCM, крипто, сеть, CallKit).
+- Решение по стеку: работаем на **актуальном** Flutter, код патчим под него.
+
+**Изменения кода/конфига:**
+- `android/gradle.properties` — удалён машинно-специфичный `org.gradle.java.home`
+  (был жёстко прописан путь другого разработчика → сборка падала на других машинах).
+- `lib/theme/app_theme.dart` — добавлен импорт `package:flutter/cupertino.dart`
+  (`CupertinoPageTransitionsBuilder` перестал реэкспортироваться из `material` в
+  новом Flutter). Это была единственная ошибка компиляции (`flutter analyze` → 0 errors).
+- `.github/workflows/ci.yml` — CI: `flutter analyze` (гейт на ошибки) + `flutter test`.
+
+**Статус тестов:** 303 passed / 20 failed. Падения — version-skew на Flutter 3.44
+(локаль EN vs RU в тестах уведомлений; семантика поиска виджетов; fallback update_service).
+Помечены как следующая задача; в CI `flutter test` пока не блокирующий.
+
+**Команды:** `flutter pub get`, `flutter analyze`, `flutter test`, `flutter run -d emulator-5554`.
+
+---
+
+## 2026-07-01 — Зелёные тесты: разбор 20 падений (Фаза 2)
+
+**Задача:** довести тест-сьют до зелёного на Flutter 3.44. Было 303 passed / 20 failed
+(version-skew, помеченный ранее как следующая задача).
+
+**Диагностика (мульти-агентный разбор по каждому падению):** причины оказались смешанными —
+не единый version-skew:
+- устаревшие RU-литералы в ассертах после миграции на gen-l10n (`СКАНИРОВАНИЕ QR` → фактически
+  `СКАНИРОВАТЬ QR-КОД`; `Неверный PIN-код` → `Неверный PIN`; неразрывный дефис U+2011 в `PIN‑код`);
+- забытая локаль в `pumpWidget` (contacts, диалог обновления) → `L10n.of(context)!` кидал null-check;
+- строки, захардкоженные по-английски (уведомления, панель звонка, заголовок «История обновлений»);
+- диалоги, читавшие язык из глобального синглтона `LocaleService` вместо виджет-дерева;
+- реальный дефект каркаса Flutter 3.44 (ListTile без Material-предка) на экране настроек;
+- самопротиворечивый тест `getWithFallback` (писан под 2 хоста, а остался один).
+
+**Изменения кода:**
+- `lib/services/notification_service.dart` — ВСЕ строки уведомлений двуязычные через gen-l10n
+  (звонок, сообщение, чат-сообщение, официальный ответ, тестовое, дефолтное имя, а также CallKit:
+  Ответить/Отклонить/Пропущенный/Перезвонить и fallback-уведомление звонка). Фоновый FCM-изолят
+  без контекста → добавлен хелпер `notificationL10n()`: резолвит язык по сохранённому `app_locale`
+  → системная локаль → `en`, затем `lookupL10n(Locale)`. RU-юзер получает RU, EN — EN.
+  (Системные названия Android-каналов не трогаем — регистрируются один раз.)
+- `lib/widgets/call/control_panel.dart` — подписи кнопок звонка через `L10n.of(context)`
+  (`decline`/`answerCall`/`microphone`/`speaker`/`endCall`).
+- `lib/l10n/app_{en,ru}.arb` — добавлены ключи `answerCall`, `microphone`, `newMessage`,
+  `unknownCaller` (обе локали); перегенерён `app_localizations*.dart`.
+- `lib/updates_screen.dart` — заголовок через `L10n.of(context).updateHistory.toUpperCase()`
+  (переиспользован существующий ключ; EN-визуал сохранён).
+- `lib/screens/settings_screen.dart` — `_MenuCard`: Column обёрнут в `Material(transparency)`
+  (фикс debug-ассерта Flutter 3.44 + видимый ripple).
+- `lib/screens/home_screen.dart`, `lib/screens/lock_screen.dart` — язык диалога бета-дисклеймера
+  и диалога wipe берётся из `Localizations.localeOf(context)` (в проде эквивалентно синглтону).
+
+**Изменения тестов:** обновлены устаревшие литералы (help/qr/lock), добавлена локаль+делегаты в
+pump'ы (contacts, диалог обновления), переписан `getWithFallback` под один хост (+тест на `null`).
+
+**Статус:** `flutter analyze` → 0 errors; `flutter test` → **324 passed / 0 failed**.
+
+**Команды:** `flutter analyze`, `flutter test`.
+
+---
+
+## 2026-07-01 — Шифрование локальной БД (аудит SEC-1) [ветка wl/db-encryption]
+
+**Задача:** первый заход по ремедиации аудита (`AUDIT_REPORT.md`) — закрыть критическую находку
+`SEC-1`: локальная БД хранилась в открытом виде, из-за чего PIN/duress/panic-wipe были косметикой.
+Директива пользователя: потеря данных допустима (критичных данных нет) → миграцию не делаем.
+
+**Сделано:**
+- `pubspec.yaml`: `sqflite` → `sqflite_sqlcipher ^3.4.0` (drop-in API + пароль/PRAGMA key).
+- `lib/services/database_service.dart`: ключ шифрования БД — 256 случайных бит (`Random.secure`),
+  хранится в Keystore-backed `flutter_secure_storage` (`orpheus_db_key`). `openDatabase(..., password:)`.
+  При первом запуске (нет ключа) старая НЕзашифрованная БД удаляется, создаётся свежая зашифрованная.
+  В `deleteDatabaseFile()` (panic-wipe) ключ БД тоже удаляется → остаточный шифртекст невосстановим,
+  следующий запуск создаёт новый ключ + пустую БД. Логи переведены на `DebugLogger`.
+- `android/app/src/main/AndroidManifest.xml`: `allowBackup="false"` + `dataExtractionRules`.
+- `android/app/src/main/res/xml/data_extraction_rules.xml`: исключить всё из cloud-backup и
+  device-transfer (SEC-7 / DB-2 / OPS-3).
+- `test/services/database_service_test.dart`: убран импорт удалённого `package:sqflite/sqflite.dart`
+  (типы/фабрика берутся из `sqflite_common_ffi`).
+
+**Дизайн-решение:** ключ БД — случайный в Keystore, НЕ из PIN. Причина: приложение принимает и пишет
+сообщения, пока заблокировано (WebSocket под экраном PIN) и в фоне; ключ из PIN там недоступен →
+входящие терялись бы. Компромисс: PIN остаётся UI-замком, данные защищает Keystore-ключ (это огромный
+шаг от plaintext). PIN-деривация — отдельное продуктовое решение (жертва приёмом в фоне).
+
+**Статус:** `flutter analyze` → 0 errors; `flutter test` → **324 passed / 0 failed**.
+Реальная проверка SQLCipher/манифеста — сборка `flutter build apk --debug` (нативные libs + resources).
+
+**Команды:** `flutter pub get`, `flutter analyze`, `flutter test`, `flutter build apk --debug`.
+
+---
+
+## 2026-07-01 - Телеметрия opt-in + без метаданных (аудит SEC-2) [ветка wl/audit-fixes]
+
+**Задача:** закрыть SEC-2 - телеметрия была включена по умолчанию и слала на сервер публичные
+ключи контактов (граф общения) и отпечаток устройства.
+
+**Сделано (lib/services/telemetry_service.dart, переписан):**
+- `_enabled = false` по умолчанию; флаг persist в SharedPreferences; `setEnabled()` + `isEnabled`.
+- Из выгрузки убраны `peer_pubkey` и `device_info` (отпечаток); `device_info_plus` больше не
+  используется в телеметрии. `os` оставлен грубым (android/ios).
+- `_sanitizeContext()` вырезает из context ключи-личности контактов перед отправкой.
+- Тумблер включения добавлен в скрытый экран отладочных логов (lib/screens/debug_logs_screen.dart).
+- `X-Pubkey` оставлен: телеметрия теперь opt-in, владелец включает её для отладки СВОЕГО устройства.
+
+**Статус:** analyze 0 errors; test 324 passed / 0 failed.
+
+---
+
+## 2026-07-01 - Стабильный message_id: дедуп + удалить у обоих (аудит LOGIC-1/2) [ветка wl/audit-fixes]
+
+**Задача:** LOGIC-1 (тихая потеря быстрых входящих из-за 5-сек окна дедупа) и LOGIC-2 («удалить
+у обоих» не срабатывало у получателя из-за матча по метке времени). Решение: стабильный `message_id`
+(UUID) в конверте, одинаковый у обеих сторон.
+
+**Сделано (8 файлов lib + тесты):**
+- `models/chat_message_model.dart`: поле `messageId` (+toMap).
+- `services/database_service.dart`: колонка `messageId`; версия 6->7; убран UNIQUE-индекс по timestamp
+  (DB-4), добавлены индекс `(contactPublicKey,timestamp)` и UNIQUE `(contactPublicKey,messageId)`;
+  методы `deleteMessagesByMessageIds`, `messageExistsByMessageId`; чтение messageId в mapping.
+- `services/incoming_message_handler.dart`: дедуп по `message_id` (точный) с fallback на окно для
+  старых клиентов; delete-for-both по `message_ids` (fallback timestamps_ms); +2 метода в интерфейс.
+- `services/websocket_service.dart`: `message_id` в конверте chat, `message_ids` в delete-for-both,
+  проброс через pending-очередь на реконнекте.
+- `services/pending_actions_service.dart`: `messageId` в PendingMessage/сериализации.
+- `chat_screen.dart`: генерация UUID при отправке (пакет `uuid`, был неиспользуем - DEP-10);
+  delete-for-both/self по id.
+- `main.dart`: адаптер IncomingMessageDatabase - 2 новых метода.
+- Тесты: тест-схемы messages + `messageId`; фейк `_FakeDb` +2 метода; новый тест на LOGIC-1
+  (разные id в окне не теряются, одинаковый id - дубль).
+
+**Обратная совместимость:** message_id в открытом виде рядом с зашифрованным payload; старые клиенты
+игнорируют лишнее поле; без id - прежнее окно дедупа.
+
+**Статус:** analyze 0 errors; test 325 passed / 0 failed; flutter build apk --debug OK.
+
+---
+
+## 2026-07-01 - Реальный статус исходящих сообщений (аудит LOGIC-3/LOGIC-4/UI-8) [ветка wl/msg-status]
+
+**Задача:** сообщение всегда показывало двойную галку «доставлено», даже при сбое шифрования/
+отправки (ошибка молча проглатывалась) - баг доверия.
+
+**Сделано:**
+- `chat_screen.dart`: `_sendMessage` теперь стартует со статусом `sending`, при успехе -> `sent`,
+  при ошибке (encrypt/send) -> `failed` (раньше `catch (_)` глотал ошибку). Иконка статуса через
+  `_buildStatusIcon`: часы/одиночная галка/красный error (двойная галка delivered/read пока не
+  используется - сервер релей без квитанций).
+- `database_service.dart`: добавлен `updateMessageStatusByMessageId` (обновление по стабильному id).
+- Тест: DB-тест на `updateMessageStatusByMessageId` + `deleteMessagesByMessageIds`.
+
+**Статус:** analyze 0 errors; test 326 passed / 0 failed.
+
+---
+
+## 2026-07-01 - Экран приветствия: loading/guard при создании аккаунта (аудит UI-5)
+
+**Сделано (welcome_screen.dart):** `_createNewAccount` - guard от двойного тапа (иначе перегенерация
+ключей поверх созданных), `isLoading` на кнопке + блокировка кнопок на время генерации, обработка
+ошибки со SnackBar (раньше без loading и без обработки). Импорт-ключа уже закрывал диалог до await
+и показывал ошибку - не трогал.
+
+**Статус:** analyze 0 errors; test 326 passed / 0 failed.
+
+---
+
+## 2026-07-01 - Батч: офлайн-лицензия, QR-камера, диалог контакта (аудит LOGIC-8/UI-3/UI-4/UI-7) [ветка wl/audit-fixes-3]
+
+- **LOGIC-8** (`main.dart`): кэш подтверждённой лицензии в SharedPreferences (`license_active`);
+  `_loadCachedLicense()` пускает офлайн-пользователя сразу (guard `!_isCheckCompleted` - онлайн-ответ
+  в приоритете); `_persistLicense()` на license-status/payment-confirmed/подтверждении на экране.
+- **UI-3** (`qr_scan_screen.dart`): `MobileScanner.errorBuilder` -> экран «нет доступа к камере» +
+  кнопка «Открыть настройки» (`openAppSettings`, permission_handler). l10n: cameraAccessDenied/openSettings.
+- **UI-4/UI-7** (`contacts_screen.dart`): `_AddContactDialog` -> StatefulWidget: валидация (пустые поля /
+  формат ключа base64x32), блокировка кнопок + loading на время сохранения, инлайн-ошибка + try/catch.
+  l10n: fillAllFields/invalidPublicKey.
+
+**Статус:** analyze 0 errors; test 326 passed / 0 failed; flutter build apk --debug OK.
+
+---
+
+## 2026-07-01 - Лицензия: grace-период 21 день (уточнение LOGIC-8 после обсуждения отзыва)
+
+По обсуждению с владельцем: бессрочный кэш лицензии не давал отозвать лицензию у вечно-офлайн
+устройства. Решение - grace-период 21 день.
+
+**main.dart:** к кэшу `license_active` добавлена отметка `license_checked_at` (время последней
+онлайн-проверки). `_loadCachedLicense` пускает офлайн только если проверка была <= 21 дня назад;
+`_persistLicense` пишет метку времени при каждом ответе сервера. Онлайн-отзыв - мгновенный
+(перезапись кэша на inactive), вечно-офлайн отозванная лицензия запрётся максимум через 21 день.
+
+**Статус:** analyze 0 errors; test 326 passed / 0 failed.
+
+---
+
+## 2026-07-01 - Производительность: инкрементальный чат + debounce контактов (аудит PERF-1/PERF-3) [ветка wl/perf]
+
+- **PERF-1** (`chat_screen.dart` + `database_service.dart`): вместо перечитывания всей переписки на
+  каждое входящее - `getMessagesForContactAfter(afterMs)` + `_appendNewMessages()` дописывают только
+  новое (дедуп по messageId). Вынесен общий маппер строки `_rowToMessage`. Пагинация начальной
+  загрузки (скролл вверх) - отдельный follow-up.
+- **PERF-3** (`contacts_screen.dart`): обновление списка на события `messageUpdateController`
+  debounce-ится (400мс) через `_scheduleRefresh` - пачка входящих не пере-агрегирует всю таблицу.
+- Тест: DB-тест на `getMessagesForContactAfter`.
+
+**Статус:** analyze 0 errors; test 327 passed / 0 failed.
+
+---
+
+## 2026-07-01 - Гигиена логирования в release (аудит QUAL-1/OPS-6) [ветка wl/log-hygiene]
+
+**Задача:** структурированные логи и голые print уходили в системный logcat в release, включая
+события безопасности (duress/wipe/неверный PIN) и дамп security-конфига с хэшами.
+
+**Сделано:**
+- `debug_logger_service.dart`: `print` в `DebugLogger.log` обёрнут в `if (kDebugMode)` - в release
+  логи не идут в logcat (остаются в RAM-буфере для in-app экрана + телеметрии). Гейтит 218 лог-сайтов.
+- `auth_service.dart`: 10 чувствительных `print` -> `DebugLogger` (гейтнуто). Дамп `$_config`
+  (хэши/соль) убран полностью - не пишем даже в буфер.
+- `main.dart`: убраны из логов префикс публичного ключа и состояние PIN при старте.
+- Остальные ~200 операционных `print` (websocket/notification/database/...) - follow-up QUAL-7.
+
+**Статус:** analyze 0 errors; test 327 passed / 0 failed.
+
+---
+
+## 2026-07-01 - Чистка мёртвого кода (аудит ARCH-4/QUAL-2/DEP-9) [ветка wl/deadcode]
+
+Верифицировано grep-ом, что не используется, и удалено:
+- `lib/main_test.dart` (183 строки) - осиротевшее WebRTC-тест-приложение (свой main/runApp) в lib/.
+- `lib/services/call_session_controller.dart`, `chat_session_controller.dart` - пустые заглушки (1 строка),
+  ни одной ссылки (тестов на них тоже нет - docs/testing упоминает их ошибочно).
+- Зависимость `provider` из pubspec (0 импортов; state - через синглтоны).
+
+**Статус:** pub get OK; analyze 0 errors; test 327 passed / 0 failed.
+
+---
+
+## 2026-07-01 - Защита аварийного wipe: исчерпывающий + best-effort + живой ключ (аудит SEC-5/LOGIC-7 + ARCH-7) [ветка wl/wipe-harden]
+
+**Задача:** SEC-5 (wipe стирал не всё secure storage - оставались desktop-link сессия и ключ БД) +
+LOGIC-7 (wipe прерывался на первом сбое, onWipeCompleted не звался).
+
+**Сделано (после адверсариал-верификации воркфлоу - 3 линзы):**
+- `auth_service.dart`: `AuthSecureStorage.deleteAll()` (+ прод + 5 тест-моков); performWipe переписан
+  best-effort (каждый шаг в try/catch, состояние/навигация сбрасываются всегда), secure storage чистится
+  целиком через `deleteAll`. Ещё 2 голых auth-принта -> DebugLogger.
+- **Верификация нашла HIGH:** wipe звал `CryptoService().deleteAccount()` на ОДНОРАЗОВОМ экземпляре,
+  а живой `cryptoService` держал приватный ключ в памяти + сокет оставался под стёртой личностью.
+  Фикс: `CryptoService` -> синглтон (ARCH-7); performWipe зовёт `CryptoService.instance.deleteAccount()`
+  (чистит ключи в памяти; reconnect не поднимется - publicKeyBase64 == null).
+- **Верификация нашла MEDIUM:** `_isWiping` снимается после шага 2 -> входящее могло пересоздать БД+ключ.
+  Фикс: добавлен `onWipeStarted` (main.dart разрывает websocket В НАЧАЛЕ wipe) + разрыв в onWipeCompleted.
+- Обновлены 3 вызова `CryptoService()` -> `.instance` (main, status_screen, auth performWipe).
+- LOW (APK-updates не чистятся - не секрет; нет сигнала об ошибке wipe в UI) - отмечено как follow-up.
+
+**Статус:** analyze 0 errors; test 327 passed / 0 failed; сборка APK - в процессе.
+
+---
+
+## 2026-07-01 - Авто-контакт для сообщений от неизвестных отправителей (аудит DB-6) [wl/dev]
+
+**Задача:** сообщение от отправителя, которого нет в контактах, сохранялось (`addMessage`), но
+`getContacts` (LEFT JOIN от contacts) его не показывал -> пользователь видел только пуш, а переписки в
+списке не было.
+
+**Сделано:** `database_service.addContactIfMissing(publicKey)` (имя = префикс ключа, без duress-проверки,
+как addMessage); вызывается в chat-пути `incoming_message_handler` перед `addMessage`. +метод в интерфейс
+`IncomingMessageDatabase`, адаптер (main.dart) и фейк (тест). Ассерт в тесте: неизвестный отправитель
+авто-добавлен в контакты.
+
+**Статус:** analyze 0 errors; test 327 passed / 0 failed.
+
+---
+
+## 2026-07-01 - Гонка переподключения WebSocket (аудит LOGIC-9) [ветка wl/ws-connect]
+
+**Задача:** `_initConnection` (async `WebSocket.connect().then`) не защищён от параллельного запуска
+(`_forceReconnect`/reconnect-таймер зовут напрямую) -> два `.then` -> два живых сокета -> двойная
+доставка + утечка.
+
+**Сделано:** generation-токен `_connectionGeneration`. `_initConnection` захватывает `gen = ++_connectionGeneration`;
+в `.then` устаревший сокет закрывается и НЕ подписывается; в `.catchError` устаревшая попытка игнорируется;
+`disconnect()` бампает поколение (инвалидирует in-flight connect).
+
+**Адверсариал-верификация (2 линзы) нашла регресс (MEDIUM x2):** обработчики `onDone/onError` НЕ были
+защищены поколением -> закрытие живого предшественника новым connect дёргало `_handleDisconnect` ->
+лишний цикл реконнектов (каждую секунду, backoff сбрасывается на успехе). Исправлено: `onDone/onError`
+теперь проверяют `gen != _connectionGeneration` и выходят для устаревшего сокета. Плюс reentrancy-guard
+`_sendingPending` в `_sendPendingMessages` (LOW). connect-timeout (LOW, pre-existing) - follow-up.
+
+**Статус:** analyze 0 errors; test 327 passed / 0 failed.
+
+---
+
+## 2026-07-01 - PIN на настоящий Argon2id + verifyPin async (аудит SEC-8 + LOGIC-5) [ветка wl/pin-argon2]
+
+**Задача:** SEC-8 — PIN хэшировался 10000×SHA-256 под видом Argon2id (слабо против перебора
+украденного конфига; для 4-6-значного PIN вся стойкость в цене KDF). LOGIC-5 — счётчик попыток
+писался fire-and-forget.
+
+**Сделано:**
+- Argon2id из пакета `cryptography` (memory=19456≈19МБ OWASP-минимум, t=2, p=1, hashLength=32).
+  Новый хэш тегируется `argon2id$`; `_verifyHash` поддерживает и legacy SHA-256 -> без блокировки/сброса.
+- `verifyPin` -> `Future<PinVerifyResult>` async; счётчики попыток awaited (LOGIC-5, durable до реакции UI).
+  Обновлены ВСЕ вызовы (lock_screen, pin_setup x3, settings, changePin/disablePin/exitDuressMode + тесты).
+- Авто-апгрейд legacy->Argon2id при первом входе — для PIN И кода принуждения (`_maybeUpgradeLegacyHash`).
+- Тест-сим `createForTesting(fastHash:true)` (быстрый sync-хэш) — реальный Argon2id async не резолвится
+  под fake-clock WidgetTester.pump (виджет-тесты зависали). Сим гейтнут `kDebugMode` -> в release всегда Argon2id.
+
+**Адверсариал-верификация (3 линзы):** crypto=solid, async-seam=solid, migration=has-issues.
+Исправлено по итогам: memory 12->19МБ (MEDIUM, OWASP); апгрейд duress-кода (LOW); гейт сим-а kDebugMode (LOW);
+short-circuit апгрейда в fast-тестах (LOW). Constant-time compare — не нужен (локальная модель, Argon2 доминирует).
+Остаток: legacy wipe-код не апгрейдится (он и так стирается при вводе) — задокументировано.
+
+**Статус:** analyze 0 errors; test 327 passed / 0 failed; APK — пересобирается.
+
+---
+
+## 2026-07-02 - OPS-1: подпись release своим keystore [wl/dev]
+
+`build.gradle.kts`: загрузка `android/key.properties` (в .gitignore) + `signingConfigs.release`;
+`buildTypes.release` подписывает release-ключом при наличии key.properties, иначе фолбэк на debug
+(сборка/CI без секретов). Добавлены `android/key.properties.example` (с инструкцией keytool) и
+`**/*.jks` в .gitignore. Владелец генерирует keystore сам.
+
+**Статус:** `flutter build apk --release` OK (фолбэк на debug-подпись, APK 128.9 МБ).
+
+---
+
+## 2026-07-02 - WS connect watchdog (pre-existing LOW из верификации LOGIC-9) [ветка wl/ws-timeout]
+
+`websocket_service.dart`: `WebSocket.connect` не имел таймаута -> при зависшем connect статус навсегда
+залипал в Connecting, а `connect()` блокировал новые попытки. Добавлен `_connectTimeout` (20с): по
+таймауту бампает `_connectionGeneration` (опоздавший сокет закроется в .then по gen-guard, без утечки),
+ротирует хост, зовёт `_handleDisconnect` (реконнект). Отменяется на успехе/ошибке/disconnect.
+
+**Статус:** analyze 0 errors; test 327 passed / 0 failed.
+
+---
+
+## 2026-07-02 - Дедуп in-flight запросов бейджей (аудит PERF-4) [wl/dev]
+
+`badge_service.dart`: `getBadge` без дедупа плодил параллельные HTTP на один pubkey (preloadBadges
+зовётся на каждый refresh контактов). Добавлен `_inFlight` (pubkey -> Future) + `putIfAbsent` со
+self-clean `whenComplete`; логика запроса вынесена в `_fetchAndCache`.
+
+**Статус:** analyze 0 errors; test 327 passed / 0 failed.
+
+---
+
+## 2026-07-02 - Синхронизация документации с изменениями сессии [wl/dev]
+
+Параллельный аудит 11 doc-файлов (воркфлоу) нашёл 22 устаревших утверждения в 6 файлах; исправлено:
+- README: подпись release (OPS-1) — key.properties вместо "debug-ключ".
+- SECURITY_REVIEW: находки P0 wipe / P2 PIN / P2 логи помечены ✅ устранёнными (SEC-1/5, SEC-8, SEC-2/QUAL-1).
+- FEATURES_AND_LIMITATIONS: пп.1 (хранение) и 5 (логи/телеметрия) → закрыто.
+- ARCHITECTURE / FUNCTIONAL_PRINCIPLES / PROJECT_STRUCTURE: БД → SQLCipher/зашифрована; телеметрия → opt-in,
+  выключена по умолчанию, санитизирована.
+5 файлов (PROJECT_OVERVIEW, GETTING_STARTED, PHILOSOPHY, DEVELOPMENT_GUIDE, docs/README) — без устаревшего.

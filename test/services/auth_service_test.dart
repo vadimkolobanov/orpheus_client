@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orpheus_project/models/security_config.dart';
 import 'package:orpheus_project/services/auth_service.dart';
+import 'package:orpheus_project/services/database_service.dart';
 
 class _InMemoryAuthStorage implements AuthSecureStorage {
   final Map<String, String> _kv = {};
@@ -19,10 +20,20 @@ class _InMemoryAuthStorage implements AuthSecureStorage {
   Future<void> delete({required String key}) async {
     _kv.remove(key);
   }
+
+  @override
+  Future<void> deleteAll() async {
+    _kv.clear();
+  }
 }
 
 void main() {
   group('AuthService (контракты безопасности)', () {
+    // ARCH-1: verifyPin(duress) теперь пушит duress-режим в DatabaseService.instance
+    // (синглтон). Сбрасываем после каждого теста, чтобы флаг не «протёк» в поздний
+    // тест (fail-safe, но чистим для изоляции). setDuressMode не трогает реальную БД.
+    tearDown(() => DatabaseService.instance.setDuressMode(false));
+
     test('init: без конфига в storage — SecurityConfig.empty и приложение разблокировано', () async {
       final storage = _InMemoryAuthStorage();
       final auth = AuthService.createForTesting(secureStorage: storage);
@@ -60,12 +71,9 @@ void main() {
       auth.lock();
       expect(auth.isUnlocked, isFalse);
 
-      final r1 = auth.verifyPin('000000');
+      final r1 = await auth.verifyPin('000000');
       expect(r1, equals(PinVerifyResult.invalid));
       expect(auth.config.failedAttempts, equals(1));
-
-      // сохранение происходит async внутри сервиса; даём очереди отработать
-      await Future<void>.delayed(const Duration(milliseconds: 5));
     });
 
     test('lockout: после достижения 5 неудачных попыток следующая попытка возвращает lockedOut', () async {
@@ -76,13 +84,13 @@ void main() {
       auth.lock();
 
       for (var i = 0; i < 5; i++) {
-        final r = auth.verifyPin('000000');
+        final r = await auth.verifyPin('000000');
         expect(r, equals(PinVerifyResult.invalid));
       }
       expect(auth.config.failedAttempts, equals(5));
       expect(auth.config.isLockedOut, isTrue);
 
-      final duringLock = auth.verifyPin('123456');
+      final duringLock = await auth.verifyPin('123456');
       expect(duringLock, equals(PinVerifyResult.lockedOut));
       expect(auth.isUnlocked, isFalse);
     });
@@ -97,7 +105,7 @@ void main() {
       expect(ok, isTrue);
 
       auth.lock();
-      final r = auth.verifyPin('654321');
+      final r = await auth.verifyPin('654321');
       expect(r, equals(PinVerifyResult.duress));
       expect(auth.isUnlocked, isTrue);
       expect(auth.isDuressMode, isTrue);
@@ -113,12 +121,12 @@ void main() {
       expect(ok, isTrue);
 
       // Сперва “набьём” попытки, чтобы было что проверять на reset/no-increment.
-      auth.verifyPin('000000');
-      auth.verifyPin('000000');
+      await auth.verifyPin('000000');
+      await auth.verifyPin('000000');
       expect(auth.config.failedAttempts, equals(2));
 
       auth.lock();
-      final r = auth.verifyPin('111111');
+      final r = await auth.verifyPin('111111');
       expect(r, equals(PinVerifyResult.wipeCode));
       // Важно: wipeCode — осознанное действие, попытки сбрасываются.
       expect(auth.config.failedAttempts, equals(0));
@@ -133,9 +141,9 @@ void main() {
       await auth.setPin('123456');
       await auth.setAutoWipe(true, attempts: 3);
 
-      expect(auth.verifyPin('000000'), equals(PinVerifyResult.invalid));
-      expect(auth.verifyPin('000000'), equals(PinVerifyResult.invalid));
-      expect(auth.verifyPin('000000'), equals(PinVerifyResult.autoWipe));
+      expect(await auth.verifyPin('000000'), equals(PinVerifyResult.invalid));
+      expect(await auth.verifyPin('000000'), equals(PinVerifyResult.invalid));
+      expect(await auth.verifyPin('000000'), equals(PinVerifyResult.autoWipe));
       expect(auth.config.failedAttempts, equals(3));
     });
 
@@ -198,7 +206,7 @@ void main() {
       expect(auth.config.pinLength, equals(4));
       
       auth.lock();
-      final result = auth.verifyPin('1234');
+      final result = await auth.verifyPin('1234');
       expect(result, equals(PinVerifyResult.success));
       expect(auth.isUnlocked, isTrue);
     });
@@ -232,7 +240,7 @@ void main() {
       expect(auth.config.pinLength, equals(4)); // длина сохранена
       
       auth.lock();
-      expect(auth.verifyPin('5678'), equals(PinVerifyResult.success));
+      expect(await auth.verifyPin('5678'), equals(PinVerifyResult.success));
     });
 
     test('setPin с 6-значным PIN (по умолчанию): сохраняет pinLength=6', () async {

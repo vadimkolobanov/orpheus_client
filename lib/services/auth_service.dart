@@ -1,14 +1,20 @@
 // lib/services/auth_service.dart
 // Сервис авторизации: PIN-код, duress code, блокировка
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:orpheus_project/services/secure_storage_options.dart';
+import 'package:orpheus_project/services/monotonic_clock.dart';
 import 'package:crypto/crypto.dart';
+import 'package:cryptography/cryptography.dart' as kdf;
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:orpheus_project/models/security_config.dart';
 import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,6 +23,9 @@ abstract class AuthSecureStorage {
   Future<String?> read({required String key});
   Future<void> write({required String key, required String value});
   Future<void> delete({required String key});
+
+  /// Полная очистка secure storage (для исчерпывающего panic-wipe — аудит SEC-5).
+  Future<void> deleteAll();
 }
 
 /// Прод-реализация secure storage через `flutter_secure_storage`.
@@ -32,6 +41,9 @@ class FlutterAuthSecureStorage implements AuthSecureStorage {
 
   @override
   Future<void> delete({required String key}) => _inner.delete(key: key);
+
+  @override
+  Future<void> deleteAll() => _inner.deleteAll();
 }
 
 class AuthService {
@@ -41,24 +53,53 @@ class AuthService {
   /// Set by _AppState.initState() to reset navigation state.
   static VoidCallback? onWipeCompleted;
 
+  /// Вызывается в САМОМ начале wipe (до удаления данных), чтобы _AppState мог
+  /// остановить сетевой конвейер (websocket): иначе входящее сообщение может
+  /// пересоздать БД + ключ во время очистки, а сокет остаться подключённым под
+  /// стёртой личностью.
+  static VoidCallback? onWipeStarted;
+
   /// Создать отдельный экземпляр (в тестах), чтобы не трогать singleton и не зависеть от плагинов.
+  ///
+  /// [fastHash] — использовать быстрый синхронный хэш вместо Argon2id. Нужен
+  /// ТОЛЬКО виджет-тестам: реальный Argon2id async не завершается под fake-clock
+  /// `WidgetTester.pump`. Прод и обычные (await) тесты используют Argon2id.
   static AuthService createForTesting({
     required AuthSecureStorage secureStorage,
     DateTime Function()? now,
+    Future<int?> Function()? monotonicNow,
+    bool fastHash = false,
   }) {
-    return AuthService._(secureStorage: secureStorage, now: now);
+    return AuthService._(
+        secureStorage: secureStorage,
+        now: now,
+        monotonicNow: monotonicNow,
+        fastHashForTesting: fastHash);
   }
 
   AuthService._({
     AuthSecureStorage? secureStorage,
     DateTime Function()? now,
+    Future<int?> Function()? monotonicNow,
+    bool fastHashForTesting = false,
   })  : _secureStorage =
-            secureStorage ?? FlutterAuthSecureStorage(const FlutterSecureStorage()),
-        _now = now ?? DateTime.now;
+            secureStorage ?? FlutterAuthSecureStorage(appSecureStorage),
+        _now = now ?? DateTime.now,
+        _monotonicNow = monotonicNow ?? MonotonicClock.elapsedRealtimeMs,
+        // Сим fastHash действует ТОЛЬКО в debug (тесты): в release всегда Argon2id,
+        // даже если кто-то по ошибке создаст сервис через createForTesting.
+        _fastHashForTesting = fastHashForTesting && kDebugMode;
 
   final AuthSecureStorage _secureStorage;
   final DateTime Function() _now;
+  // Монотонные часы (elapsedRealtime) для тамперо-устойчивой блокировки (LOGIC-6).
+  final Future<int?> Function() _monotonicNow;
+  final bool _fastHashForTesting;
   static const _configKey = 'orpheus_security_config';
+  // Non-secret marker (SharedPreferences): "a PIN exists on this install".
+  // Lets init() fail CLOSED when the secure-storage config is unreadable or
+  // missing — otherwise a storage hiccup silently opens the app without PIN.
+  static const _pinMarkerKey = 'orpheus_pin_was_enabled';
 
   /// Текущая конфигурация безопасности
   SecurityConfig _config = SecurityConfig.empty;
@@ -68,31 +109,75 @@ class AuthService {
   bool _isDuressMode = false;
   bool get isDuressMode => _isDuressMode;
 
+  /// Единая точка смены duress-режима. Кроме своего флага, ПРОТАЛКИВАЕТ его в
+  /// DatabaseService (разрыв цикла auth↔database, ARCH-1): раньше БД сама читала
+  /// `AuthService.instance.isDuressMode`. Все переходы duress идут через этот
+  /// метод, чтобы БД всегда фильтровала данные согласованно с режимом входа.
+  void _setDuressMode(bool value) {
+    _isDuressMode = value;
+    DatabaseService.instance.setDuressMode(value);
+  }
+
   /// Флаг: приложение разблокировано
   bool _isUnlocked = false;
   bool get isUnlocked => _isUnlocked;
 
+  /// Fail-closed: конфиг не прочитался/пропал, хотя маркер говорит, что PIN
+  /// был настроен. Приложение остаётся заблокированным (см. requiresUnlock),
+  /// а не тихо открывается без PIN. Выход — wipe/переустановка.
+  bool _configLoadFailed = false;
+
   /// Инициализация сервиса — загрузка конфигурации
   Future<void> init() async {
     try {
-      final configJson = await _secureStorage.read(key: _configKey);
+      String? configJson;
+      try {
+        configJson = await _secureStorage.read(key: _configKey);
+      } catch (_) {
+        // Один retry: транзиентные сбои Keystore сразу после старта процесса.
+        await Future.delayed(const Duration(milliseconds: 200));
+        configJson = await _secureStorage.read(key: _configKey);
+      }
       if (configJson != null) {
         final map = json.decode(configJson) as Map<String, dynamic>;
         _config = SecurityConfig.fromMap(map);
-        print("AUTH: Config loaded: $_config");
+        DebugLogger.info('AUTH', 'Config loaded'); // без дампа конфига (хэши/соль)
       } else {
         _config = SecurityConfig.empty;
         print("AUTH: Config not found, using empty");
+        if (await _pinWasEnabled()) {
+          _configLoadFailed = true;
+          DebugLogger.error(
+              'AUTH', 'Config missing but PIN marker set — fail closed');
+        }
       }
-      
+
       // Если PIN не настроен — приложение автоматически разблокировано
-      if (!_config.requiresUnlock) {
+      if (!_config.requiresUnlock && !_configLoadFailed) {
         _isUnlocked = true;
       }
     } catch (e) {
       print("AUTH ERROR: Config load error: $e");
       _config = SecurityConfig.empty;
-      _isUnlocked = true;
+      if (await _pinWasEnabled()) {
+        _configLoadFailed = true;
+        DebugLogger.error(
+            'AUTH', 'Config load error with PIN marker set — fail closed');
+      } else {
+        _isUnlocked = true;
+      }
+    }
+  }
+
+  Future<bool> _pinWasEnabled() async {
+    try {
+      // init() ждётся до runApp: подвисший prefs не должен блокировать старт.
+      final prefs = await SharedPreferences.getInstance()
+          .timeout(const Duration(seconds: 3));
+      return prefs.getBool(_pinMarkerKey) ?? false;
+    } catch (_) {
+      // Нет prefs (unit-тесты / ранний старт) — ведём себя как раньше.
+      return false;
     }
   }
 
@@ -100,10 +185,22 @@ class AuthService {
   Future<void> _saveConfig() async {
     final configJson = json.encode(_config.toMap());
     await _secureStorage.write(key: _configKey, value: configJson);
+    // Маркер держим в синхроне с конфигом (best effort, не секрет).
+    // Без await: недоступный/подвисший prefs не должен блокировать PIN-флоу
+    // (и виджет-тесты под fake-async).
+    unawaited(_syncPinMarker());
+  }
+
+  Future<void> _syncPinMarker() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_pinMarkerKey, _config.isPinEnabled);
+    } catch (_) {}
   }
 
   /// Проверить, нужна ли разблокировка
-  bool get requiresUnlock => _config.requiresUnlock && !_isUnlocked;
+  bool get requiresUnlock =>
+      (_config.requiresUnlock || _configLoadFailed) && !_isUnlocked;
 
   // === УПРАВЛЕНИЕ PIN ===
 
@@ -111,8 +208,8 @@ class AuthService {
   /// [pinLength] — длина PIN-кода (4 или 6), используется для UI и валидации
   Future<void> setPin(String pin, {int pinLength = 6}) async {
     final salt = _generateSalt();
-    final hash = _hashPin(pin, salt);
-    
+    final hash = await _computeHash(pin, salt);
+
     _config = _config.copyWith(
       isPinEnabled: true,
       pinLength: pinLength,
@@ -130,7 +227,7 @@ class AuthService {
   /// Изменить PIN-код (требует текущий PIN)
   /// При изменении PIN сохраняется текущая длина
   Future<bool> changePin(String currentPin, String newPin) async {
-    final result = verifyPin(currentPin);
+    final result = await verifyPin(currentPin);
     if (result != PinVerifyResult.success) {
       return false;
     }
@@ -142,7 +239,7 @@ class AuthService {
 
   /// Отключить PIN-код (требует текущий PIN)
   Future<bool> disablePin(String currentPin) async {
-    final result = verifyPin(currentPin);
+    final result = await verifyPin(currentPin);
     if (result != PinVerifyResult.success) {
       return false;
     }
@@ -166,61 +263,92 @@ class AuthService {
   }
 
   /// Проверить PIN-код
-  PinVerifyResult verifyPin(String pin) {
+  Future<PinVerifyResult> verifyPin(String pin) async {
+    // Fail-closed состояние: конфиг утерян, сверить не с чем — НЕ пускать
+    // (без этого ветка ниже разблокировала бы любым вводом по pinHash==null).
+    if (_configLoadFailed) {
+      return PinVerifyResult.invalid;
+    }
     if (!_config.isPinEnabled || _config.pinHash == null) {
       _isUnlocked = true;
       return PinVerifyResult.success;
     }
 
-    // Проверка блокировки
-    if (_config.isLockedOut) {
-      print("AUTH: ⛔ Login attempt during lockout (pinLength: ${_config.pinLength})");
+    // Проверка блокировки — по монотонным часам, чтобы её нельзя было обойти
+    // переводом системного времени вперёд (аудит LOGIC-6). Fallback на wall-clock
+    // внутри isLockedOutMonotonic, если монотонные часы недоступны.
+    if (_config.isLockedOutMonotonic(await _monotonicNow())) {
+      DebugLogger.warn('AUTH', 'Login attempt during lockout');
       return PinVerifyResult.lockedOut;
     }
 
     // Проверка основного PIN
-    final hash = _hashPin(pin, _config.pinSalt!);
-    if (hash == _config.pinHash) {
-      _resetFailedAttempts();
+    if (await _verifyHash(pin, _config.pinSalt!, _config.pinHash!)) {
+      await _resetFailedAttempts();
       _isUnlocked = true;
-      _isDuressMode = false;
-      print("AUTH: ✅ PIN correct (${_config.pinLength}-digit), unlocked");
+      _setDuressMode(false);
+      // legacy → Argon2id при первом входе
+      await _maybeUpgradeLegacyHash(pin, _config.pinSalt, _config.pinHash,
+          (h) => _config.copyWith(pinHash: h));
+      DebugLogger.info('AUTH', 'PIN correct, unlocked');
       return PinVerifyResult.success;
     }
 
     // Проверка кода удаления (wipe code)
     // ВАЖНО: возвращаем wipeCode без инкремента попыток — это сознательное действие.
     if (_config.isWipeCodeEnabled && _config.wipeCodeHash != null && _config.wipeCodeSalt != null) {
-      final wipeHash = _hashPin(pin, _config.wipeCodeSalt!);
-      if (wipeHash == _config.wipeCodeHash) {
-        _resetFailedAttempts();
-        print("AUTH: 🗑️ Wipe code entered (${_config.pinLength}-digit) — confirmation required");
+      if (await _verifyHash(pin, _config.wipeCodeSalt!, _config.wipeCodeHash!)) {
+        await _resetFailedAttempts();
+        DebugLogger.warn('AUTH', 'Wipe code entered — confirmation required');
         return PinVerifyResult.wipeCode;
       }
     }
 
     // Проверка duress кода
-    if (_config.isDuressEnabled && _config.duressHash != null) {
-      final duressHash = _hashPin(pin, _config.duressSalt!);
-      if (duressHash == _config.duressHash) {
-        _resetFailedAttempts();
+    if (_config.isDuressEnabled && _config.duressHash != null && _config.duressSalt != null) {
+      if (await _verifyHash(pin, _config.duressSalt!, _config.duressHash!)) {
+        await _resetFailedAttempts();
         _isUnlocked = true;
-        _isDuressMode = true;
-        print("AUTH: 🎭 Duress code entered (${_config.pinLength}-digit), empty profile activated");
+        _setDuressMode(true);
+        await _maybeUpgradeLegacyHash(pin, _config.duressSalt, _config.duressHash,
+            (h) => _config.copyWith(duressHash: h));
+        DebugLogger.warn('AUTH', 'Duress code entered, empty profile activated');
         return PinVerifyResult.duress;
       }
     }
 
     // Неверный PIN
-    _incrementFailedAttempts();
-    
+    // Счётчик попыток пишем durable ДО реакции UI, иначе force-kill сбрасывает
+    // прогресс блокировки/авто-wipe (аудит LOGIC-5).
+    await _incrementFailedAttempts();
+
     // Проверка автоматического wipe
     if (_config.shouldAutoWipe) {
-      print("AUTH: ⚠️ Attempt limit exceeded (${_config.failedAttempts}/${_config.autoWipeAttempts}), auto-wipe required");
+      DebugLogger.warn('AUTH', 'Attempt limit exceeded, auto-wipe required');
       return PinVerifyResult.autoWipe;
     }
 
     return PinVerifyResult.invalid;
+  }
+
+  /// Апгрейд legacy SHA-256 хэша в Argon2id при первом удачном вводе кода —
+  /// чтобы старые PIN/коды принуждения не оставались слабо захэшированными
+  /// (аудит SEC-8). [code] — введённый (правильный) код, [apply] проставляет
+  /// новый Argon2id-хэш в конфиг.
+  Future<void> _maybeUpgradeLegacyHash(String code, String? salt,
+      String? stored, SecurityConfig Function(String newHash) apply) async {
+    if (_fastHashForTesting) return; // в тестах хэш и так legacy — не переписываем
+    if (stored == null || salt == null || stored.startsWith(_argon2Prefix)) {
+      return;
+    }
+    try {
+      final upgraded = await _computeHash(code, salt);
+      _config = apply(upgraded);
+      await _saveConfig();
+      DebugLogger.info('AUTH', 'Legacy hash upgraded to Argon2id');
+    } catch (_) {
+      // Апгрейд не критичен: при неудаче код продолжит работать по legacy-пути.
+    }
   }
 
   /// Сбросить счётчик неудачных попыток
@@ -234,12 +362,15 @@ class AuthService {
 
   /// Увеличить счётчик неудачных попыток
   Future<void> _incrementFailedAttempts() async {
+    // Пишем и wall-clock (для отображения/fallback), и монотонное время
+    // (тамперо-устойчивый источник блокировки, LOGIC-6).
     _config = _config.copyWith(
       failedAttempts: _config.failedAttempts + 1,
       lastFailedAttempt: _now(),
+      lastFailedElapsedMs: await _monotonicNow(),
     );
     await _saveConfig();
-    print("AUTH: Wrong PIN, attempt ${_config.failedAttempts}");
+    DebugLogger.warn('AUTH', 'Wrong PIN attempt');
   }
 
   // === УПРАВЛЕНИЕ DURESS CODE ===
@@ -247,8 +378,8 @@ class AuthService {
   /// Установить код принуждения (требует основной PIN)
   Future<bool> setDuressCode(String mainPin, String duressCode) async {
     // Проверяем основной PIN
-    final hash = _hashPin(mainPin, _config.pinSalt!);
-    if (hash != _config.pinHash) {
+    if (_config.pinHash == null || _config.pinSalt == null) return false;
+    if (!await _verifyHash(mainPin, _config.pinSalt!, _config.pinHash!)) {
       return false;
     }
 
@@ -258,7 +389,7 @@ class AuthService {
     }
 
     final salt = _generateSalt();
-    final duressHash = _hashPin(duressCode, salt);
+    final duressHash = await _computeHash(duressCode, salt);
     
     _config = _config.copyWith(
       isDuressEnabled: true,
@@ -267,14 +398,14 @@ class AuthService {
     );
     
     await _saveConfig();
-    print("AUTH: 🎭 Duress code set (${_config.pinLength}-digit)");
+    DebugLogger.info('AUTH', 'Duress code set');
     return true;
   }
 
   /// Отключить код принуждения (требует основной PIN)
   Future<bool> disableDuressCode(String mainPin) async {
-    final hash = _hashPin(mainPin, _config.pinSalt!);
-    if (hash != _config.pinHash) {
+    if (_config.pinHash == null || _config.pinSalt == null) return false;
+    if (!await _verifyHash(mainPin, _config.pinSalt!, _config.pinHash!)) {
       return false;
     }
     
@@ -284,7 +415,7 @@ class AuthService {
     );
     
     await _saveConfig();
-    _isDuressMode = false;
+    _setDuressMode(false);
     print("AUTH: Duress code disabled");
     return true;
   }
@@ -295,14 +426,13 @@ class AuthService {
   Future<bool> setWipeCode(String mainPin, String wipeCode) async {
     if (_config.pinHash == null || _config.pinSalt == null) return false;
 
-    final hash = _hashPin(mainPin, _config.pinSalt!);
-    if (hash != _config.pinHash) return false;
+    if (!await _verifyHash(mainPin, _config.pinSalt!, _config.pinHash!)) return false;
 
     // Код удаления не должен совпадать с основным PIN
     if (wipeCode == mainPin) return false;
 
     final salt = _generateSalt();
-    final wipeHash = _hashPin(wipeCode, salt);
+    final wipeHash = await _computeHash(wipeCode, salt);
 
     _config = _config.copyWith(
       isWipeCodeEnabled: true,
@@ -311,7 +441,7 @@ class AuthService {
     );
 
     await _saveConfig();
-    print("AUTH: 🗑️ Wipe code set (${_config.pinLength}-digit)");
+    DebugLogger.info('AUTH', 'Wipe code set');
     return true;
   }
 
@@ -319,8 +449,7 @@ class AuthService {
   Future<bool> disableWipeCode(String mainPin) async {
     if (_config.pinHash == null || _config.pinSalt == null) return false;
 
-    final hash = _hashPin(mainPin, _config.pinSalt!);
-    if (hash != _config.pinHash) return false;
+    if (!await _verifyHash(mainPin, _config.pinSalt!, _config.pinHash!)) return false;
 
     _config = _config.copyWith(
       isWipeCodeEnabled: false,
@@ -338,6 +467,14 @@ class AuthService {
     _config = _config.copyWith(isPanicGestureEnabled: enabled);
     await _saveConfig();
     print("AUTH: Panic gesture ${enabled ? 'enabled' : 'disabled'}");
+  }
+
+  // === БИОМЕТРИЯ (вход по отпечатку/лицу) ===
+
+  Future<void> setBiometricEnabled(bool enabled) async {
+    _config = _config.copyWith(isBiometricEnabled: enabled);
+    await _saveConfig();
+    print("AUTH: Biometric ${enabled ? 'enabled' : 'disabled'}");
   }
 
   // === БЛОКИРОВКА ПО ТАЙМАУТУ НЕАКТИВНОСТИ ===
@@ -396,16 +533,25 @@ class AuthService {
   void lock() {
     if (_config.requiresUnlock) {
       _isUnlocked = false;
-      _isDuressMode = false;
+      _setDuressMode(false);
       print("AUTH: 🔒 App locked (requires ${_config.pinLength}-digit PIN)");
     }
   }
 
+  /// Отметить разблокировку, выполненную вне verifyPin (успешная биометрия).
+  /// Без этого requiresUnlock остаётся true при разблокированном UI, и,
+  /// например, входящий звонок в форграунде уходит в pending вместо экрана.
+  void markUnlockedExternally() {
+    _isUnlocked = true;
+    DebugLogger.info('AUTH', 'Unlocked externally (biometric)');
+  }
+
   /// Выйти из duress mode (требует основной PIN)
   Future<bool> exitDuressMode(String mainPin) async {
-    final result = verifyPin(mainPin);
+    final result = await verifyPin(mainPin);
     if (result == PinVerifyResult.success) {
-      _isDuressMode = false;
+      // verifyPin(success) уже вызвал _setDuressMode(false) — оставляем явно для читаемости.
+      _setDuressMode(false);
       return true;
     }
     return false;
@@ -423,39 +569,64 @@ class AuthService {
     print("AUTH: Auto-wipe ${enabled ? 'enabled ($attempts attempts)' : 'disabled'}");
   }
 
-  /// Полный wipe — удаление всех данных
+  /// Полный wipe — удаление всех данных.
+  ///
+  /// Best-effort: каждый шаг в своём try/catch, чтобы сбой одного не отменял
+  /// остальные (аудит LOGIC-7). Secure storage чистится ПОЛНОСТЬЮ (`deleteAll`),
+  /// а не по списку ключей, чтобы не оставить desktop-link сессию, ключ БД и
+  /// любые будущие ключи (аудит SEC-5). Состояние и `onWipeCompleted`
+  /// сбрасываются всегда, даже при частичных ошибках.
   Future<void> performWipe() async {
-    print("AUTH: ⚠️ PERFORMING FULL WIPE...");
-    
+    DebugLogger.warn('AUTH', 'Performing full wipe');
+    // Останавливаем сеть ДО деструктивных шагов (см. onWipeStarted).
+    onWipeStarted?.call();
+    final errors = <String>[];
+
+    // 1. Криптоключи — на ЖИВОМ синглтоне, чтобы очистились и ключи в памяти,
+    //    и reconnect не поднялся под стёртой личностью (publicKeyBase64 → null).
     try {
-      // 1. Удаляем криптоключи
-      final cryptoService = CryptoService();
-      await cryptoService.deleteAccount();
-      
-      // 2. Закрываем и удаляем базу данных
-      await DatabaseService.instance.deleteDatabaseFile();
-      
-      // 3. Удаляем локальные настройки (SharedPreferences)
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.clear();
-      } catch (_) {}
-
-      // 4. Удаляем конфигурацию безопасности
-      await _secureStorage.delete(key: _configKey);
-      
-      // 5. Сбрасываем состояние
-      _config = SecurityConfig.empty;
-      _isUnlocked = false;
-      _isDuressMode = false;
-
-      // 6. Notify _AppState to reset navigation
-      onWipeCompleted?.call();
-
-      print("AUTH: ✅ WIPE completed");
+      await CryptoService.instance.deleteAccount();
     } catch (e) {
-      print("AUTH ERROR: Wipe error: $e");
-      rethrow;
+      errors.add('crypto: $e');
+    }
+
+    // 2. База данных (в т.ч. удаляет ключ шифрования БД)
+    try {
+      await DatabaseService.instance.deleteDatabaseFile();
+    } catch (e) {
+      errors.add('db: $e');
+    }
+
+    // 3. ВСЁ secure storage: крипто-ключи, security-config, desktop-link сессия,
+    //    ключ БД и любые будущие ключи — исчерпывающе (аудит SEC-5).
+    try {
+      await _secureStorage.deleteAll();
+    } catch (e) {
+      errors.add('secure_storage: $e');
+    }
+
+    // 4. Локальные настройки
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+    } catch (e) {
+      errors.add('prefs: $e');
+    }
+
+    // 5. Сброс состояния (всегда)
+    _config = SecurityConfig.empty;
+    _isUnlocked = false;
+    _configLoadFailed = false;
+    _setDuressMode(false);
+
+    // 6. Всегда уведомляем UI (даже при частичных ошибках), чтобы навигация
+    //    сбросилась и не осталась на «полу-стёртом» состоянии (аудит LOGIC-7).
+    onWipeCompleted?.call();
+
+    if (errors.isEmpty) {
+      DebugLogger.success('AUTH', 'Wipe completed');
+    } else {
+      DebugLogger.error('AUTH', 'Wipe finished with errors: ${errors.join('; ')}');
     }
   }
 
@@ -468,18 +639,55 @@ class AuthService {
     return base64.encode(saltBytes);
   }
 
-  /// Хеширование PIN с солью (PBKDF2-like с SHA-256)
-  String _hashPin(String pin, String salt) {
-    // Простая схема: SHA-256(salt + pin + salt) повторенная несколько раз
-    // Для production рекомендуется Argon2id, но для мобильного приложения это достаточно
+  /// Параметры Argon2id для хэширования PIN/кодов (memory-hard — аудит SEC-8).
+  /// `memory` — число 1 КБ-блоков (≈19 МБ) = минимум OWASP (m=19456, t=2, p=1).
+  /// Для 4–6-значного PIN вся стойкость к перебору украденного конфига держится
+  /// на цене KDF, поэтому берём рекомендованный минимум. Значения — тюнингуемы:
+  /// при заметной задержке разблокировки на слабом устройстве уменьшить memory
+  /// или нарастить iterations (замерять на реальном железе).
+  static final kdf.Argon2id _argon2id = kdf.Argon2id(
+    parallelism: 1,
+    memory: 19456,
+    iterations: 2,
+    hashLength: 32,
+  );
+
+  /// Префикс-тег нового формата хэша. Legacy-хэши (10000×SHA-256) его не имеют,
+  /// по этому и различаем формат при проверке.
+  static const String _argon2Prefix = 'argon2id\$';
+
+  /// Хэширует PIN/код через Argon2id. Соль — base64 (как и раньше).
+  Future<String> _computeHash(String pin, String salt) async {
+    // Тест-режим: быстрый синхронный хэш (untagged) — verify пойдёт по legacy-пути.
+    if (_fastHashForTesting) return _hashPinLegacy(pin, salt);
+    final key = await _argon2id.deriveKey(
+      secretKey: kdf.SecretKey(utf8.encode(pin)),
+      nonce: base64.decode(salt),
+    );
+    final bytes = await key.extractBytes();
+    return '$_argon2Prefix${base64.encode(bytes)}';
+  }
+
+  /// Проверяет PIN/код против сохранённого хэша, поддерживая ОБА формата:
+  /// новый Argon2id и legacy SHA-256 — иначе PIN, заданные до обновления,
+  /// заблокировались бы (аудит SEC-8).
+  Future<bool> _verifyHash(String pin, String salt, String storedHash) async {
+    if (storedHash.startsWith(_argon2Prefix)) {
+      final computed = await _computeHash(pin, salt);
+      return computed == storedHash;
+    }
+    return _hashPinLegacy(pin, salt) == storedHash;
+  }
+
+  /// LEGACY-хэш (10000×SHA-256). Оставлен ТОЛЬКО для проверки PIN/кодов,
+  /// заданных до перехода на Argon2id; все новые хэши считаются через
+  /// [_computeHash] и при первой удачной проверке апгрейдятся (см. verifyPin).
+  String _hashPinLegacy(String pin, String salt) {
     final saltBytes = base64.decode(salt);
     var data = [...saltBytes, ...utf8.encode(pin), ...saltBytes];
-    
-    // 10000 итераций для замедления brute-force
     for (var i = 0; i < 10000; i++) {
       data = sha256.convert(data).bytes;
     }
-    
     return base64.encode(data);
   }
 

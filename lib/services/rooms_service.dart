@@ -11,7 +11,7 @@ class RoomsService {
 
   final http.Client _httpClient;
 
-  String? get _pubkey => cryptoService.publicKeyBase64;
+  String? get _pubkey => cryptoService.addressBase64;
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
@@ -214,6 +214,20 @@ class RoomsService {
   Future<void> leaveRoom(String roomId) async {
     if (_pubkey == null) throw Exception('Keys not initialized');
     final url = AppConfig.httpUrl('/api/rooms/$roomId/leave');
+    final response = await _httpClient
+        .post(Uri.parse(url), headers: _headers)
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}');
+    }
+  }
+
+  /// Delete the room for everyone. Owner-only: the server checks is_owner
+  /// against X-Pubkey and returns 403 for non-owners.
+  Future<void> deleteRoom(String roomId) async {
+    if (_pubkey == null) throw Exception('Keys not initialized');
+    final url = AppConfig.httpUrl('/api/rooms/$roomId/delete');
     final response = await _httpClient
         .post(Uri.parse(url), headers: _headers)
         .timeout(const Duration(seconds: 10));

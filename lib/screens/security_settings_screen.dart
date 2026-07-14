@@ -7,6 +7,7 @@ import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/screens/pin_setup_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
+import 'package:orpheus_project/services/device_settings_service.dart';
 import 'package:orpheus_project/services/message_cleanup_service.dart';
 
 class SecuritySettingsScreen extends StatefulWidget {
@@ -24,19 +25,26 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
   final _localAuth = LocalAuthentication();
   
   bool _canUseBiometrics = false;
+  bool _showCallerNameOnLock = false;
   late AnimationController _revealController;
 
   @override
   void initState() {
     super.initState();
     _auth = widget.auth;
-    
+
     _revealController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
     )..forward();
-    
+
     _checkBiometrics();
+    _loadCallPrivacy();
+  }
+
+  Future<void> _loadCallPrivacy() async {
+    final value = await DeviceSettingsService.showCallerNameWhenLocked();
+    if (mounted) setState(() => _showCallerNameOnLock = value);
   }
 
   @override
@@ -132,28 +140,36 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
 
   Future<void> _toggleBiometrics(bool enabled) async {
     final l10n = L10n.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     if (enabled) {
-      // Проверяем, что биометрия доступна
+      // Включение требует подтверждения биометрией (иначе кто угодно с
+      // разблокированным экраном включит вход по своему отпечатку).
       try {
         final didAuth = await _localAuth.authenticate(
           localizedReason: l10n.confirmForBiometry,
-          options: const AuthenticationOptions(
-            stickyAuth: true,
-            biometricOnly: true,
-          ),
+          persistAcrossBackgrounding: true,
+          biometricOnly: true,
         );
-        
-        if (didAuth) {
-          // TODO: Сохранить настройку биометрии в AuthService
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l10n.biometryEnabled)),
-          );
+
+        if (!didAuth) {
+          // Не подтвердил — тумблер вернётся в «выкл» (config не менялся).
+          _refresh();
+          return;
         }
+
+        // Реально сохраняем флаг: теперь lock_screen предложит вход по биометрии.
+        await _auth.setBiometricEnabled(true);
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.biometryEnabled)),
+        );
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           SnackBar(content: Text(l10n.biometryFailed)),
         );
       }
+    } else {
+      // Выключение — без биометрического запроса.
+      await _auth.setBiometricEnabled(false);
     }
     _refresh();
   }
@@ -253,6 +269,19 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
               const SizedBox(height: 32),
             ],
             
+            // Приватность звонка: показывать ли имя звонящего на локскрине
+            _buildSwitchTile(
+              icon: Icons.phonelink_lock,
+              title: l10n.callerNameOnLockTitle,
+              subtitle: l10n.callerNameOnLockDesc,
+              value: _showCallerNameOnLock,
+              onChanged: (v) async {
+                await DeviceSettingsService.setShowCallerNameWhenLocked(v);
+                if (mounted) setState(() => _showCallerNameOnLock = v);
+              },
+            ),
+            const SizedBox(height: 32),
+
             // Секция кода принуждения (только если PIN включен)
             if (isPinEnabled) ...[
               _buildSectionHeader(l10n.duressCodeSection, Icons.shield_outlined),
@@ -498,7 +527,13 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                // Wrap, а не Row: длинный RU-заголовок + бейдж не влезали в строку —
+                // бейдж «4-значный» уезжал за правый край. Теперь при нехватке места
+                // бейдж переносится под заголовок.
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
                       l10n.pinCodeSet,
@@ -508,7 +543,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> with Si
                         fontSize: 15,
                       ),
                     ),
-                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 import 'package:orpheus_project/call_screen.dart';
 import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
@@ -10,6 +11,8 @@ import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/models/note_model.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
+import 'package:orpheus_project/services/identity_directory_service.dart';
 import 'package:orpheus_project/services/locale_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_button.dart';
@@ -35,6 +38,13 @@ class _ChatScreenState extends State<ChatScreen>
   List<ChatMessage> _chatHistory = const <ChatMessage>[];
   StreamSubscription<String>? _messageUpdateSubscription;
 
+  // Пагинация истории (аудит PERF-1): грузим только последнюю страницу, старые
+  // сообщения подгружаем по скроллу вверх. Список reverse=true, поэтому "верх"
+  // (старое) соответствует maxScrollExtent.
+  static const int _pageSize = 50;
+  bool _hasMoreOlder = false;
+  bool _isLoadingOlder = false;
+
   late final AnimationController _encryptionController;
   bool _isEncrypting = false;
 
@@ -59,13 +69,37 @@ class _ChatScreenState extends State<ChatScreen>
 
     _loadChatHistory();
     _markAsRead();
+    _scrollController.addListener(_onScroll);
 
     _messageUpdateSubscription =
         messageUpdateController.stream.listen((senderKey) {
       if (senderKey == widget.contact.publicKey) {
-        _loadChatHistory();
+        // Дописываем только НОВЫЕ сообщения, а не перечитываем всю историю
+        // на каждое входящее (аудит PERF-1).
+        _appendNewMessages();
         _markAsRead();
       }
+    });
+  }
+
+  /// Инкрементально дописывает сообщения новее последнего известного, без
+  /// перезапроса всей переписки. Дедуп по messageId на случай пересечений.
+  Future<void> _appendNewMessages() async {
+    final lastMs = _chatHistory.isEmpty
+        ? 0
+        : _chatHistory.last.timestamp.millisecondsSinceEpoch;
+    final newer = await DatabaseService.instance
+        .getMessagesForContactAfter(widget.contact.publicKey, lastMs);
+    if (!mounted || newer.isEmpty) return;
+    final existingIds =
+        _chatHistory.map((m) => m.messageId).whereType<String>().toSet();
+    final toAdd = newer
+        .where((m) => m.messageId == null || !existingIds.contains(m.messageId))
+        .toList();
+    if (toAdd.isEmpty) return;
+    setState(() => _chatHistory = [..._chatHistory, ...toAdd]);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) _scrollController.jumpTo(0.0);
     });
   }
 
@@ -73,6 +107,7 @@ class _ChatScreenState extends State<ChatScreen>
   void dispose() {
     _messageUpdateSubscription?.cancel();
     _messageController.dispose();
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _inputFocusNode.dispose();
     _encryptionController.dispose();
@@ -80,10 +115,14 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _loadChatHistory() async {
+    // Грузим последнюю страницу, а не всю историю (аудит PERF-1).
     final history = await DatabaseService.instance
-        .getMessagesForContact(widget.contact.publicKey);
+        .getMessagesForContactLatest(widget.contact.publicKey, limit: _pageSize);
     if (!mounted) return;
-    setState(() => _chatHistory = history);
+    setState(() {
+      _chatHistory = history;
+      _hasMoreOlder = history.length >= _pageSize;
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -92,8 +131,64 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    // reverse=true: старые сообщения — у maxScrollExtent (визуально сверху).
+    if (pos.pixels >= pos.maxScrollExtent - 300 &&
+        _hasMoreOlder &&
+        !_isLoadingOlder) {
+      _loadOlder();
+    }
+  }
+
+  /// Подгружает предыдущую страницу истории (старые сообщения). При reverse=true
+  /// prepend скролл-стабилен — контент добавляется у дальнего края, вид не прыгает.
+  Future<void> _loadOlder() async {
+    if (_isLoadingOlder || !_hasMoreOlder || _chatHistory.isEmpty) return;
+    _isLoadingOlder = true;
+    final oldestMs = _chatHistory.first.timestamp.millisecondsSinceEpoch;
+    final older = await DatabaseService.instance.getMessagesForContactBefore(
+        widget.contact.publicKey, oldestMs,
+        limit: _pageSize);
+    if (!mounted) {
+      _isLoadingOlder = false;
+      return;
+    }
+    final existingIds =
+        _chatHistory.map((m) => m.messageId).whereType<String>().toSet();
+    final toPrepend = older
+        .where((m) => m.messageId == null || !existingIds.contains(m.messageId))
+        .toList();
+    setState(() {
+      if (toPrepend.isNotEmpty) {
+        _chatHistory = [...toPrepend, ..._chatHistory];
+      }
+      _hasMoreOlder = older.length >= _pageSize;
+      _isLoadingOlder = false;
+    });
+  }
+
   Future<void> _markAsRead() async {
     await DatabaseService.instance.markMessagesAsRead(widget.contact.publicKey);
+  }
+
+  /// Иконка статуса исходящего сообщения. Раньше всегда показывалась двойная
+  /// галка «доставлено», даже для неотправленных/упавших сообщений (аудит
+  /// LOGIC-3). Теперь отражает реальный статус. Двойная галка (delivered/read)
+  /// пока не используется — сервер это релей без квитанций о доставке.
+  Widget _buildStatusIcon(MessageStatus status) {
+    switch (status) {
+      case MessageStatus.sending:
+        return Icon(Icons.schedule, size: 14, color: AppColors.textTertiary);
+      case MessageStatus.failed:
+        return const Icon(Icons.error_outline, size: 14, color: AppColors.danger);
+      case MessageStatus.delivered:
+      case MessageStatus.read:
+        return Icon(Icons.done_all, size: 14, color: AppColors.info.withOpacity(0.85));
+      case MessageStatus.sent:
+        return Icon(Icons.done, size: 14, color: AppColors.info.withOpacity(0.85));
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -105,21 +200,38 @@ class _ChatScreenState extends State<ChatScreen>
     _encryptionController.reset();
     _encryptionController.forward();
 
+    // Стабильный id: одинаков у нашей копии и у копии получателя →
+    // корректный дедуп и «удалить у обоих» (аудит LOGIC-1/LOGIC-2).
+    final messageId = const Uuid().v4();
     final sentMessage = ChatMessage(
+      messageId: messageId,
       text: messageText,
       isSentByMe: true,
-      status: MessageStatus.sent,
+      status: MessageStatus.sending, // пока не зашифровано и не передано в сеть
       isRead: true,
     );
 
     await DatabaseService.instance
         .addMessage(sentMessage, widget.contact.publicKey);
     try {
-      final payload =
-          await cryptoService.encrypt(widget.contact.publicKey, messageText);
-      websocketService.sendChatMessage(widget.contact.publicKey, payload);
-    } catch (_) {
-      // UI не блокируем — сообщение уже сохранено локально.
+      // Шифруем на X25519 enc-ключ контакта (роутинг — по адресу publicKey).
+      final encKey = widget.contact.encryptionKey ??
+          await IdentityDirectoryService.instance.resolveEncKey(widget.contact.publicKey);
+      if (encKey == null || encKey.isEmpty) {
+        throw Exception('Ключ шифрования контакта недоступен');
+      }
+      final payload = await cryptoService.encrypt(encKey, messageText);
+      websocketService.sendChatMessage(widget.contact.publicKey, payload,
+          messageId: messageId);
+      // Успех: сообщение передано в сеть или поставлено в offline-очередь.
+      await DatabaseService.instance.updateMessageStatusByMessageId(
+          widget.contact.publicKey, messageId, MessageStatus.sent);
+    } catch (e) {
+      // Раньше ошибка молча проглатывалась, и сообщение выглядело отправленным
+      // (аудит LOGIC-4). Теперь помечаем как failed, чтобы показать это пользователю.
+      DebugLogger.error('CHAT', 'Ошибка отправки сообщения: $e');
+      await DatabaseService.instance.updateMessageStatusByMessageId(
+          widget.contact.publicKey, messageId, MessageStatus.failed);
     }
 
     _messageController.clear();
@@ -198,10 +310,16 @@ class _ChatScreenState extends State<ChatScreen>
     );
     if (!ok) return;
 
-    await DatabaseService.instance.deleteMessagesByTimestamps(
-      widget.contact.publicKey,
-      [message.timestamp.millisecondsSinceEpoch],
-    );
+    final id = message.messageId;
+    if (id != null) {
+      await DatabaseService.instance
+          .deleteMessagesByMessageIds(widget.contact.publicKey, [id]);
+    } else {
+      await DatabaseService.instance.deleteMessagesByTimestamps(
+        widget.contact.publicKey,
+        [message.timestamp.millisecondsSinceEpoch],
+      );
+    }
     await _loadChatHistory();
   }
 
@@ -218,12 +336,120 @@ class _ChatScreenState extends State<ChatScreen>
     if (!ok) return;
 
     final tsMs = message.timestamp.millisecondsSinceEpoch;
-    websocketService.sendDeleteForBoth(widget.contact.publicKey, [tsMs]);
-    await DatabaseService.instance.deleteMessagesByTimestamps(
+    final id = message.messageId;
+    websocketService.sendDeleteForBoth(
       widget.contact.publicKey,
-      [tsMs],
+      timestampsMs: [tsMs],
+      messageIds: id != null ? [id] : const [],
     );
+    if (id != null) {
+      await DatabaseService.instance
+          .deleteMessagesByMessageIds(widget.contact.publicKey, [id]);
+    } else {
+      await DatabaseService.instance
+          .deleteMessagesByTimestamps(widget.contact.publicKey, [tsMs]);
+    }
     await _loadChatHistory();
+  }
+
+  /// Меню чата («…»). Раньше кнопка сразу открывала подтверждение очистки истории
+  /// (вводило в заблуждение — иконка меню без меню). Теперь это настоящее меню
+  /// с информацией о контакте (в т.ч. сверкой ключа против MITM) и очисткой (PROD-5).
+  void _showChatMenu() {
+    final l10n = L10n.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.info_outline, color: AppColors.primary),
+              title: Text(l10n.contactInfo),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _showContactInfo();
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.delete_forever, color: AppColors.danger),
+              title: Text(l10n.clearHistory,
+                  style: const TextStyle(color: AppColors.danger)),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _confirmClearHistory();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Информация о контакте: имя + полный публичный ключ (для сверки против MITM)
+  /// с возможностью копирования.
+  void _showContactInfo() {
+    final l10n = L10n.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.contact.name,
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: AppSpacing.lg),
+              Text(
+                l10n.publicKey,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+              ),
+              const SizedBox(height: 6),
+              SelectableText(
+                widget.contact.publicKey,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                l10n.verifyKeyHint,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.textTertiary,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              AppButton(
+                label: l10n.copy,
+                onPressed: () async {
+                  await Clipboard.setData(
+                      ClipboardData(text: widget.contact.publicKey));
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(l10n.keyCopied)),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _confirmClearHistory() async {
@@ -323,7 +549,7 @@ class _ChatScreenState extends State<ChatScreen>
           AppIconButton(
             icon: Icons.more_horiz,
             tooltip: l10n.menu,
-            onPressed: _confirmClearHistory,
+            onPressed: _showChatMenu,
           ),
         ],
       ),
@@ -455,11 +681,7 @@ class _ChatScreenState extends State<ChatScreen>
                       ),
                       if (isMyMessage) ...[
                         const SizedBox(width: 6),
-                        Icon(
-                          Icons.done_all,
-                          size: 14,
-                          color: AppColors.info.withOpacity(0.85),
-                        ),
+                        _buildStatusIcon(message.status),
                       ],
                     ],
                   ),

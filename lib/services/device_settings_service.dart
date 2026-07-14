@@ -8,9 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Особенно важен для китайских производителей (Xiaomi, Vivo, Oppo, Huawei),
 /// которые агрессивно управляют батареей и убивают фоновые приложения.
 class DeviceSettingsService {
-  static const _batteryChannel = MethodChannel('com.example.orpheus_project/battery');
-  static const _settingsChannel = MethodChannel('com.example.orpheus_project/settings');
-  
+  static const _batteryChannel =
+      MethodChannel('com.example.orpheus_project/battery');
+  static const _settingsChannel =
+      MethodChannel('com.example.orpheus_project/settings');
+
   // Ключ для хранения настройки "не показывать диалог"
   static const String _setupDialogDismissedKey = 'setup_dialog_dismissed';
 
@@ -30,17 +32,78 @@ class DeviceSettingsService {
     debugManufacturerOverride = null;
     debugBatteryOptimizationDisabledOverride = null;
   }
-  
+
   /// Проверить, был ли диалог скрыт пользователем
   static Future<bool> isSetupDialogDismissed() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_setupDialogDismissedKey) ?? false;
   }
-  
+
   /// Сохранить настройку "не показывать диалог"
   static Future<void> setSetupDialogDismissed(bool dismissed) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_setupDialogDismissedKey, dismissed);
+  }
+
+  /// Заблокирован ли экран устройства (keyguard).
+  ///
+  /// ВАЖНО: вызывается из показа входящего звонка, в т.ч. из ОТДЕЛЬНОГО изолята
+  /// push-сервиса, где method-channel к MainActivity недоступен -> invokeMethod
+  /// падает. В этом случае (и на не-Android нет — там lockscreen'а нет) НЕЛЬЗЯ
+  /// вернуть false: это раскрыло бы имя звонящего на локскрине. Раз подтвердить
+  /// «разблокировано» не можем — консервативно считаем «заблокировано» (true),
+  /// т.е. прячем имя. Реально false вернём только когда канал ответил false.
+  static Future<bool> isDeviceLocked() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final locked =
+          await _settingsChannel.invokeMethod<bool>('isDeviceLocked');
+      // null (канал недоступен/не ответил) -> приватный дефолт «заблокировано».
+      return locked ?? true;
+    } catch (e) {
+      // Канал недоступен (фоновый изолят) -> приватный дефолт «заблокировано».
+      return true;
+    }
+  }
+
+  static const String _showCallerNameWhenLockedKey =
+      'show_caller_name_when_locked';
+
+  /// Показывать ли имя звонящего на входящем, когда устройство заблокировано.
+  /// По умолчанию НЕТ: на локскрине не светим, кто звонит (приватность).
+  static Future<bool> showCallerNameWhenLocked() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_showCallerNameWhenLockedKey) ?? false;
+  }
+
+  static Future<void> setShowCallerNameWhenLocked(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_showCallerNameWhenLockedKey, value);
+  }
+
+  static const String _appInForegroundKey = 'app_in_foreground';
+
+  /// Флаг «Orpheus на переднем плане». Пишется из main-изолята по lifecycle,
+  /// читается в ЛЮБОМ изоляте (SharedPreferences), в т.ч. push-изолятом — в
+  /// отличие от keyguard-проверки через method-channel (в push-изоляте недоступна).
+  static Future<void> setAppInForeground(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_appInForegroundKey, value);
+  }
+
+  /// Прятать ли имя звонящего на баннере входящего (CallKit). По умолчанию ВСЕГДА
+  /// прячем — баннер CallKit рисуется поверх локскрина, а кто звонит видно только
+  /// после принятия (на экране звонка внутри приложения); паритет с обезличенными
+  /// уведомлениями о сообщениях. Opt-in тоггл `showCallerNameWhenLocked` возвращает
+  /// имя тем, кто явно этого хочет. Раньше зависело от флага app_in_foreground,
+  /// который при жёстком убийстве приложения протухал в true -> имя утекало на
+  /// локскрин (дыра, device-тест 13.07.2026).
+  static Future<bool> hideCallerIdentityOnIncoming() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      await prefs.reload();
+    } catch (_) {}
+    return !(prefs.getBool(_showCallerNameWhenLockedKey) ?? false);
   }
 
   /// Получить производителя устройства
@@ -50,9 +113,10 @@ class DeviceSettingsService {
 
     final override = debugManufacturerOverride;
     if (override != null) return override.toLowerCase();
-    
+
     try {
-      final manufacturer = await _settingsChannel.invokeMethod<String>('getDeviceManufacturer');
+      final manufacturer =
+          await _settingsChannel.invokeMethod<String>('getDeviceManufacturer');
       return manufacturer?.toLowerCase() ?? 'other';
     } catch (e) {
       return 'other';
@@ -66,9 +130,11 @@ class DeviceSettingsService {
 
     final override = debugBatteryOptimizationDisabledOverride;
     if (override != null) return override;
-    
+
     try {
-      return await _batteryChannel.invokeMethod<bool>('isBatteryOptimizationDisabled') ?? false;
+      return await _batteryChannel
+              .invokeMethod<bool>('isBatteryOptimizationDisabled') ??
+          false;
     } catch (e) {
       return false;
     }
@@ -77,7 +143,7 @@ class DeviceSettingsService {
   /// Запросить отключение оптимизации батареи
   static Future<void> requestBatteryOptimization() async {
     if (!Platform.isAndroid) return;
-    
+
     try {
       await _batteryChannel.invokeMethod('requestBatteryOptimization');
     } catch (e) {
@@ -88,7 +154,7 @@ class DeviceSettingsService {
   /// Открыть настройки батареи
   static Future<void> openBatterySettings() async {
     if (!Platform.isAndroid) return;
-    
+
     try {
       await _batteryChannel.invokeMethod('openBatterySettings');
     } catch (e) {
@@ -99,7 +165,7 @@ class DeviceSettingsService {
   /// Открыть настройки приложения
   static Future<void> openAppSettings() async {
     if (!Platform.isAndroid) return;
-    
+
     try {
       await _settingsChannel.invokeMethod('openAppSettings');
     } catch (e) {
@@ -110,7 +176,7 @@ class DeviceSettingsService {
   /// Открыть настройки уведомлений
   static Future<void> openNotificationSettings() async {
     if (!Platform.isAndroid) return;
-    
+
     try {
       await _settingsChannel.invokeMethod('openNotificationSettings');
     } catch (e) {
@@ -129,10 +195,23 @@ class DeviceSettingsService {
     }
   }
 
+  /// Управление защитой от скриншотов (FLAG_SECURE). В тест-сборках отключаем
+  /// (можно делать скрины), в релизе включено (защита экрана). По умолчанию окно
+  /// стартует с FLAG_SECURE (нативно), поэтому релиз защищён с первого кадра.
+  static Future<void> setScreenSecure(bool enabled) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _settingsChannel
+          .invokeMethod('setScreenSecure', {'enabled': enabled});
+    } catch (e) {
+      print("DeviceSettings: setScreenSecure error: $e");
+    }
+  }
+
   /// Открыть настройки автозапуска (для китайских OEM)
   static Future<void> openAutoStartSettings() async {
     if (!Platform.isAndroid) return;
-    
+
     try {
       await _settingsChannel.invokeMethod('openAutoStartSettings');
     } catch (e) {
@@ -143,9 +222,10 @@ class DeviceSettingsService {
   /// Проверить, разрешено ли рисовать поверх других приложений
   static Future<bool> canDrawOverlays() async {
     if (!Platform.isAndroid) return true;
-    
+
     try {
-      return await _settingsChannel.invokeMethod<bool>('canDrawOverlays') ?? false;
+      return await _settingsChannel.invokeMethod<bool>('canDrawOverlays') ??
+          false;
     } catch (e) {
       return false;
     }
@@ -154,7 +234,7 @@ class DeviceSettingsService {
   /// Запросить разрешение на overlay
   static Future<void> requestOverlayPermission() async {
     if (!Platform.isAndroid) return;
-    
+
     try {
       await _settingsChannel.invokeMethod('requestOverlayPermission');
     } catch (e) {
@@ -167,23 +247,36 @@ class DeviceSettingsService {
   static Future<bool> needsManualSetup() async {
     final manufacturer = await getDeviceManufacturer();
     final batteryOptimized = !(await isBatteryOptimizationDisabled());
-    
+
     // Для китайских OEM всегда нужна ручная настройка
-    final isChineseOem = ['xiaomi', 'redmi', 'poco', 'vivo', 'oppo', 'realme', 'huawei', 'honor', 'oneplus']
-        .any((brand) => manufacturer.contains(brand));
-    
+    final isChineseOem = [
+      'xiaomi',
+      'redmi',
+      'poco',
+      'vivo',
+      'oppo',
+      'realme',
+      'huawei',
+      'honor',
+      'oneplus'
+    ].any((brand) => manufacturer.contains(brand));
+
     return isChineseOem || batteryOptimized;
   }
 
   /// Получить человекочитаемое название производителя
   static String getManufacturerDisplayName(String manufacturer) {
-    if (manufacturer.contains('xiaomi') || manufacturer.contains('redmi') || manufacturer.contains('poco')) {
+    if (manufacturer.contains('xiaomi') ||
+        manufacturer.contains('redmi') ||
+        manufacturer.contains('poco')) {
       return 'Xiaomi/MIUI';
     } else if (manufacturer.contains('vivo')) {
       return 'Vivo';
-    } else if (manufacturer.contains('oppo') || manufacturer.contains('realme')) {
+    } else if (manufacturer.contains('oppo') ||
+        manufacturer.contains('realme')) {
       return 'OPPO/Realme';
-    } else if (manufacturer.contains('huawei') || manufacturer.contains('honor')) {
+    } else if (manufacturer.contains('huawei') ||
+        manufacturer.contains('honor')) {
       return 'Huawei/Honor';
     } else if (manufacturer.contains('samsung')) {
       return 'Samsung';
@@ -201,23 +294,30 @@ class DeviceSettingsService {
 
     if (!context.mounted) return;
 
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        // Шире стандартного (меньше боковые отступы) — RU-текст меньше переносится,
+        // шаги влезают без обрезки на границе скролла (баг на крупном шрифте Samsung).
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
         title: Row(
           children: [
             Icon(
-              batteryDisabled ? Icons.check_circle : Icons.warning_amber_rounded,
+              batteryDisabled
+                  ? Icons.check_circle
+                  : Icons.warning_amber_rounded,
               color: batteryDisabled ? const Color(0xFF6AD394) : Colors.orange,
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Text(
-                'Notification setup',
-                style: TextStyle(color: Colors.white, fontSize: 18),
+                isRu ? 'Настройка уведомлений' : 'Notification setup',
+                style: const TextStyle(color: Colors.white, fontSize: 18),
               ),
             ),
           ],
@@ -228,58 +328,74 @@ class DeviceSettingsService {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Device: $displayName',
+                isRu ? 'Устройство: $displayName' : 'Device: $displayName',
                 style: const TextStyle(color: Colors.grey, fontSize: 12),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'For stable call and message notifications, please complete the following steps:',
-                style: TextStyle(color: Colors.white70, fontSize: 14),
+              Text(
+                isRu
+                    ? 'Для стабильных уведомлений о звонках и сообщениях выполните следующие шаги:'
+                    : 'For stable call and message notifications, please complete the following steps:',
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 16),
-              
+
               // Шаг 1: Батарея
               _buildSetupStep(
                 number: 1,
-                title: 'Disable battery optimization',
-                description: batteryDisabled 
-                    ? 'Already disabled ✓'
-                    : 'Allow Orpheus to run in background without restrictions',
+                title: isRu
+                    ? 'Отключите оптимизацию батареи'
+                    : 'Disable battery optimization',
+                description: batteryDisabled
+                    ? (isRu ? 'Уже отключено ✓' : 'Already disabled ✓')
+                    : (isRu
+                        ? 'Разрешите Orpheus работать в фоне без ограничений'
+                        : 'Allow Orpheus to run in background without restrictions'),
                 isComplete: batteryDisabled,
-                onTap: batteryDisabled ? null : () async {
-                  Navigator.pop(context);
-                  await requestBatteryOptimization();
-                },
+                onTap: batteryDisabled
+                    ? null
+                    : () async {
+                        // НЕ закрываем диалог: настройки Android откроются поверх,
+                        // после возврата диалог остаётся — можно сделать и остальные
+                        // шаги. Закрытие — только явной кнопкой Done/Later.
+                        await requestBatteryOptimization();
+                      },
               ),
-              
+
               // Шаг 2: Автозапуск (для китайских OEM)
               if (_isChineseOem(manufacturer)) ...[
                 const SizedBox(height: 12),
                 _buildSetupStep(
                   number: 2,
-                  title: 'Enable autostart',
-                  description: 'Allow the app to start automatically',
+                  title: isRu ? 'Включите автозапуск' : 'Enable autostart',
+                  description: isRu
+                      ? 'Разрешите приложению запускаться автоматически'
+                      : 'Allow the app to start automatically',
                   onTap: () async {
-                    Navigator.pop(context);
                     await openAutoStartSettings();
                   },
                 ),
               ],
-              
+
               // Шаг 3: Уведомления
               const SizedBox(height: 12),
               _buildSetupStep(
                 number: _isChineseOem(manufacturer) ? 3 : 2,
-                title: 'Check notification settings',
-                description: 'Make sure call notifications are enabled',
+                title: isRu
+                    ? 'Проверьте настройки уведомлений'
+                    : 'Check notification settings',
+                description: isRu
+                    ? 'Убедитесь, что уведомления о звонках включены'
+                    : 'Make sure call notifications are enabled',
                 onTap: () async {
-                  Navigator.pop(context);
                   await openNotificationSettings();
                 },
               ),
-              
+
               // Дополнительные инструкции для Xiaomi
-              if (manufacturer.contains('xiaomi') || manufacturer.contains('redmi') || manufacturer.contains('poco')) ...[
+              if (manufacturer.contains('xiaomi') ||
+                  manufacturer.contains('redmi') ||
+                  manufacturer.contains('poco')) ...[
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -288,25 +404,35 @@ class DeviceSettingsService {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.orange.withOpacity(0.3)),
                   ),
-                  child: const Column(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '⚠️ For Xiaomi/MIUI also:',
-                        style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13),
+                        isRu
+                            ? '⚠️ Для Xiaomi/MIUI также:'
+                            : '⚠️ For Xiaomi/MIUI also:',
+                        style: const TextStyle(
+                            color: Colors.orange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13),
                       ),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 8),
                       Text(
-                        '• Settings → Apps → Orpheus → Battery saver → "No restrictions"\n'
-                        '• Security → Autostart → enable Orpheus\n'
-                        '• Settings → Apps → Orpheus → Notifications → enable all',
-                        style: TextStyle(color: Colors.white60, fontSize: 12),
+                        isRu
+                            ? '• Настройки → Приложения → Orpheus → Экономия батареи → «Без ограничений»\n'
+                                '• Безопасность → Автозапуск → включить Orpheus\n'
+                                '• Настройки → Приложения → Orpheus → Уведомления → включить все'
+                            : '• Settings → Apps → Orpheus → Battery saver → "No restrictions"\n'
+                                '• Security → Autostart → enable Orpheus\n'
+                                '• Settings → Apps → Orpheus → Notifications → enable all',
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 12),
                       ),
                     ],
                   ),
                 ),
               ],
-              
+
               // Для Vivo
               if (manufacturer.contains('vivo')) ...[
                 const SizedBox(height: 16),
@@ -317,18 +443,25 @@ class DeviceSettingsService {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.blue.withOpacity(0.3)),
                   ),
-                  child: const Column(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '⚠️ For Vivo also:',
-                        style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 13),
+                        isRu ? '⚠️ Для Vivo также:' : '⚠️ For Vivo also:',
+                        style: const TextStyle(
+                            color: Colors.blue,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13),
                       ),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 8),
                       Text(
-                        '• i Manager → App manager → Orpheus → High power consumption\n'
-                        '• Settings → Apps → Orpheus → Autostart → enable',
-                        style: TextStyle(color: Colors.white60, fontSize: 12),
+                        isRu
+                            ? '• i Manager → Менеджер приложений → Orpheus → Высокое энергопотребление\n'
+                                '• Настройки → Приложения → Orpheus → Автозапуск → включить'
+                            : '• i Manager → App manager → Orpheus → High power consumption\n'
+                                '• Settings → Apps → Orpheus → Autostart → enable',
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 12),
                       ),
                     ],
                   ),
@@ -343,11 +476,13 @@ class DeviceSettingsService {
               await setSetupDialogDismissed(true);
               if (context.mounted) Navigator.pop(context);
             },
-            child: const Text("Don't show again", style: TextStyle(color: Colors.grey, fontSize: 12)),
+            child: Text(isRu ? 'Больше не показывать' : "Don't show again",
+                style: const TextStyle(color: Colors.grey, fontSize: 12)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Later', style: TextStyle(color: Colors.grey)),
+            child: Text(isRu ? 'Позже' : 'Later',
+                style: const TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -355,7 +490,7 @@ class DeviceSettingsService {
               foregroundColor: Colors.black,
             ),
             onPressed: () => Navigator.pop(context),
-            child: const Text('Done'),
+            child: Text(isRu ? 'Готово' : 'Done'),
           ),
         ],
       ),
@@ -363,8 +498,17 @@ class DeviceSettingsService {
   }
 
   static bool _isChineseOem(String manufacturer) {
-    return ['xiaomi', 'redmi', 'poco', 'vivo', 'oppo', 'realme', 'huawei', 'honor', 'oneplus']
-        .any((brand) => manufacturer.contains(brand));
+    return [
+      'xiaomi',
+      'redmi',
+      'poco',
+      'vivo',
+      'oppo',
+      'realme',
+      'huawei',
+      'honor',
+      'oneplus'
+    ].any((brand) => manufacturer.contains(brand));
   }
 
   static Widget _buildSetupStep({
@@ -380,12 +524,12 @@ class DeviceSettingsService {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isComplete 
+          color: isComplete
               ? const Color(0xFF6AD394).withOpacity(0.1)
               : Colors.white.withOpacity(0.05),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isComplete 
+            color: isComplete
                 ? const Color(0xFF6AD394).withOpacity(0.3)
                 : Colors.white.withOpacity(0.1),
           ),
@@ -397,7 +541,7 @@ class DeviceSettingsService {
               height: 28,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isComplete 
+                color: isComplete
                     ? const Color(0xFF6AD394)
                     : Colors.white.withOpacity(0.2),
               ),
@@ -422,7 +566,8 @@ class DeviceSettingsService {
                   Text(
                     title,
                     style: TextStyle(
-                      color: isComplete ? const Color(0xFF6AD394) : Colors.white,
+                      color:
+                          isComplete ? const Color(0xFF6AD394) : Colors.white,
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
@@ -430,7 +575,9 @@ class DeviceSettingsService {
                   Text(
                     description,
                     style: TextStyle(
-                      color: isComplete ? const Color(0xFF6AD394).withOpacity(0.7) : Colors.grey,
+                      color: isComplete
+                          ? const Color(0xFF6AD394).withOpacity(0.7)
+                          : Colors.grey,
                       fontSize: 12,
                     ),
                   ),
@@ -449,4 +596,3 @@ class DeviceSettingsService {
     );
   }
 }
-

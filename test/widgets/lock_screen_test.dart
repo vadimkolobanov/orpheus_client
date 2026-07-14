@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/screens/lock_screen.dart';
 import 'package:orpheus_project/services/auth_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _MemSecureStorage implements AuthSecureStorage {
   final Map<String, String> _m = {};
@@ -10,6 +11,11 @@ class _MemSecureStorage implements AuthSecureStorage {
   @override
   Future<void> delete({required String key}) async {
     _m.remove(key);
+  }
+
+  @override
+  Future<void> deleteAll() async {
+    _m.clear();
   }
 
   @override
@@ -38,8 +44,14 @@ void main() {
       final binding = TestWidgetsFlutterBinding.ensureInitialized();
       binding.window.physicalSizeTestValue = const Size(1080, 1920);
       binding.window.devicePixelRatioTestValue = 1.0;
+      // AuthService держит best-effort маркер PIN в SharedPreferences; без
+      // мока getInstance() виснет под fake-async виджет-тестов.
+      SharedPreferences.setMockInitialValues({});
 
-      auth = AuthService.createForTesting(secureStorage: _MemSecureStorage());
+      auth = AuthService.createForTesting(
+          secureStorage: _MemSecureStorage(),
+          fastHash: true,
+          monotonicNow: () async => 0);
       await auth.init();
     });
 
@@ -187,7 +199,7 @@ void main() {
       await _enterPin(tester, '000000');
       await tester.pump(const Duration(milliseconds: 350));
 
-      expect(find.text('Неверный PIN-код'), findsOneWidget);
+      expect(find.text('Неверный PIN'), findsOneWidget);
     });
   });
 }

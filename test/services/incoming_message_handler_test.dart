@@ -8,18 +8,46 @@ class _FakeCrypto implements IncomingMessageCrypto {
   final Future<String> Function(String sender, String payload) _decryptFn;
 
   @override
-  Future<String> decrypt(String senderPublicKeyBase64, String encryptedPayload) {
-    return _decryptFn(senderPublicKeyBase64, encryptedPayload);
+  Future<String> decrypt(String senderEncKeyBase64, String encryptedPayload) {
+    return _decryptFn(senderEncKeyBase64, encryptedPayload);
   }
+
+  @override
+  Future<bool> verifyIdentityBundle(String address, String enc, String sig) async => true;
 }
 
 class _FakeDb implements IncomingMessageDatabase {
   final Map<String, String> contactNames = {};
+  final Map<String, String> contactEncKeys = {};
   final List<(ChatMessage message, String contactKey)> saved = [];
+
+  final Set<String> ensuredContacts = {};
+
+  // Строгий mutual-add: по умолчанию считаем всех контактами (чтобы прежние тесты
+  // работали); отдельные тесты выставляют contactsAllowAll=false + contacts.
+  bool contactsAllowAll = true;
+  final Set<String> contacts = {};
+
+  @override
+  Future<bool> isContact(String publicKey) async =>
+      contactsAllowAll || contacts.contains(publicKey);
 
   @override
   Future<void> addMessage(ChatMessage message, String contactPublicKey) async {
     saved.add((message, contactPublicKey));
+  }
+
+  @override
+  Future<void> addContactIfMissing(String publicKey, {String? encryptionKey}) async {
+    ensuredContacts.add(publicKey);
+    contacts.add(publicKey);
+    if (encryptionKey != null) contactEncKeys[publicKey] = encryptionKey;
+  }
+
+  @override
+  Future<String?> getContactEncryptionKey(String publicKey) async {
+    // Возвращаем не-null, чтобы chat-декрипт в тестах проходил (fake decrypt ключ игнорирует).
+    return contactEncKeys[publicKey] ?? 'fake-enc';
   }
 
   @override
@@ -30,6 +58,16 @@ class _FakeDb implements IncomingMessageDatabase {
   @override
   Future<int> deleteMessagesByTimestamps(String contactKey, List<int> timestamps) async {
     return timestamps.length;
+  }
+
+  @override
+  Future<int> deleteMessagesByMessageIds(String contactKey, List<String> messageIds) async {
+    return messageIds.length;
+  }
+
+  @override
+  Future<bool> messageExistsByMessageId(String contactKey, String messageId) async {
+    return saved.any((e) => e.$1.messageId == messageId && e.$2 == contactKey);
   }
 }
 
@@ -47,8 +85,8 @@ class _FakeNotif implements IncomingMessageNotifications {
   }
 
   @override
-  Future<void> showMessageNotification({required String senderName}) async {
-    calls.add('showMsg:$senderName');
+  Future<void> showMessageNotification() async {
+    calls.add('showMsg');
   }
 }
 
@@ -86,6 +124,114 @@ void main() {
       expect(chatUpdates, isEmpty);
       expect(notif.calls, isEmpty);
       expect(db.saved, isEmpty);
+    });
+
+    test('строгий mutual-add: сообщение и звонок от не-контакта дропаются', () async {
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb()
+        ..contactsAllowAll = false
+        ..contacts.add('FRIEND');
+      final notif = _FakeNotif();
+      final signaling = <Map<String, dynamic>>[];
+      final chatUpdates = <String>[];
+      var openedCall = false;
+
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, payload) async => payload),
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {
+          openedCall = true;
+        },
+        emitSignaling: signaling.add,
+        emitChatUpdate: chatUpdates.add,
+        isAppInForeground: () => true,
+      );
+
+      // Не-контакт: и chat, и call-offer дропаются целиком (без сохранения/показа/авто-добавления).
+      await handler.handleDecoded(
+          {'type': 'chat', 'sender_pubkey': 'STRANGER', 'payload': 'hi', 'message_id': 'm1'});
+      await handler.handleDecoded(
+          {'type': 'call-offer', 'sender_pubkey': 'STRANGER', 'data': {'call_id': 'c1'}});
+      expect(db.saved, isEmpty);
+      expect(chatUpdates, isEmpty);
+      expect(openedCall, isFalse);
+      expect(db.ensuredContacts, isEmpty);
+
+      // Контакт: сообщение проходит.
+      await handler.handleDecoded(
+          {'type': 'chat', 'sender_pubkey': 'FRIEND', 'payload': 'yo', 'message_id': 'm2'});
+      expect(db.saved.length, 1);
+      expect(chatUpdates, ['FRIEND']);
+    });
+
+    test('строгий mutual-add: teardown (hang-up/call-rejected) от не-контакта НЕ дропается', () async {
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb()..contactsAllowAll = false; // в контактах никого нет
+      final notif = _FakeNotif();
+      final signaling = <Map<String, dynamic>>[];
+
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, payload) async => payload),
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {},
+        emitSignaling: signaling.add,
+        emitChatUpdate: (_) {},
+        isAppInForeground: () => true,
+      );
+
+      // Сигналы завершения звонка проходят даже от не-контакта: активный звонок
+      // всегда должен закрываться (фильтрация по пиру — уже в CallScreen).
+      await handler.handleDecoded(
+          {'type': 'hang-up', 'sender_pubkey': 'STRANGER', 'data': {'call_id': 'c1'}});
+      await handler.handleDecoded(
+          {'type': 'call-rejected', 'sender_pubkey': 'STRANGER', 'data': {'call_id': 'c2'}});
+
+      expect(signaling.map((s) => s['type']).toList(), ['hang-up', 'call-rejected']);
+    });
+
+    test('chat: разные message_id в окне не теряются, одинаковый id — дубль отбрасывается (LOGIC-1)', () async {
+      final buffer = IncomingCallBuffer.instance;
+      final db = _FakeDb();
+      final notif = _FakeNotif();
+      var now = 1000;
+
+      final handler = IncomingMessageHandler(
+        crypto: _FakeCrypto((_, payload) async => payload), // "расшифровка" = payload
+        database: db,
+        notifications: notif,
+        callBuffer: buffer,
+        openCallScreen: ({required contactPublicKey, required offer, callId}) {},
+        emitSignaling: (_) {},
+        emitChatUpdate: (_) {},
+        isAppInForeground: () => true,
+        nowMs: () => now, // время не двигаем: оба сообщения "в одну мс"
+      );
+
+      const sender = 'SENDER_KEY';
+
+      // Два РАЗНЫХ сообщения в одну и ту же миллисекунду (внутри старого 5-сек окна).
+      await handler.handleDecoded(
+          {'type': 'chat', 'sender_pubkey': sender, 'payload': 'привет', 'message_id': 'id-1'});
+      await handler.handleDecoded(
+          {'type': 'chat', 'sender_pubkey': sender, 'payload': 'ты тут?', 'message_id': 'id-2'});
+
+      // Оба сохранились (старое 5-сек окно теряло второе — аудит LOGIC-1).
+      expect(db.saved.length, 2);
+      expect(db.saved.map((e) => e.$1.text), containsAll(['привет', 'ты тут?']));
+      expect(db.saved.first.$1.messageId, 'id-1');
+
+      // Повторная доставка того же id (WS + offline) — настоящий дубль, не сохраняется.
+      await handler.handleDecoded(
+          {'type': 'chat', 'sender_pubkey': sender, 'payload': 'привет', 'message_id': 'id-1'});
+      expect(db.saved.length, 2);
+
+      // Неизвестный отправитель авто-добавлен в контакты, иначе сообщение
+      // сохранилось бы, но не показалось в списке чатов (аудит DB-6).
+      expect(db.ensuredContacts, contains(sender));
     });
 
     test('ICE до offer не теряется: буферизуется и сохраняется при приходе offer', () async {
@@ -298,8 +444,8 @@ void main() {
       expect(db.saved.first.$1.status, equals(MessageStatus.delivered));
 
       expect(chatUpdates, equals(['SENDER_KEY']));
-      // Приватность: уведомление без содержания — только имя отправителя.
-      expect(notif.calls, equals(['showMsg:Bob']));
+      // Приватность: уведомление полностью обезличено — ни содержания, ни отправителя.
+      expect(notif.calls, equals(['showMsg']));
     });
 
     test('chat: системные call-status сообщения не должны поднимать уведомление', () async {

@@ -68,7 +68,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
   bool get _isOrpheusRoom => widget.room.id == _orpheusRoomId;
 
   Future<void> _loadMyBadge() async {
-    final myKey = cryptoService.publicKeyBase64;
+    final myKey = cryptoService.addressBase64;
     if (myKey == null) return;
     final badge = await BadgeService.instance.getBadge(myKey);
     if (!mounted) return;
@@ -296,7 +296,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
           RoomMessage(
             id: DateTime.now().millisecondsSinceEpoch.toString(),
             text: text,
-            senderKey: cryptoService.publicKeyBase64,
+            senderKey: cryptoService.addressBase64,
             senderName: _isOrpheusRoom && _sendAsOrpheus
                 ? l10n.orpheusOfficialName
                 : null,
@@ -323,7 +323,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
       icon: Icons.vpn_key_outlined,
       title: l10n.rotateInviteTitle,
       content: l10n.rotateInviteDesc,
-      primaryLabel: l10n.rotateInvite,
+      primaryLabel: l10n.rotateConfirm,
       secondaryLabel: l10n.cancel,
     );
     if (!ok) return;
@@ -347,7 +347,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
       icon: Icons.delete_forever,
       title: l10n.panicClearTitle,
       content: l10n.panicClearDesc,
-      primaryLabel: l10n.panicClear,
+      primaryLabel: l10n.panicClearConfirm,
       secondaryLabel: l10n.cancel,
       isDanger: true,
     );
@@ -375,7 +375,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
       icon: Icons.logout,
       title: l10n.leaveRoomTitle,
       content: l10n.leaveRoomDesc,
-      primaryLabel: l10n.leaveRoom,
+      primaryLabel: l10n.leaveConfirm,
       secondaryLabel: l10n.cancel,
       isDanger: true,
     );
@@ -383,6 +383,31 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
 
     try {
       await _service.leaveRoom(widget.room.id);
+      if (!mounted) return;
+      Navigator.pop(context);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.connectionError)),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteRoom() async {
+    final l10n = L10n.of(context);
+    final ok = await AppDialog.show(
+      context: context,
+      icon: Icons.delete_forever,
+      title: l10n.deleteRoomTitle,
+      content: l10n.deleteRoomDesc,
+      primaryLabel: l10n.deleteConfirm,
+      secondaryLabel: l10n.cancel,
+      isDanger: true,
+    );
+    if (!ok) return;
+
+    try {
+      await _service.deleteRoom(widget.room.id);
       if (!mounted) return;
       Navigator.pop(context);
     } catch (_) {
@@ -434,6 +459,9 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
                 case 'leave':
                   _confirmLeaveRoom();
                   break;
+                case 'delete':
+                  _confirmDeleteRoom();
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -458,6 +486,11 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
                 PopupMenuItem(
                   value: 'leave',
                   child: Text(l10n.leaveRoom),
+                ),
+              if (widget.room.isOwner && !_isOrpheusRoom)
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text(l10n.deleteRoom),
                 ),
             ],
           ),
@@ -758,7 +791,7 @@ class _RoomMessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final myKey = cryptoService.publicKeyBase64;
+    final myKey = cryptoService.addressBase64;
     final isOfficial = message.authorType == 'orpheus';
     final isMine = !message.isSystem &&
         !isOfficial &&

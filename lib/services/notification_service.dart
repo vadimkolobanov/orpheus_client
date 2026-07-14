@@ -3,7 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'dart:ui' as ui;
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -15,21 +15,41 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 import 'package:orpheus_project/config.dart';
 import 'package:orpheus_project/services/call_id_storage.dart';
+import 'package:orpheus_project/services/pending_call_storage.dart';
+import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/device_settings_service.dart';
+import 'package:orpheus_project/l10n/app_localizations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Обработчик фоновых FCM сообщений (top-level функция)
-/// Вызывается когда приложение убито или в фоне
-/// 
-/// КРИТИЧЕСКИ ВАЖНО: Этот код выполняется в отдельном isolate!
+/// Диспетчер входящего push-сообщения из фонового WS-слушателя
+/// (см. PushConnectionService). Раньше эту роль играл FCM background handler
+/// (`firebaseMessagingBackgroundHandler(RemoteMessage)`) — после отказа от Google
+/// сообщения приходят по WebSocket из изолята постоянного foreground-сервиса.
+///
+/// КРИТИЧЕСКИ ВАЖНО: Этот код выполняется в ОТДЕЛЬНОМ isolate!
 /// Нельзя использовать синглтоны или состояние из main isolate.
+/// `data` — это раскодированный JSON WS-кадра (data-only, без notification payload).
 @pragma('vm:entry-point')
-Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  print("📱 FCM BACKGROUND: ${message.messageId}");
-  
-  final data = message.data;
+Future<void> handleBackgroundPush(Map<String, dynamic> data) async {
   final type = data['type'];
-  
-  print("📱 FCM BACKGROUND type: $type");
-  
+  print("PUSH BACKGROUND type: $type");
+
+  // Строгий mutual-add (фон): peer-звонки и peer-сообщения показываем ТОЛЬКО от
+  // добавленных контактов. Проверка по allow-list из secure storage (в фоновом
+  // изоляте зашифрованная БД ненадёжна). Комнаты (room-*) и support-reply не гейтим.
+  final peerSender = (data['caller_key'] ?? data['sender_pubkey'])?.toString();
+  final isPeerType = type == 'incoming_call' ||
+      type == 'call-offer' ||
+      type == 'new_message' ||
+      type == 'chat';
+  if (isPeerType && peerSender != null && peerSender.isNotEmpty) {
+    final allow = await DatabaseService.loadContactAllowlist();
+    if (!allow.contains(peerSender)) {
+      print("PUSH BACKGROUND: drop $type from non-contact (strict mutual-add)");
+      return;
+    }
+  }
+
   // === ВХОДЯЩИЙ ЗВОНОК ===
   // Показываем нативный UI звонка через flutter_callkit_incoming
   if (type == 'incoming_call' || type == 'call-offer') {
@@ -37,21 +57,18 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await _showNativeIncomingCall(data);
     return;
   }
-  
+
   // === НОВОЕ СООБЩЕНИЕ ===
-  // Показываем локальное уведомление
+  // Показываем локальное уведомление (WS-кадр всегда data-only)
   if (type == 'new_message' ||
       type == 'chat' ||
       type == 'room-message' ||
       type == 'room_message' ||
       type == 'support-reply') {
-    // Только если нет notification payload (data-only message)
-    if (message.notification == null) {
-      await NotificationService._handleBackgroundMessage(data);
-    }
+    await NotificationService._handleBackgroundMessage(data);
     return;
   }
-  
+
   // === ЗАВЕРШЕНИЕ ЗВОНКА ===
   // Скрываем нативный UI если звонок завершён
   if (type == 'hang-up' || type == 'call-rejected' || type == 'call-ended') {
@@ -67,11 +84,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> _sendBackgroundTelemetry(Map<String, dynamic> data, String message) async {
   try {
+    // Уважаем opt-in: фоновая телеметрия не уходит, пока пользователь явно не
+    // включил её (тот же флаг, что у TelemetryService). Раньше этот путь слал
+    // peer_pubkey и сырой payload в обход флага и санитизации (AUDIT_REPORT SEC-2).
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!(prefs.getBool('telemetry_enabled') ?? false)) return;
+    } catch (_) {
+      return;
+    }
+
     final recipientPubkey = data['recipient_pubkey']?.toString();
     if (recipientPubkey == null || recipientPubkey.isEmpty) return;
 
     final callId = data['call_id'] ?? data['callId'] ?? data['id'];
-    final peerKey = data['caller_key'] ?? data['sender_pubkey'];
 
     final payload = {
       'source': 'client-bg',
@@ -79,12 +105,11 @@ Future<void> _sendBackgroundTelemetry(Map<String, dynamic> data, String message)
         {
           'timestamp': DateTime.now().toIso8601String(),
           'level': 'info',
-          'tag': 'FCM_BG',
-          'category': 'FCM_BG',
+          'tag': 'BG',
+          'category': 'BG',
           'message': message,
-          'details': data,
+          // НЕ отправляем сырой data и peer_pubkey (граф общения контактов) — SEC-2.
           'call_id': callId,
-          'peer_pubkey': peerKey,
           'app_state': 'background',
         },
       ],
@@ -152,15 +177,41 @@ String _extractOrGenerateCallId(Map<String, dynamic> data, String callerKey) {
 Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
   try {
     final callerKey = data['caller_key'] ?? data['sender_pubkey'] ?? '';
-    // NOTE: caller_name из FCM — это только первые 8 символов ключа (сервер не знает имена).
-    // Правильное имя появится после открытия CallScreen из локальной БД.
-    final callerName = data['caller_name'] ?? data['sender_name'] ?? callerKey.toString().substring(0, 8);
-    
+    // Резолвим ЛОКАЛЬНОЕ имя контакта (как пользователь его назвал), а не префикс
+    // ключа. Best-effort с таймаутом: если приложение живо и БД доступна — покажем
+    // имя сразу на экране входящего; при killed-app/закрытой БД — фолбэк на
+    // caller_name/префикс (сервер имён не знает; имя всё равно подтянется при
+    // открытии CallScreen).
+    final fallbackName =
+        (data['caller_name'] ?? data['sender_name'] ?? callerKey.toString().substring(0, 8))
+            .toString();
+    String callerName = fallbackName;
+    try {
+      final contact = await DatabaseService.instance
+          .getContact(callerKey.toString())
+          .timeout(const Duration(seconds: 1));
+      final localName = contact?.name.trim();
+      if (localName != null && localName.isNotEmpty) callerName = localName;
+    } catch (_) {}
+
+    // Приватность на локскрине: если устройство заблокировано и в настройках НЕ
+    // включён показ имени на локскрине — прячем личность звонящего за нейтральной
+    // подписью (без имени и без префикса ключа). Имя появится на экране звонка
+    // после разблокировки Orpheus.
+    bool hideCallerIdentity = false;
+    try {
+      if (await DeviceSettingsService.hideCallerIdentityOnIncoming()) {
+        hideCallerIdentity = true;
+        callerName =
+            (await NotificationService.notificationL10n()).incomingEncryptedCall;
+      }
+    } catch (_) {}
+
     // Используем call_id от сервера если есть, иначе генерируем
     // КРИТИЧНО: сервер должен передавать уникальный call_id для каждого звонка!
     final callId = _extractOrGenerateCallId(data, callerKey.toString());
 
-    final canShow = await CallIdStorage.tryShowCallKitForFcm(callId: callId);
+    final canShow = await CallIdStorage.tryShowCallKitForPush(callId: callId);
     if (!canShow) {
       print("📞 CALLKIT FCM: callId=$callId уже активен, пропускаю показ");
       return;
@@ -170,21 +221,20 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
     // ВАЖНО: FCM и WebSocket могут генерировать РАЗНЫЕ callId для одного звонка!
     // Поэтому проверяем по callerKey, а не только по callId.
     try {
+      // activeCalls() теперь возвращает List<CallKitParams> (callkit 3.x).
       final activeCalls = await FlutterCallkitIncoming.activeCalls();
-      if (activeCalls is List && activeCalls.isNotEmpty) {
+      if (activeCalls.isNotEmpty) {
         for (final call in activeCalls) {
-          if (call is Map) {
-            // Проверяем по callId
-            if (call['id'] == callId) {
-              print("📞 CALLKIT FCM: Звонок с id=$callId уже показан, пропускаю дубликат");
-              return;
-            }
-            // Проверяем по callerKey в extra — если тот же caller, значит дубль!
-            final extra = call['extra'];
-            if (extra is Map && extra['callerKey'] == callerKey.toString()) {
-              print("📞 CALLKIT FCM: Звонок от $callerKey уже показан (WS?), пропускаю FCM дубликат");
-              return;
-            }
+          // Проверяем по callId
+          if (call.id == callId) {
+            print("📞 CALLKIT PUSH: Звонок с id=$callId уже показан, пропускаю дубликат");
+            return;
+          }
+          // Проверяем по callerKey в extra — если тот же caller, значит дубль!
+          final extra = call.extra;
+          if (extra != null && extra['callerKey'] == callerKey.toString()) {
+            print("📞 CALLKIT PUSH: Звонок от $callerKey уже показан (WS?), пропускаю дубликат");
+            return;
           }
         }
         // Есть активный звонок от ДРУГОГО caller — закрываем и показываем новый
@@ -201,23 +251,44 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
     if (data['offer_data'] != null) {
       offerDataJson = data['offer_data'].toString();
     }
+
+    // Кладём offer на диск по callId. При ответе с ЗАБЛОКИРОВАННОГО экрана main-изолят
+    // стартует «с нуля», и native `extra` CallKit часто не доносит offer до свежего
+    // listener'а -> отвечающий создавал СВОЙ offer вместо answer (glare, звонок не
+    // соединялся). Теперь main-изолят достанет offer отсюда (см. main_callkit).
+    // Это НЕ авто-открытие звонка — только хранилище offer (TTL + сверка callId).
+    if (offerDataJson != null) {
+      try {
+        await PendingCallStorage.instance.cacheOffer(
+          callId: callId,
+          offerData: json.decode(offerDataJson) as Map<String, dynamic>,
+        );
+      } catch (e) {
+        print("📞 CALLKIT: cacheOffer error: $e");
+      }
+    }
+
+    print("📞 CALLKIT: Показываю входящий звонок (id=$callId), hasOffer=${offerDataJson != null}");
     
-    print("📞 CALLKIT: Показываю входящий звонок от $callerName (id=$callId), hasOffer=${offerDataJson != null}");
-    
+    final l10n = await NotificationService.notificationL10n();
+
     final params = CallKitParams(
       id: callId,
       nameCaller: callerName,
       appName: 'Orpheus',
-      handle: callerKey.toString().substring(0, 8),
+      handle: hideCallerIdentity ? '' : callerKey.toString().substring(0, 8),
       type: 0, // Audio call
-      textAccept: 'Answer',
-      textDecline: 'Decline',
       missedCallNotification: NotificationParams(
         showNotification: true,
         isShowCallback: false,
-        subtitle: 'Missed call',
-        callbackText: 'Call back',
+        subtitle: l10n.missedCall,
+        callbackText: l10n.callBack,
       ),
+      // No plugin ongoing-call notification: the app runs its own in-call FGS
+      // (CallAudioService). The plugin one is redundant AND leaks: its service
+      // is START_STICKY and only stops via ACTION_CALL_ENDED, which endAllCalls
+      // skips when the plugin's active-call list is already empty.
+      callingNotification: const NotificationParams(showNotification: false),
       duration: 45000, // 45 seconds ringtone
       extra: <String, dynamic>{
         'callerKey': callerKey,
@@ -232,9 +303,14 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
         backgroundColor: '#0D0D0D',
         actionColor: '#6AD394',
         textColor: '#FFFFFF',
+        // callkit 3.x: textAccept/textDecline переехали из CallKitParams в AndroidParams.
+        textAccept: l10n.answerCall,
+        textDecline: l10n.decline,
         incomingCallNotificationChannelName: 'Incoming calls',
         missedCallNotificationChannelName: 'Missed calls',
         isShowCallID: false,
+        // ПРИМЕЧАНИЕ: false (heads-up вместо полноэкранного ринга) не помог обойти
+        // плагинный requestDismissKeyguard — PIN оставался. Вернули true.
         isShowFullLockedScreen: true,
       ),
       ios: IOSParams(
@@ -265,12 +341,13 @@ Future<void> _showNativeIncomingCall(Map<String, dynamic> data) async {
 
 Future<void> _showFallbackLocalCallNotification(Map<String, dynamic> data) async {
   try {
-    final callerKey = data['caller_key'] ?? data['sender_pubkey'] ?? '';
-    final callerName = data['caller_name'] ?? data['sender_name'] ?? callerKey.toString().substring(0, 8);
+    // Обезличенный баннер: ни имени, ни ключа звонящего (приватность на локскрине).
+    // caller_key едет только в payload для приёма/отклонения, не на экран.
+    final l10n = await NotificationService.notificationL10n();
     final plugin = FlutterLocalNotificationsPlugin();
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidSettings);
-    await plugin.initialize(initSettings);
+    await plugin.initialize(settings: initSettings);
 
     const androidDetails = AndroidNotificationDetails(
       'incoming_calls_fallback',
@@ -285,10 +362,10 @@ Future<void> _showFallbackLocalCallNotification(Map<String, dynamic> data) async
     const details = NotificationDetails(android: androidDetails);
 
     await plugin.show(
-      9901,
-      'Incoming call',
-      'From: $callerName',
-      details,
+      id: 9901,
+      title: l10n.incomingCall,
+      body: l10n.incomingEncryptedCall,
+      notificationDetails: details,
       payload: json.encode(data),
     );
   } catch (_) {
@@ -302,11 +379,6 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  /// ВАЖНО: не трогаем `FirebaseMessaging.instance` в момент импорта/конструирования
-  /// (widget-тесты могут падать без зарегистрированных плагинов).
-  /// Достаём инстанс лениво — только когда реально вызывается `init()`.
-  FirebaseMessaging get _firebaseMessaging => FirebaseMessaging.instance;
-
   // ===== Local notifications backend (DI for unit tests) =====
   static NotificationLocalBackend? _localBackend;
   static bool _localInitialized = false;
@@ -317,12 +389,7 @@ class NotificationService {
     _localInitialized = false;
   }
 
-  /// FCM токен для отправки на сервер
-  String? fcmToken;
-
   /// Callbacks для обработки событий
-  static VoidCallback? onTokenUpdated;
-  static Function(String callerKey)? onIncomingCallFromPush;
   static Function(Map<String, dynamic> data)? onIncomingCallFromNotification;
 
   // ID каналов уведомлений
@@ -345,13 +412,15 @@ class NotificationService {
   static const int _callNotificationId = 1001;
   static const int _messageNotificationId = 1002;
 
-  /// Инициализация сервиса
+  /// Инициализация сервиса (только локальные уведомления — без Google/FCM).
+  ///
+  /// Пуши доставляются по WebSocket из фонового сервиса (PushConnectionService),
+  /// а показ на экране — через flutter_local_notifications / flutter_callkit_incoming.
   Future<void> init() async {
     // 1. Инициализация локальных уведомлений
     await _ensureLocalNotificationsInitialized();
 
     // 1.1 Android 13+: запрос runtime permission на уведомления (best-effort).
-    // На iOS это делается через FirebaseMessaging.requestPermission().
     if (!kIsWeb && Platform.isAndroid) {
       try {
         final status = await Permission.notification.request();
@@ -359,47 +428,6 @@ class NotificationService {
       } catch (e) {
         DebugLogger.warn('NOTIF', 'Notification permission request failed: $e');
       }
-    }
-
-    // 2. Запрос разрешений FCM
-    NotificationSettings settings = await _firebaseMessaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      criticalAlert: true,  // Важно для звонков
-      provisional: false,
-    );
-    print('📱 FCM Permission: ${settings.authorizationStatus}');
-    DebugLogger.info('FCM', 'Permission: ${settings.authorizationStatus}');
-
-    // 3. Получение токена
-    try {
-      fcmToken = await _firebaseMessaging.getToken();
-      print("📱 FCM Token: $fcmToken");
-      DebugLogger.success('FCM', 'Token received: ${fcmToken?.substring(0, 30)}...');
-
-      // Подписка на обновление токена
-      _firebaseMessaging.onTokenRefresh.listen((newToken) {
-        fcmToken = newToken;
-        print("📱 FCM Token updated: $newToken");
-        DebugLogger.info('FCM', 'Token updated: ${newToken.substring(0, 30)}...');
-        onTokenUpdated?.call();
-      });
-    } catch (e) {
-      print("📱 FCM Error: $e");
-      DebugLogger.error('FCM', 'Token error: $e');
-    }
-
-    // 4. Обработка foreground сообщений
-    FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-
-    // 5. Обработка клика по уведомлению
-    FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
-
-    // 6. Проверка начального сообщения (если приложение открыто из уведомления)
-    final initialMessage = await _firebaseMessaging.getInitialMessage();
-    if (initialMessage != null) {
-      _handleNotificationTap(initialMessage);
     }
   }
 
@@ -441,19 +469,6 @@ class NotificationService {
     print("🔔 Local notifications initialized");
   }
 
-  /// Обработка foreground FCM сообщений
-  void _handleForegroundMessage(RemoteMessage message) {
-    print('📱 FCM Foreground: ${message.notification?.title}');
-    
-    // Если приложение открыто - FCM не показывает уведомление автоматически
-    // Можно показать локальное уведомление если нужно
-    final data = message.data;
-    if (data.containsKey('type') && (data['type'] == 'call' || data['type'] == 'incoming_call')) {
-      // Для звонков можно показать уведомление даже в foreground
-      // (но обычно экран звонка уже открывается через WebSocket)
-    }
-  }
-
   /// Обработка фоновых data-only сообщений
   static Future<void> _handleBackgroundMessage(Map<String, dynamic> data) async {
     // Обеспечиваем инициализацию локальных уведомлений
@@ -466,13 +481,8 @@ class NotificationService {
     // - new_message: sender_name/sender_key
     //
     // Оставляем совместимость со старыми call/message.
-    final callerName = (data['caller_name'] ?? data['sender_name'] ?? 'Unknown').toString();
-    final senderName = (data['sender_name'] ??
-            data['caller_name'] ??
-            data['sender'] ??
-            data['from'] ??
-            'Developer')
-        .toString();
+    final l10n = await notificationL10n();
+    final callerName = (data['caller_name'] ?? data['sender_name'] ?? l10n.unknownCaller).toString();
 
     if (type == 'incoming_call' || type == 'call') {
       await showCallNotification(
@@ -480,7 +490,8 @@ class NotificationService {
         payload: json.encode(data),
       );
     } else if (type == 'new_message' || type == 'message' || type == 'support-reply') {
-      await showMessageNotification(senderName: senderName);
+      // Обезличенное уведомление — без отправителя (см. showMessageNotification).
+      await showMessageNotification();
     } else if (type == 'room-message' || type == 'room_message') {
       final roomId = data['room_id']?.toString();
       final roomName = (data['room_name'] ?? 'Chat').toString();
@@ -520,19 +531,6 @@ class NotificationService {
         type == 'support-reply';
   }
 
-  /// Обработка клика по уведомлению FCM
-  void _handleNotificationTap(RemoteMessage message) {
-    print('📱 Notification tap: ${message.data}');
-    
-    final data = message.data;
-    if (data.containsKey('caller_key')) {
-      onIncomingCallFromPush?.call(data['caller_key']);
-    }
-    if (data.isNotEmpty) {
-      onIncomingCallFromNotification?.call(Map<String, dynamic>.from(data));
-    }
-  }
-
   /// Обработка клика по локальному уведомлению
   static void _onNotificationTap(NotificationResponse response) {
     print('🔔 Local notification tap: ${response.payload}');
@@ -545,6 +543,35 @@ class NotificationService {
 
   // ==================== ПУБЛИЧНЫЕ МЕТОДЫ ====================
 
+  /// Локализация для строк уведомлений.
+  ///
+  /// Уведомления показываются из фонового сервисного изолята, где нет `BuildContext`,
+  /// поэтому язык резолвим по сохранённому выбору пользователя (`app_locale`,
+  /// пишется `LocaleService`), с откатом на системную локаль, затем на английский.
+  /// Так RU-пользователь получает русские уведомления, EN — английские.
+  /// Нейтральная подпись входящего звонка для локскрина (без имени/ключа).
+  /// Публичная обёртка над локализацией — чтобы другие сервисы (WS-путь показа
+  /// CallKit) не лезли к @visibleForTesting notificationL10n напрямую.
+  static Future<String> incomingEncryptedCallLabel() async =>
+      (await notificationL10n()).incomingEncryptedCall;
+
+  @visibleForTesting
+  static Future<L10n> notificationL10n() async {
+    String code;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('app_locale');
+      if (saved != null && saved.isNotEmpty) {
+        code = saved;
+      } else {
+        code = ui.PlatformDispatcher.instance.locale.languageCode == 'ru' ? 'ru' : 'en';
+      }
+    } catch (_) {
+      code = 'en';
+    }
+    return lookupL10n(Locale(code));
+  }
+
   /// Показать уведомление о входящем звонке
   /// Простое, без кнопок, со звуком и вибрацией
   static Future<void> showCallNotification({
@@ -553,13 +580,14 @@ class NotificationService {
   }) async {
     try {
       await _ensureLocalNotificationsInitialized();
+      final l10n = await notificationL10n();
 
       await _localBackend!.show(
         id: _callNotificationId,
         channelId: _incomingCallChannelId,
         channelName: _callChannelName,
-        title: 'Incoming call',
-        body: callerName,
+        title: l10n.incomingCall,
+        body: l10n.incomingEncryptedCall, // обезличено: без имени/ключа звонящего
         category: AndroidNotificationCategory.call,
         androidSmallIcon: _androidSmallIcon,
         fullScreenIntent: true,
@@ -567,8 +595,7 @@ class NotificationService {
         payload: payload,
       );
 
-      print("🔔 Call notification shown: $callerName");
-      DebugLogger.success('NOTIF', '🔔 Call notification shown: $callerName');
+      DebugLogger.success('NOTIF', 'Показано обезличенное уведомление о звонке');
     } catch (e) {
       print("🔔 showCallNotification error: $e");
       DebugLogger.error('NOTIF', 'showCallNotification error: $e');
@@ -589,56 +616,64 @@ class NotificationService {
     }
   }
 
-  /// Показать уведомление о новом сообщении
-  /// Содержимое сообщения НЕ показывается для приватности
-  static Future<void> showMessageNotification({
-    required String senderName,
-  }) async {
+  /// Показать ПОЛНОСТЬЮ ОБЕЗЛИЧЕННОЕ уведомление о новом сообщении.
+  /// Ни содержимое, ни отправитель не раскрываются (приватность на локскрине).
+  /// [senderName] намеренно игнорируется — это единая точка показа для всех путей
+  /// (main-изолят и push-изолят), поэтому обезличиваем здесь, чтобы ни один путь
+  /// (в т.ч. будущий) не мог пропалить отправителя. Фиксированный id -> все новые
+  /// сообщения сливаются в одно уведомление и не выдают число собеседников.
+  static Future<void> showMessageNotification() async {
     try {
       await _ensureLocalNotificationsInitialized();
+      final l10n = await notificationL10n();
 
       await _localBackend!.show(
-        id: _messageNotificationId + senderName.hashCode % 1000, // Уникальный ID для разных отправителей
+        id: _messageNotificationId,
         channelId: _messageChannelId,
         channelName: _messageChannelName,
-        title: senderName,
-        body: 'New message', // Don't show content for privacy
+        title: 'Orpheus',
+        body: l10n.newMessage, // ни содержимого, ни отправителя
         category: AndroidNotificationCategory.message,
         androidSmallIcon: _androidSmallIcon,
-        groupKey: 'orpheus_messages_group',
+        // No groupKey: a lone grouped child without a posted group summary makes
+        // Samsung One UI synthesize a blank "Orpheus" header row in the shade.
         ongoing: false,
         fullScreenIntent: false,
       );
 
-      print("🔔 Message notification shown: $senderName");
-      DebugLogger.success('NOTIF', '📩 Показано уведомление: $senderName');
+      DebugLogger.success('NOTIF', 'Показано обезличенное уведомление о сообщении');
     } catch (e) {
       print("🔔 showMessageNotification error: $e");
       DebugLogger.error('NOTIF', 'showMessageNotification ошибка: $e');
     }
   }
 
-  /// Показать уведомление о новом сообщении в чате.
+  /// Показать ОБЕЗЛИЧЕННОЕ уведомление о новом сообщении в комнате.
+  /// [roomName] намеренно игнорируется — на локскрине не светим, в какой группе
+  /// сообщение (паритет с обезличенными личными сообщениями). Фиксированный id ->
+  /// не выдаём число активных комнат отдельными уведомлениями.
   static Future<void> showRoomMessageNotification({
-    required String roomName,
+    String roomName = '',
   }) async {
     try {
       await _ensureLocalNotificationsInitialized();
+      final l10n = await notificationL10n();
 
       await _localBackend!.show(
-        id: _messageNotificationId + roomName.hashCode % 1000,
+        id: _messageNotificationId,
         channelId: _messageChannelId,
         channelName: _messageChannelName,
-        title: roomName,
-        body: 'New message in chat',
+        title: 'Orpheus',
+        body: l10n.newMessageInChat,
         category: AndroidNotificationCategory.message,
         androidSmallIcon: _androidSmallIcon,
-        groupKey: 'orpheus_messages_group',
+        // No groupKey: a lone grouped child without a posted group summary makes
+        // Samsung One UI synthesize a blank "Orpheus" header row in the shade.
         ongoing: false,
         fullScreenIntent: false,
       );
 
-      DebugLogger.success('NOTIF', '💬 Чат-уведомление: $roomName');
+      DebugLogger.success('NOTIF', 'Показано обезличенное уведомление о сообщении в комнате');
     } catch (e) {
       DebugLogger.error('NOTIF', 'showRoomMessageNotification ошибка: $e');
     }
@@ -648,16 +683,18 @@ class NotificationService {
   static Future<void> showOrpheusOfficialNotification() async {
     try {
       await _ensureLocalNotificationsInitialized();
+      final l10n = await notificationL10n();
 
       await _localBackend!.show(
         id: _messageNotificationId + 999,
         channelId: _messageChannelId,
         channelName: _messageChannelName,
         title: 'Orpheus',
-        body: 'Official Orpheus reply',
+        body: l10n.officialOrpheusReply,
         category: AndroidNotificationCategory.message,
         androidSmallIcon: _androidSmallIcon,
-        groupKey: 'orpheus_messages_group',
+        // No groupKey: a lone grouped child without a posted group summary makes
+        // Samsung One UI synthesize a blank "Orpheus" header row in the shade.
         ongoing: false,
         fullScreenIntent: false,
       );
@@ -682,13 +719,14 @@ class NotificationService {
   /// Показать тестовое уведомление
   static Future<void> showTestNotification() async {
     await _ensureLocalNotificationsInitialized();
+    final l10n = await notificationL10n();
 
     await _localBackend!.show(
       id: 9999,
       channelId: _messageChannelId,
       channelName: _messageChannelName,
       title: 'Orpheus',
-      body: 'Test notification works! 🔔',
+      body: l10n.testNotificationWorks,
       category: AndroidNotificationCategory.message,
       androidSmallIcon: _androidSmallIcon,
       groupKey: null,
@@ -762,7 +800,7 @@ class PluginNotificationLocalBackend implements NotificationLocalBackend {
   @override
   Future<void> initialize({required void Function(NotificationResponse response) onTap}) async {
     await _plugin.initialize(
-      const InitializationSettings(
+      settings: const InitializationSettings(
         android: AndroidInitializationSettings(NotificationService._androidSmallIcon),
       ),
       onDidReceiveNotificationResponse: onTap,
@@ -800,16 +838,16 @@ class PluginNotificationLocalBackend implements NotificationLocalBackend {
     );
 
     await _plugin.show(
-      id,
-      title,
-      body,
-      NotificationDetails(android: androidDetails),
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(android: androidDetails),
       payload: payload,
     );
   }
 
   @override
-  Future<void> cancel(int id) => _plugin.cancel(id);
+  Future<void> cancel(int id) => _plugin.cancel(id: id);
 
   @override
   Future<void> cancelAll() => _plugin.cancelAll();

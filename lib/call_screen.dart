@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:orpheus_project/main.dart';
@@ -14,12 +17,16 @@ import 'package:orpheus_project/services/sound_service.dart';
 import 'package:orpheus_project/services/webrtc_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/identity_directory_service.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
 import 'package:orpheus_project/widgets/call/background_painters.dart';
 import 'package:orpheus_project/widgets/call/control_panel.dart';
 import 'package:orpheus_project/widgets/badge_widget.dart';
+import 'package:orpheus_project/services/call_session_controller.dart';
 
-enum CallState { Dialing, Incoming, Connecting, Connected, Rejected, Failed, Reconnecting }
+// CallState и логика звонка (машина состояний, реконнект) вынесены в
+// CallSessionController (аудит ARCH-3 / вариант #1). Здесь остаётся UI-виджет,
+// который слушает контроллер и прокидывает в него события сети/WS/действия.
 
 class CallScreen extends StatefulWidget {
   final String contactPublicKey;
@@ -40,6 +47,17 @@ class CallScreen extends StatefulWidget {
   State<CallScreen> createState() => _CallScreenState();
 }
 
+/// Реализация [CallOps] поверх WebRTCService/сигналинга конкретного экрана.
+/// Контроллер знает только про этот узкий интерфейс; фактический ICE-restart
+/// делегируется виджету (где живут WebRTC, WS и ключ собеседника).
+class _WebRtcCallOps implements CallOps {
+  _WebRtcCallOps(this._state);
+  final _CallScreenState _state;
+
+  @override
+  Future<bool> restartIce() => _state._performIceRestart();
+}
+
 class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   // Сервисы
   final _webrtcService = WebRTCService();
@@ -52,24 +70,24 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   StreamSubscription? _wsStatusSubscription;
   StreamSubscription? _iceRestartSubscription;
 
-  // Состояние звонка
-  CallState _callState = CallState.Dialing;
+  // Состояние звонка — владелец логики: CallSessionController (вынос ARCH-3/#1).
+  // Виджет ЧИТАЕТ состояние через геттеры-делегаты и слушает контроллер (перерисовка).
+  late final CallSessionController _controller;
+  CallState get _callState => _controller.callState;
+  String get _debugStatus => _controller.debugStatus;
+  NetworkState get _networkState => _controller.networkState;
+  ConnectionStatus get _wsStatus => _controller.wsStatus;
+  bool get _isReconnecting => _controller.isReconnecting;
+  int get _reconnectAttempts => _controller.reconnectAttempts;
+  static const int _maxReconnectAttempts = CallSessionController.maxReconnectAttempts;
+
   String _displayName = "Anonymous";
-  String _debugStatus = "Init";
   String _durationText = "00:00";
   late final String _callId;
 
-  // Состояние сети
-  NetworkState _networkState = NetworkState.online;
-  ConnectionStatus _wsStatus = ConnectionStatus.Connected;
-  bool _isReconnecting = false;
-  int _reconnectAttempts = 0;
-  static const int _maxReconnectAttempts = 5;
-  
-  // Debounce для ICE restart (отправка и получение)
-  DateTime? _lastIceRestartTime;
+  // Debounce для ВХОДЯЩЕГО ICE restart (исходящий дебаунс живёт в контроллере).
   DateTime? _lastIceRestartReceivedTime;
-  static const Duration _iceRestartDebounce = Duration(seconds: 3);
+  static const Duration _iceRestartDebounce = CallSessionController.iceRestartDebounce;
 
   // Управление устройствами
   bool _isSpeakerOn = false;
@@ -78,6 +96,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   // Флаги жизненного цикла
   bool _isDisposed = false;
   bool _messagesSent = false;
+  // Липкий признак «звонок был соединён хоть раз». Решение о записи в историю
+  // (Outgoing/Incoming/Missed) раньше бралось по МГНОВЕННОМУ состоянию, но ответ
+  // с локскрина на cold-start соединяется поздно через ICE-restart: если отбой
+  // приходит в момент секундной переподготовки (Reconnecting), мгновенное
+  // Connected == false и запись пропадала (device-тест 13.07.2026). Липкий флаг
+  // переживает переподготовку.
+  bool _everConnected = false;
 
   // Логирование
   bool _showDebugLogs = false;
@@ -97,6 +122,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   final List<double> _audioWaveData = List.generate(20, (_) => 0.0);
   Timer? _waveTimer;
 
+  /// Watchdog: если после ОТВЕТА звонок не соединился — ICE-restart (отложенный
+  /// ответ на локе теряет ранние кандидаты звонящего). См. _scheduleAnswerConnectWatchdog.
+  Timer? _answerConnectWatchdog;
+  // Таймаут исходящего звонка: если абонент не ответил за отведённое время —
+  // авто-отбой, чтобы не звонить бесконечно (в т.ч. когда на той стороне нет
+  // аккаунта и она даже не может отклонить).
+  Timer? _outgoingRingWatchdog;
+
   @override
   void initState() {
     super.initState();
@@ -108,25 +141,34 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     CallNativeUiService.enableCallMode();
 
     _displayName = widget.contactPublicKey.substring(0, 8);
+    // Поднимаем микрофонный foreground-сервис из видимого CallScreen — тогда
+    // микрофон переживёт сворачивание приложения во время разговора (Android 14).
+    CallNativeUiService.startCallAudio(title: _displayName);
     _resolveContactName();
 
-    // Единый call_id для корреляции логов
+    // Единый call_id для корреляции логов.
+    // Исходящий (offer == null) -> УНИКАЛЬНЫЙ id на каждый звонок (иначе быстрые
+    // перезвоны в пределах 30с получали одинаковый id и CallKit не показывал
+    // новый ринг). Входящий -> берём id из offer.
     _callId = widget.callId
         ?? (widget.offer != null
             ? CallIdStorage.extractCallId(widget.offer!, widget.contactPublicKey)
-            : CallIdStorage.generateFallbackCallId(
-                cryptoService.publicKeyBase64 ?? widget.contactPublicKey,
+            : CallIdStorage.generateUniqueCallId(
+                cryptoService.addressBase64 ?? widget.contactPublicKey,
               ));
 
-    // Устанавливаем начальное состояние звонка
-    // autoAnswer=true означает что звонок уже принят через CallKit - сразу в режим Connecting
-    if (widget.autoAnswer && widget.offer != null) {
-      _callState = CallState.Connecting;
-    } else if (widget.offer != null) {
-      _callState = CallState.Incoming;
-    } else {
-      _callState = CallState.Dialing;
-    }
+    // Контроллер логики звонка (машина состояний + реконнект/ICE-restart).
+    // Начальное состояние: autoAnswer+offer -> Connecting (принят через CallKit),
+    // offer -> Incoming, иначе Dialing (исходящий).
+    _controller = CallSessionController(
+      ops: _WebRtcCallOps(this),
+      // Терминальный Failed (в т.ч. исчерпаны попытки реконнекта) -> авто-закрытие.
+      onFatal: () => Future.delayed(const Duration(seconds: 2), _safePop),
+      initialState: CallSessionController.initialStateFor(
+        autoAnswer: widget.autoAnswer,
+        hasOffer: widget.offer != null,
+      ),
+    );
 
     // 1. Запуск foreground service для звонка
     _startBackgroundMode();
@@ -156,86 +198,64 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
     // 5. Старт WebRTC
     _initCallSequence();
+
+    // Слушаем контроллер ПОСЛЕДНИМ: синхронные правки состояния выше (нач.
+    // значения сети/WS) не должны дёргать setState во время initState.
+    _controller.addListener(_onControllerChanged);
+
+    // BT-priming один раз, с задержкой — после того как отработает запрос
+    // микрофона (иначе диалоги стекаются).
+    Future.delayed(const Duration(seconds: 3), _maybePrimeBluetooth);
+  }
+
+  void _onControllerChanged() {
+    if (mounted) setState(() {});
   }
 
   /// Инициализация мониторинга сети для индикации и реконнекта
   void _initNetworkMonitoring() {
-    // Получаем начальное состояние
-    _networkState = NetworkMonitorService.instance.currentState;
-    _wsStatus = websocketService.currentStatus;
+    // Начальное состояние сети/WS проталкиваем в контроллер (слушатель ещё не
+    // подключён -> setState не дёргается).
+    _controller.updateNetworkState(NetworkMonitorService.instance.currentState);
+    _controller.updateWsStatus(websocketService.currentStatus);
 
-    // Подписка на изменения сети
+    // Подписка на изменения сети -> прокидываем в контроллер
     _networkSubscription = NetworkMonitorService.instance.onNetworkChange.listen((event) {
       if (_isDisposed) return;
-      
+
       _addLog("🌐 Network: ${event.type.name}");
       DebugLogger.info('CALL', 'Network event: ${event.type}');
 
-      setState(() {
-        _networkState = NetworkMonitorService.instance.currentState;
-      });
+      _controller.updateNetworkState(NetworkMonitorService.instance.currentState);
 
       if (event.type == NetworkChangeType.disconnected) {
-        // Потеря связи во время звонка
-        _handleNetworkLost();
-      } else if (event.type == NetworkChangeType.reconnected || 
+        // Потеря связи во время звонка -> режим реконнекта
+        _controller.onNetworkLost();
+      } else if (event.type == NetworkChangeType.reconnected ||
                  event.type == NetworkChangeType.networkSwitch) {
-        // Восстановление связи - нужен ICE restart
-        _handleNetworkRestored();
+        // Восстановление связи -> ICE restart
+        _controller.onNetworkRestored();
       }
     });
 
-    // Подписка на статус WebSocket
+    // Подписка на статус WebSocket. Контроллер сам инициирует ICE restart, если
+    // WS восстановился во время реконнекта.
     _wsStatusSubscription = websocketService.status.listen((status) {
       if (_isDisposed) return;
-      
       _addLog("📡 WS: ${status.name}");
-      
-      final previousStatus = _wsStatus;
-      setState(() {
-        _wsStatus = status;
-      });
-
-      // WebSocket восстановился - можно пробовать ICE restart
-      if (previousStatus != ConnectionStatus.Connected && 
-          status == ConnectionStatus.Connected &&
-          _isReconnecting) {
-        _attemptIceRestart();
-      }
+      _controller.updateWsStatus(status);
     });
-    
+
     // Подписка на автоматический ICE restart от WebRTC при Disconnected/Failed
     _iceRestartSubscription = _webrtcService.onIceRestartNeeded.listen((_) {
       if (_isDisposed) return;
-      
+
       // Только если звонок был активен
       if (_callState == CallState.Connected) {
         _addLog("🔄 ICE restart нужен (автоопределение)");
-        _handleNetworkLost(); // Переводим в режим реконнекта
+        _controller.onNetworkLost(); // Переводим в режим реконнекта
       }
     });
-  }
-
-  /// Обработка потери сети во время звонка
-  void _handleNetworkLost() {
-    if (_callState == CallState.Connected) {
-      _addLog("📵 Сеть потеряна во время звонка!");
-      _isReconnecting = true;
-      _reconnectAttempts = 0;
-      
-      setState(() {
-        _callState = CallState.Reconnecting;
-        _debugStatus = "Connection lost...";
-      });
-    }
-  }
-
-  /// Обработка восстановления сети
-  void _handleNetworkRestored() {
-    if (_isReconnecting || _callState == CallState.Reconnecting) {
-      _addLog("📶 Сеть восстановлена, попытка реконнекта...");
-      _attemptIceRestart();
-    }
   }
 
   /// Обработка входящего ICE restart от собеседника
@@ -250,13 +270,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _lastIceRestartReceivedTime = now;
     
     _addLog("🔄 Обработка входящего ICE restart...");
-    
-    if (mounted) {
-      setState(() {
-        _debugStatus = "ICE restart...";
-      });
-    }
-    
+
+    _controller.setDebugStatus("ICE restart...");
+
     try {
       final success = await _webrtcService.handleIceRestartOffer(
         offer: offer,
@@ -288,89 +304,89 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
-  /// Попытка ICE restart для восстановления соединения
-  Future<void> _attemptIceRestart() async {
-    // Debounce - не запускаем ICE restart чаще чем раз в 3 секунды
-    final now = DateTime.now();
-    if (_lastIceRestartTime != null && 
-        now.difference(_lastIceRestartTime!) < _iceRestartDebounce) {
-      _addLog("⏳ ICE restart debounced");
-      return;
-    }
-    _lastIceRestartTime = now;
-    
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
-      _addLog("❌ Max reconnect attempts exceeded");
-      _onError("Failed to restore connection");
-      return;
-    }
-
-    _reconnectAttempts++;
-    _addLog("🔄 ICE Restart попытка $_reconnectAttempts/$_maxReconnectAttempts");
-    
-    setState(() {
-      _debugStatus = "Reconnecting... ($_reconnectAttempts)";
-    });
-
-    try {
-      // Ждём, пока WebSocket восстановится
-      if (_wsStatus != ConnectionStatus.Connected) {
-        _addLog("⏳ Ожидание WebSocket...");
-        await Future.delayed(const Duration(seconds: 1));
-        if (_wsStatus != ConnectionStatus.Connected) {
-          // Ещё не подключились, подождём
-          Future.delayed(const Duration(seconds: 2), () {
-            if (!_isDisposed && _isReconnecting) {
-              _attemptIceRestart();
-            }
-          });
-          return;
-        }
-      }
-
-      // Выполняем ICE restart с типом 'ice-restart' вместо 'call-offer'
-      final success = await _webrtcService.restartIce(
-        onOfferCreated: (offer) {
-          _addLog("📤 ICE restart offer (ice-restart signal)");
-          // ВАЖНО: используем 'ice-restart' а не 'call-offer' чтобы получатель
-          // знал что это renegotiation, а не новый звонок
-          websocketService.sendSignalingMessage(
-            widget.contactPublicKey,
-            'ice-restart',
-            _attachCallId(offer),
-          );
-        },
-        onCandidateCreated: (cand) {
-          websocketService.sendSignalingMessage(
-            widget.contactPublicKey,
-            'ice-candidate',
-            _attachCallId(cand),
-          );
-        },
-      );
-
-      if (success) {
-        _addLog("✅ ICE restart инициирован");
-      } else {
-        _addLog("⚠️ ICE restart не удался, повтор...");
-        Future.delayed(const Duration(seconds: 3), () {
-          if (!_isDisposed && _isReconnecting) {
-            _attemptIceRestart();
-          }
-        });
-      }
-    } catch (e) {
-      _addLog("❌ Ошибка ICE restart: $e");
-      Future.delayed(const Duration(seconds: 3), () {
-        if (!_isDisposed && _isReconnecting) {
-          _attemptIceRestart();
-        }
-      });
-    }
+  /// Реализация CallOps.restartIce: выполняет WebRTC ICE-restart и шлёт сигнал
+  /// 'ice-restart' + кандидаты собеседнику. Дебаунс/лимит попыток/повторы —
+  /// теперь в CallSessionController, здесь только сама WebRTC-операция.
+  Future<bool> _performIceRestart() {
+    return _webrtcService.restartIce(
+      onOfferCreated: (offer) {
+        _addLog("📤 ICE restart offer (ice-restart signal)");
+        // ВАЖНО: 'ice-restart', а не 'call-offer', чтобы получатель знал что это
+        // renegotiation, а не новый звонок.
+        websocketService.sendSignalingMessage(
+          widget.contactPublicKey,
+          'ice-restart',
+          _attachCallId(offer),
+        );
+      },
+      onCandidateCreated: (cand) {
+        websocketService.sendSignalingMessage(
+          widget.contactPublicKey,
+          'ice-candidate',
+          _attachCallId(cand),
+        );
+      },
+    );
   }
 
   Future<void> _startBackgroundMode() async {
     await BackgroundCallService.startCallService();
+  }
+
+  static const String _btPrimeKey = 'bt_call_audio_primed';
+
+  /// Разовый поясняющий экран ПЕРЕД системным запросом BLUETOOTH_CONNECT.
+  /// Системный диалог «устройства поблизости» звучит пугающе (упоминает
+  /// «относительное положение»), хотя разрешение нужно ТОЛЬКО для вывода звука
+  /// звонка в BT-гарнитуру — без сканирования устройств и геолокации. Праймим один
+  /// раз, только когда микрофон уже выдан (чтобы диалоги не стекались).
+  Future<void> _maybePrimeBluetooth() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_btPrimeKey) ?? false) return;
+      if (await Permission.bluetoothConnect.isGranted) return;
+      if (!await Permission.microphone.isGranted) return;
+      if (!mounted) return;
+
+      final isRu = Localizations.localeOf(context).languageCode == 'ru';
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: Text(
+            isRu ? 'Звук звонка в Bluetooth' : 'Bluetooth call audio',
+            style: const TextStyle(color: Colors.white),
+          ),
+          content: Text(
+            isRu
+                ? 'Чтобы выводить звук звонка в вашу Bluetooth-гарнитуру, Android '
+                    'сейчас попросит разрешение «Устройства поблизости». Orpheus '
+                    'использует его ТОЛЬКО для подключения к гарнитуре — не сканирует '
+                    'устройства и не определяет ваше местоположение. Можно пропустить: '
+                    'звонки работают и через динамик/наушники.'
+                : 'To play call audio through your Bluetooth headset, Android will now '
+                    'ask for the "Nearby devices" permission. Orpheus uses it ONLY to '
+                    'connect to your headset — it does not scan for devices or track your '
+                    'location. You can skip this; calls still work via the speaker/earpiece.',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(isRu ? 'Пропустить' : 'Skip'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(isRu ? 'Продолжить' : 'Continue'),
+            ),
+          ],
+        ),
+      );
+      await prefs.setBool(_btPrimeKey, true);
+      if (proceed == true) {
+        await Permission.bluetoothConnect.request();
+      }
+    } catch (_) {}
   }
 
   Future<void> _resolveContactName() async {
@@ -403,7 +419,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       if (log.contains("Connected")) {
         if (_callState != CallState.Connected) _onConnected();
       } else if (log.contains("Failed")) {
-        if (!_isDisposed) _onError("Failed (ICE)");
+        if (_isDisposed) return;
+        // Терпение до ПЕРВОГО соединения: на cold-start ответ/кандидаты могли опоздать
+        // (свежий сокет ещё верифицировался). Не рвём звонок на первом ICE-Failed —
+        // собеседник сам инициирует ICE-restart (его watchdog 4с/6с), который теперь
+        // долетит на верифицированный сокет и соединит звонок. Backstop — 45с
+        // outgoing-watchdog. Рвём сразу только если звонок УЖЕ был соединён.
+        if (_everConnected) {
+          _onError("Failed (ICE)");
+        } else {
+          _addLog("ICE Failed до соединения — ждём ICE-restart собеседника (45с backstop)");
+        }
       }
 
       if (log.contains("REMOTE TRACK RECEIVED") || log.contains("Remote stream assigned")) {
@@ -421,15 +447,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       final data = signal['data'];
 
       if (type == 'call-answer') {
-        if (mounted) setState(() => _debugStatus = "Answer received");
+        _controller.setDebugStatus("Answer received");
         await _webrtcService.handleAnswer(data);
-        if (_callState != CallState.Connected && mounted) {
-          setState(() => _callState = CallState.Connecting);
+        if (_callState != CallState.Connected) {
+          _controller.onConnecting();
         }
       } else if (type == 'ice-restart-answer') {
         // Ответ на наш ICE restart
         _addLog("📥 ICE restart answer received");
-        if (mounted) setState(() => _debugStatus = "ICE restart answer");
+        _controller.setDebugStatus("ICE restart answer");
         await _webrtcService.handleAnswer(data);
       } else if (type == 'ice-restart') {
         // Входящий ICE restart от собеседника
@@ -438,8 +464,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       } else if (type == 'ice-candidate') {
         await _webrtcService.addCandidate(data);
       } else if (type == 'hang-up' || type == 'call-rejected') {
-        _addLog("📞 Получен $type - завершаем звонок");
-        _onRemoteHangup();
+        // Проверяем call_id: устаревший hang-up/reject от ПРЕДЫДУЩЕГО захода
+        // (например, тайаут-reject старого звонка, долетевший поздно по
+        // HTTP-fallback) не должен завершать ТЕКУЩИЙ соединённый звонок.
+        // Если call_id нет (старые клиенты) — обрабатываем как раньше.
+        final signalCallId = data is Map ? data['call_id'] : null;
+        if (signalCallId != null && signalCallId != _callId) {
+          _addLog("📞 Игнорирую устаревший $type (call_id=$signalCallId ≠ $_callId)");
+        } else {
+          _addLog("📞 Получен $type - завершаем звонок");
+          _onRemoteHangup();
+        }
       }
     });
 
@@ -455,19 +490,26 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       }
     }
 
-    if (_callState == CallState.Dialing) {
-      SoundService.instance.playDialingSound();
-      _startOutgoingCall();
-    } else {
-      // Входящий звонок
-      if (widget.autoAnswer) {
+    if (widget.autoAnswer) {
+      // Экран открыт, чтобы ОТВЕТИТЬ на входящий (CallKit/автоответ). Отвечающий
+      // НИКОГДА не должен инициировать свой offer.
+      if (widget.offer != null) {
         // Автоответ через CallKit — сразу принимаем без рингтона
         DebugLogger.info('CALL', '📞 AutoAnswer: принимаю звонок автоматически');
         _acceptCall();
       } else {
-        // Обычный входящий — показываем рингтон и ждём ответа
-        SoundService.instance.playIncomingRingtone();
+        // Offer потерян (напр. ответ с заблокированного экрана при cold-start, когда
+        // offer не доехал). НЕ создаём свой offer — это дало бы glare (обе стороны
+        // «звонящие»), и звонок бы не соединился. Обрываем чисто.
+        DebugLogger.error('CALL', '📞 AutoAnswer без offer — обрыв (защита от glare)');
+        _onError("Call Error");
       }
+    } else if (_callState == CallState.Dialing) {
+      SoundService.instance.playDialingSound();
+      _startOutgoingCall();
+    } else {
+      // Обычный входящий (не автоответ) — рингтон, ждём ручного ответа
+      SoundService.instance.playIncomingRingtone();
     }
   }
 
@@ -475,6 +517,31 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   Future<void> _startOutgoingCall() async {
     try {
+      // WS-guard (cold-start): call-answer и входящие ICE-кандидаты прилетают ТОЛЬКО
+      // по WS и только на PoP-verified сокет. Сразу после полного перезапуска свежий
+      // сокет ещё проходит PoP — если отправить offer раньше, ответ уйдёт в старую
+      // мёртвую сессию и звонок не соединится (device-тест 14.07.2026). Ждём Connected
+      // (=pop-ok) до ~4с; по таймауту звоним всё равно (offer идёт и по HTTP, а поздний
+      // ICE-restart от собеседника долетит, когда сокет верифицируется). Зеркало guard
+      // отвечающего (_waitForWebSocketConnected в main_callkit).
+      if (websocketService.currentStatus != ConnectionStatus.Connected) {
+        final st = websocketService.currentStatus;
+        // Форсим свежий реконнект только если сокет застрял (не рвём идущий PoP).
+        if (st == ConnectionStatus.Disconnected || st == ConnectionStatus.AuthFailed) {
+          final pubkey = cryptoService.addressBase64;
+          if (pubkey != null) websocketService.forceReconnectIfStale(pubkey);
+        }
+        final deadline = DateTime.now().add(const Duration(seconds: 4));
+        while (websocketService.currentStatus != ConnectionStatus.Connected &&
+            DateTime.now().isBefore(deadline)) {
+          if (!mounted || _isDisposed) return;
+          await Future.delayed(const Duration(milliseconds: 150));
+        }
+        // Экран мог быть закрыт (dispose) в последние 150мс ожидания — не поднимаем
+        // микрофон и не шлём offer к уже отменённому звонку.
+        if (!mounted || _isDisposed) return;
+        _addLog("WS перед offer: ${websocketService.currentStatus}");
+      }
       await _webrtcService.initiateCall(
         onOfferCreated: (offer) {
           _addLog("📤 call-offer");
@@ -493,15 +560,29 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           );
         },
       );
+      _startOutgoingRingWatchdog();
     } catch (e) {
       _addLog("ERROR: $e");
       _onError("Mic Error");
     }
   }
 
+  /// Авто-отбой исходящего звонка при отсутствии ответа. Иначе экран «Calling…»
+  /// звонит бесконечно, пока пользователь сам не сбросит — особенно когда на той
+  /// стороне нет аккаунта (после wipe) и она не может даже отклонить.
+  void _startOutgoingRingWatchdog() {
+    _outgoingRingWatchdog?.cancel();
+    _outgoingRingWatchdog = Timer(const Duration(seconds: 45), () {
+      if (!mounted || _isDisposed) return;
+      if (_callState == CallState.Connected) return;
+      _addLog("⏱️ Нет ответа 45с — авто-отбой исходящего");
+      _endCallButton();
+    });
+  }
+
   void _acceptCall() async {
     SoundService.instance.stopAllSounds();
-    if (mounted) setState(() => _callState = CallState.Connecting);
+    _controller.onConnecting();
 
     try {
       await _webrtcService.answerCall(
@@ -523,9 +604,36 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           );
         },
       );
+      _scheduleAnswerConnectWatchdog();
     } catch (e) {
       _onError("Connect Error");
     }
+  }
+
+  /// Watchdog после ОТВЕТА. Если за отведённое время звонок не соединился —
+  /// инициируем ICE-restart (пере-обмен кандидатами). Нужен для ОТЛОЖЕННОГО
+  /// ответа (звонок принят на заблокированном телефоне после ввода PIN): ранние
+  /// ICE-кандидаты звонящего теряются, пока приёмник ещё не готов/не подключён к
+  /// WS, и обычный обмен не связывается. Для нормального (быстрого) ответа звонок
+  /// успевает стать Connected раньше — тогда watchdog просто ничего не делает.
+  void _scheduleAnswerConnectWatchdog() {
+    _answerConnectWatchdog?.cancel();
+    // 4с: быстрый ответ (обычный звонок) успевает Connected раньше -> no-op; для
+    // отложенного ответа на локе (кандидаты потеряны) чем раньше ICE-restart, тем
+    // быстрее соединение. Меньше не берём — дать шанс штатному ICE на медленной сети.
+    _answerConnectWatchdog = Timer(const Duration(seconds: 4), () {
+      if (!mounted || _isDisposed) return;
+      if (_callState == CallState.Connected) return;
+      _addLog("⏱️ Нет коннекта через 4с после ответа — ICE-restart");
+      _performIceRestart();
+      // Вторая попытка, если и после restart не связалось.
+      _answerConnectWatchdog = Timer(const Duration(seconds: 6), () {
+        if (!mounted || _isDisposed) return;
+        if (_callState == CallState.Connected) return;
+        _addLog("⏱️ Всё ещё нет коннекта — повторный ICE-restart");
+        _performIceRestart();
+      });
+    });
   }
 
   void _endCallButton() async {
@@ -549,16 +657,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     // Небольшая задержка чтобы WebSocket успел отправить сообщение
     await Future.delayed(const Duration(milliseconds: 100));
 
-    // System messages to chat (English for consistent DB storage)
-    if (currentState == CallState.Connected) {
-      _saveCallStatusMessageLocally("Outgoing call", true);
-      _sendCallStatusMessageToContact("Incoming call");
-    } else if (currentState == CallState.Incoming) {
-      _saveCallStatusMessageLocally("Missed call", false);
-    } else if (currentState == CallState.Dialing) {
-      _saveCallStatusMessageLocally("Outgoing call", true);
-      _sendCallStatusMessageToContact("Missed call");
-    }
+    // Запись в историю — по роли (см. _writeCallLog). Направление больше не зависит
+    // от того, кто нажал отбой.
+    _writeCallLog();
 
     _safePop();
   }
@@ -569,32 +670,30 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     SoundService.instance.stopAllSounds();
     SoundService.instance.playDisconnectedSound();
 
-    final wasConnected = _callState == CallState.Connected;
-    if (mounted) setState(() => _callState = CallState.Rejected);
+    _controller.onRemoteHangup();
 
-    if (wasConnected) {
-      _saveCallStatusMessageLocally("Incoming call", false);
-      _sendCallStatusMessageToContact("Outgoing call");
-    }
-    // Non-connected calls: remote hung up / rejected — no local message needed,
-    // the remote side already saved and sent their status message to us.
+    // Пишем СВОЮ запись по роли независимо от того, что трубку положил собеседник —
+    // иначе инициатор, которому ответили и затем повесили с той стороны, получал
+    // «Входящий» вместо «Исходящего». Дедуп по call_id снимает возможные дубли.
+    _writeCallLog();
 
     Future.delayed(const Duration(seconds: 1), _safePop);
   }
 
   void _onConnected() {
+    _everConnected = true; // звонок состоялся — не сбрасывается при Reconnecting
+    _answerConnectWatchdog?.cancel();
+    _outgoingRingWatchdog?.cancel();
     SoundService.instance.stopAllSounds();
     SoundService.instance.playConnectedSound();
 
-    // Сброс флагов реконнекта при успешном соединении
     if (_isReconnecting) {
       _addLog("✅ Соединение восстановлено!");
-      _isReconnecting = false;
-      _reconnectAttempts = 0;
     }
+    // Контроллер: Connected + сброс флагов реконнекта (+ notify -> перерисовка).
+    _controller.onConnected();
 
     if (mounted) {
-      setState(() => _callState = CallState.Connected);
       _waveController.repeat();
       _attachRemoteStream();
     }
@@ -629,8 +728,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   void _onError(String msg) {
     if (_isDisposed) return;
-    if (mounted) setState(() => _callState = CallState.Failed);
-    Future.delayed(const Duration(seconds: 2), _safePop);
+    // Авто-закрытие теперь через controller.onError -> onFatal (единый путь для
+    // прямых ошибок И внутреннего max-attempts, регресс #2).
+    _controller.onError(msg);
   }
 
   void _safePop() {
@@ -668,11 +768,22 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   Future<void> _saveCallStatusMessageLocally(String messageText, bool isSentByMe) async {
     try {
+      // Дедуп по call_id: у одного звонка ОДНА запись в чате. И локальная запись,
+      // и копия от собеседника используют call_id как message_id, поэтому вторая
+      // (та, что придёт позже) отсекается. Раньше обе сохранялись -> задвоение
+      // записи о звонке (device-тест 13.07.2026; копия стала доходить после фиксов
+      // доставки, и дубль вылез).
+      if (_callId.isNotEmpty &&
+          await DatabaseService.instance
+              .messageExistsByMessageId(widget.contactPublicKey, _callId)) {
+        return;
+      }
       final callMessage = ChatMessage(
         text: messageText,
         isSentByMe: isSentByMe,
         status: MessageStatus.sent,
         isRead: true,
+        messageId: _callId.isNotEmpty ? _callId : null,
       );
       await DatabaseService.instance.addMessage(callMessage, widget.contactPublicKey);
       messageUpdateController.add(widget.contactPublicKey);
@@ -682,10 +793,42 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
+  /// Роль в звонке: инициатор (набрал) — без входящего offer И без автоответа.
+  /// autoAnswer учитывается для холодного старта с локскрина, где offer мог
+  /// потеряться (offer==null), но это ОТВЕЧАющий — иначе пропущенный входящий
+  /// мог бы пометиться исходящим.
+  bool get _isOutgoing => widget.offer == null && !widget.autoAnswer;
+
+  /// Единая запись звонка в историю. Направление берётся по РОЛИ (кто инициировал),
+  /// а НЕ по тому, кто повесил трубку: раньше _onRemoteHangup всегда писал «Входящий»,
+  /// и при ответе с локскрина инициатор получал «Входящий» вместо «Исходящий»
+  /// (device-тест 13.07.2026). Дедуп по call_id гарантирует одну запись на звонок.
+  void _writeCallLog() {
+    if (_everConnected) {
+      _saveCallStatusMessageLocally(
+          _isOutgoing ? "Outgoing call" : "Incoming call", _isOutgoing);
+    } else {
+      // Не соединились: «Пропущенный» с направлением по роли (исходящий/входящий).
+      _saveCallStatusMessageLocally("Missed call", _isOutgoing);
+    }
+    // Инициатор шлёт копию отвечающему (на случай, что тот не открыл экран, напр.
+    // убитое приложение) — с направлением ДЛЯ отвечающего; у него дедупится по call_id.
+    if (_isOutgoing) {
+      _sendCallStatusMessageToContact(_everConnected ? "Incoming call" : "Missed call");
+    }
+  }
+
   Future<void> _sendCallStatusMessageToContact(String messageText) async {
     try {
-      final payload = await cryptoService.encrypt(widget.contactPublicKey, messageText);
-      websocketService.sendChatMessage(widget.contactPublicKey, payload);
+      // Шифруем на X25519 enc-ключ контакта (contactPublicKey = адрес, им шифровать нельзя).
+      final encKey = await DatabaseService.instance.getContactEncryptionKey(widget.contactPublicKey) ??
+          await IdentityDirectoryService.instance.resolveEncKey(widget.contactPublicKey);
+      if (encKey == null || encKey.isEmpty) return;
+      final payload = await cryptoService.encrypt(encKey, messageText);
+      // message_id = call_id: у получателя эта копия дедупится против его локальной
+      // записи того же звонка (см. _saveCallStatusMessageLocally).
+      websocketService.sendChatMessage(widget.contactPublicKey, payload,
+          messageId: _callId.isNotEmpty ? _callId : null);
     } catch (e) {
       DebugLogger.error('CALL', 'Error sending message to peer: $e',
           context: _callContext());
@@ -792,10 +935,231 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     );
   }
 
+  /// Статус/таймер под именем контакта: таймер (Connected), спиннер реконнекта
+  /// (Reconnecting) или текст статуса (остальные состояния).
+  Widget _buildStatusSection() {
+    if (_callState == CallState.Connected) {
+      return Column(
+        children: [
+          Text(
+            _durationText,
+            style: const TextStyle(
+              color: Color(0xFF6AD394),
+              fontSize: 24,
+              fontFamily: "monospace",
+            ),
+          ),
+          // Показываем предупреждение при проблемах с сетью
+          if (_networkState == NetworkState.offline ||
+              _wsStatus != ConnectionStatus.Connected)
+            _buildConnectionWarning(),
+        ],
+      );
+    } else if (_callState == CallState.Reconnecting) {
+      return Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _getStatusText(),
+                style: const TextStyle(color: Colors.orange, fontSize: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _debugStatus,
+            style: const TextStyle(color: Colors.orange, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Attempt $_reconnectAttempts of $_maxReconnectAttempts",
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
+          ),
+        ],
+      );
+    } else {
+      return Column(
+        children: [
+          Text(
+            _getStatusText(),
+            style: const TextStyle(color: Colors.grey, fontSize: 18),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _debugStatus,
+            style: const TextStyle(color: Colors.red, fontSize: 10),
+          ),
+        ],
+      );
+    }
+  }
+
+  /// Аватар контакта с пульсирующими кольцами (кроме Failed/Rejected).
+  Widget _buildAvatar() {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        if (_callState != CallState.Failed && _callState != CallState.Rejected)
+          ...List.generate(3, (index) {
+            return ScaleTransition(
+              scale: Tween(begin: 1.0, end: 1.8 + index * 0.3).animate(
+                CurvedAnimation(
+                  parent: _pulseController,
+                  curve: Interval(index * 0.2, 1.0, curve: Curves.easeOut),
+                ),
+              ),
+              child: FadeTransition(
+                opacity: Tween(begin: 0.4 - index * 0.1, end: 0.0).animate(
+                  CurvedAnimation(
+                    parent: _pulseController,
+                    curve: Interval(index * 0.2, 1.0, curve: Curves.easeOut),
+                  ),
+                ),
+                child: Container(
+                  width: 150 + index * 30,
+                  height: 150 + index * 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFF6AD394).withOpacity(0.3 - index * 0.1),
+                      width: 2 - index * 0.3,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: _callState == CallState.Connected
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF6AD394).withOpacity(0.5),
+                      blurRadius: 30,
+                      spreadRadius: 5,
+                    ),
+                  ]
+                : [],
+          ),
+          child: CircleAvatar(
+            radius: 60,
+            backgroundColor: _callState == CallState.Connected
+                ? const Color(0xFF6AD394).withOpacity(0.2)
+                : Colors.grey[800],
+            child: Text(
+              _displayName.isNotEmpty ? _displayName[0].toUpperCase() : "?",
+              style: TextStyle(
+                fontSize: 40,
+                color: _callState == CallState.Connected
+                    ? const Color(0xFF6AD394)
+                    : Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Визуализатор звука (полоски), показывается только в состоянии Connected.
+  Widget _buildAudioVisualizer() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 30),
+        Container(
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: List.generate(_audioWaveData.length, (index) {
+              final height = _audioWaveData[index] * 50;
+              return Container(
+                width: 3,
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6AD394),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                height: height.clamp(5.0, 50.0),
+              );
+            }),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Оверлей debug-логов (только в debug, аудит UI-9).
+  Widget _buildDebugOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.85),
+        padding: const EdgeInsets.only(top: 50, bottom: 20, left: 10, right: 10),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "DEBUG LOGS",
+                  style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => setState(() => _showDebugLogs = false),
+                )
+              ],
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: _logScrollController,
+                itemCount: _debugLogs.length,
+                itemBuilder: (context, index) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(
+                      _debugLogs[index],
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     CallStateService.instance.setCallActive(false);
+    // Освобождаем активный call_id в межизолятном хранилище. Раньше clear() был
+    // мёртвым кодом -> активный id висел до TTL 15с, и быстрый повторный звонок
+    // (уже с НОВЫМ id) отклонялся trySetActiveCall как "занято, другой активен".
+    CallIdStorage.clear();
     CallNativeUiService.disableCallMode();
+    // Останавливаем микрофонный сервис — звонок завершён.
+    CallNativeUiService.stopCallAudio();
 
     // 0. Скрываем CallKit UI если он был показан
     FlutterCallkitIncoming.endAllCalls();
@@ -809,29 +1173,23 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     // 3. Отправляем HangUp если закрыли свайпом (не через кнопку)
     if (!_messagesSent) {
       final finalState = _callState;
-      print("📞 Dispose: отправка hang-up (state=$finalState)");
-      
-      if (finalState == CallState.Connected || finalState == CallState.Dialing) {
+      print("📞 Dispose: отправка hang-up (state=$finalState, everConnected=$_everConnected)");
+
+      // Сигнал завершения — по состоянию; запись в историю — по роли (_writeCallLog).
+      if (_everConnected || finalState == CallState.Dialing) {
         websocketService.sendSignalingMessage(
           widget.contactPublicKey,
           'hang-up',
           _attachCallId({}),
         );
-
-        if (finalState == CallState.Connected) {
-          _saveCallStatusMessageLocally("Outgoing call", true);
-          _sendCallStatusMessageToContact("Incoming call");
-        } else if (finalState == CallState.Dialing) {
-          _saveCallStatusMessageLocally("Outgoing call", true);
-          _sendCallStatusMessageToContact("Missed call");
-        }
+        _writeCallLog();
       } else if (finalState == CallState.Incoming) {
         websocketService.sendSignalingMessage(
           widget.contactPublicKey,
           'call-rejected',
           _attachCallId({}),
         );
-        _saveCallStatusMessageLocally("Missed call", false);
+        _writeCallLog();
       }
     }
 
@@ -844,12 +1202,17 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _stopwatch.stop();
     _durationTimer?.cancel();
     _waveTimer?.cancel();
+    _answerConnectWatchdog?.cancel();
+    _outgoingRingWatchdog?.cancel();
     _signalingSubscription?.cancel();
     _webrtcLogSubscription?.cancel();
     _networkSubscription?.cancel();
     _wsStatusSubscription?.cancel();
     _iceRestartSubscription?.cancel();
     SoundService.instance.stopAllSounds();
+
+    _controller.removeListener(_onControllerChanged);
+    _controller.dispose();
 
     _webrtcService.hangUp();
     super.dispose();
@@ -886,11 +1249,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
           SafeArea(
             child: Column(
               children: [
-                const SizedBox(height: 40),
+                const SizedBox(height: 24),
 
-                // Скрытая кнопка логов
+                // Скрытая кнопка логов — только в debug (аудит UI-9)
                 GestureDetector(
-                  onTap: () => setState(() => _showDebugLogs = !_showDebugLogs),
+                  onTap: kDebugMode
+                      ? () => setState(() => _showDebugLogs = !_showDebugLogs)
+                      : null,
                   child: const Text(
                     "Secure Call",
                     style: TextStyle(
@@ -919,164 +1284,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                 const SizedBox(height: 4),
 
                 // Статус или Таймер
-                if (_callState == CallState.Connected)
-                  Column(
-                    children: [
-                      Text(
-                        _durationText,
-                        style: const TextStyle(
-                          color: Color(0xFF6AD394),
-                          fontSize: 24,
-                          fontFamily: "monospace",
-                        ),
-                      ),
-                      // Показываем предупреждение при проблемах с сетью
-                      if (_networkState == NetworkState.offline || 
-                          _wsStatus != ConnectionStatus.Connected)
-                        _buildConnectionWarning(),
-                    ],
-                  )
-                else if (_callState == CallState.Reconnecting)
-                  Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _getStatusText(),
-                            style: const TextStyle(color: Colors.orange, fontSize: 18),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _debugStatus,
-                        style: const TextStyle(color: Colors.orange, fontSize: 12),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "Attempt $_reconnectAttempts of $_maxReconnectAttempts",
-                        style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
-                      ),
-                    ],
-                  )
-                else
-                  Column(
-                    children: [
-                      Text(
-                        _getStatusText(),
-                        style: const TextStyle(color: Colors.grey, fontSize: 18),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _debugStatus,
-                        style: const TextStyle(color: Colors.red, fontSize: 10),
-                      ),
-                    ],
-                  ),
+                _buildStatusSection(),
 
                 const Spacer(),
 
                 // Аватар с анимацией пульсации
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (_callState != CallState.Failed && _callState != CallState.Rejected)
-                      ...List.generate(3, (index) {
-                        return ScaleTransition(
-                          scale: Tween(begin: 1.0, end: 1.8 + index * 0.3).animate(
-                            CurvedAnimation(
-                              parent: _pulseController,
-                              curve: Interval(index * 0.2, 1.0, curve: Curves.easeOut),
-                            ),
-                          ),
-                          child: FadeTransition(
-                            opacity: Tween(begin: 0.4 - index * 0.1, end: 0.0).animate(
-                              CurvedAnimation(
-                                parent: _pulseController,
-                                curve: Interval(index * 0.2, 1.0, curve: Curves.easeOut),
-                              ),
-                            ),
-                            child: Container(
-                              width: 150 + index * 30,
-                              height: 150 + index * 30,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: const Color(0xFF6AD394).withOpacity(0.3 - index * 0.1),
-                                  width: 2 - index * 0.3,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: _callState == CallState.Connected
-                            ? [
-                                BoxShadow(
-                                  color: const Color(0xFF6AD394).withOpacity(0.5),
-                                  blurRadius: 30,
-                                  spreadRadius: 5,
-                                ),
-                              ]
-                            : [],
-                      ),
-                      child: CircleAvatar(
-                        radius: 60,
-                        backgroundColor: _callState == CallState.Connected
-                            ? const Color(0xFF6AD394).withOpacity(0.2)
-                            : Colors.grey[800],
-                        child: Text(
-                          _displayName.isNotEmpty ? _displayName[0].toUpperCase() : "?",
-                          style: TextStyle(
-                            fontSize: 40,
-                            color: _callState == CallState.Connected
-                                ? const Color(0xFF6AD394)
-                                : Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                _buildAvatar(),
 
                 // Визуализатор звука
-                if (_callState == CallState.Connected) ...[
-                  const SizedBox(height: 30),
-                  Container(
-                    height: 60,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: List.generate(_audioWaveData.length, (index) {
-                        final height = _audioWaveData[index] * 50;
-                        return Container(
-                          width: 3,
-                          margin: const EdgeInsets.symmetric(horizontal: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF6AD394),
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                          height: height.clamp(5.0, 50.0),
-                        );
-                      }),
-                    ),
-                  ),
-                ],
+                if (_callState == CallState.Connected) _buildAudioVisualizer(),
 
                 const Spacer(),
 
@@ -1091,55 +1307,16 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                   onAcceptCall: _acceptCall,
                 ),
 
-                const SizedBox(height: 60),
+                // Было 60 — на невысоких экранах / крупном шрифте подпись «Завершить»
+                // под кнопкой обрезалась снизу (device-тест). SafeArea уже даёт нижний
+                // отступ от системной навигации.
+                const SizedBox(height: 16),
               ],
             ),
           ),
 
-          // Оверлей с логами
-          if (_showDebugLogs)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withOpacity(0.85),
-                padding: const EdgeInsets.only(top: 50, bottom: 20, left: 10, right: 10),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "DEBUG LOGS",
-                          style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white),
-                          onPressed: () => setState(() => _showDebugLogs = false),
-                        )
-                      ],
-                    ),
-                    Expanded(
-                      child: ListView.builder(
-                        controller: _logScrollController,
-                        itemCount: _debugLogs.length,
-                        itemBuilder: (context, index) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2),
-                            child: Text(
-                              _debugLogs[index],
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          // Оверлей с логами — только в debug (в release не показываем, аудит UI-9)
+          if (kDebugMode && _showDebugLogs) _buildDebugOverlay(),
         ],
       ),
     );

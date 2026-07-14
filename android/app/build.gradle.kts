@@ -1,9 +1,20 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
+}
+
+// Настройки подписи release читаются из android/key.properties (в .gitignore,
+// НЕ коммитится). Если файла нет — release подписывается debug-ключом, чтобы
+// `flutter run --release` и CI работали без секретного keystore (аудит OPS-1).
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -25,24 +36,47 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.orpheus_project"
+        // Постоянный уникальный Application ID (reverse-DNS домена orpheus.click).
+        // ВАЖНО: после первого публичного релиза менять НЕЛЬЗЯ (аудит OPS-2).
+        // Внутренний namespace/package намеренно оставлен прежним — магазину не виден.
+        applicationId = "click.orpheus.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // minSdk 24: flutter_local_notifications 22 и local_auth 3 требуют API 24+
+        // (дропаем Android 6.0 / API 23). maxOf на случай, если Flutter поднимет floor.
+        minSdk = maxOf(24, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // Рекомендуется включить MultiDex, так как у вас Firebase + Notifications
+        // MultiDex включён (много плагинов: WebRTC, CallKit, уведомления, фоновый сервис)
         multiDexEnabled = true
+    }
+
+    signingConfigs {
+        create("release") {
+            // Заполняется только если есть key.properties (иначе конфиг пустой и
+            // не используется — см. buildTypes.release ниже).
+            val storeFilePath = keystoreProperties["storeFile"] as String?
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+                storePassword = keystoreProperties["storePassword"] as String?
+                keyAlias = keystoreProperties["keyAlias"] as String?
+                keyPassword = keystoreProperties["keyPassword"] as String?
+            }
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Если настроен key.properties — подписываем своим release-ключом,
+            // иначе остаёмся на debug-ключе, чтобы сборка работала без keystore
+            // (аудит OPS-1).
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
 
             // Настройки для релизной сборки (сжатие)
             isMinifyEnabled = true
@@ -58,8 +92,5 @@ flutter {
 
 dependencies {
     // !!! ВАЖНОЕ ИЗМЕНЕНИЕ 2: Библиотека Desugaring
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
-
-    implementation(platform("com.google.firebase:firebase-bom:34.6.0"))
-    implementation("com.google.firebase:firebase-analytics")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

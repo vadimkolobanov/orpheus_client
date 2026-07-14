@@ -31,8 +31,9 @@
 - AuthService - аутентификация, PIN, duress mode, auto-lock
 - CryptoService - E2E шифрование (X25519 + ChaCha20-Poly1305)
 - WebSocketService - real-time messaging с автореконнектом
-- DatabaseService - SQLite, версия 5, поддержка duress mode
-- NotificationService - FCM + local notifications
+- DatabaseService - SQLite (SQLCipher), версия 8, поддержка duress mode
+- NotificationService - локальные уведомления + CallKit (без Google/FCM)
+- PushConnectionService - постоянный foreground-сервис (specialUse) с WebSocket в отдельном isolate; заменяет FCM для доставки при убитом приложении
 - CallStateService - WebRTC звонки
 - AiAssistantService - Oracle of Orpheus AI
 - RoomsService - групповые чаты
@@ -70,8 +71,9 @@
 ## Локализация
 - Английский (EN) имеет приоритет
 - Русский (RU) как второй язык
-- Все строки UI через AppLocalizations
-- Файлы: lib/l10n/app_localizations_en.dart, app_localizations_ru.dart
+- Все строки UI через AppLocalizations (класс `L10n`, `L10n.of(context)`)
+- Редактируемые ИСТОЧНИКИ переводов: `lib/l10n/app_en.arb` (шаблон) и `lib/l10n/app_ru.arb`.
+  Файлы `lib/l10n/app_localizations*.dart` — СГЕНЕРИРОВАННЫЕ (`flutter gen-l10n`), править их вручную нельзя.
 
 ## Чеклист релиза (ОБЯЗАТЕЛЬНО)
 Перед каждым патчем или релизом агент ОБЯЗАН пройти все пункты по порядку.
@@ -121,7 +123,7 @@
 ## Особенности проекта
 - Oracle of Orpheus - AI ассистент, всегда первый в списке контактов
 - Notes Vault - зашифрованные заметки с tracking источника (manual/contact/room/oracle)
-- Desktop Link - в разработке, QR-based pairing (файлы в lib/services/)
+- Desktop Link - удалён из клиента (небезопасный протокол + мёртвый код); вернём безопасно после клиента+сервера, когда десктоп-приложение дозреет
 - Orpheus Room - официальная комната, скрытая до релиза
 - Single host: api.orpheus.click (legacy twc1 domain removed for privacy)
 - HTTP fallback для критичных сигналов (call-offer, call-answer, hang-up)

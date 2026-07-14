@@ -95,21 +95,32 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   }
 
   void _checkLockout() {
-    if (_auth.config.isLockedOut) {
-      _startLockoutTimer();
-    }
+    _ensureLockoutTimer();
   }
 
-  void _startLockoutTimer() {
-    _lockoutTimer?.cancel();
-    _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_auth.config.isLockedOut) {
-        timer.cancel();
+  /// Гарантирует, что таймер обратного отсчёта локаута жив, пока идёт блокировка,
+  /// и остановлен, когда она кончилась. Идемпотентно; вызывается ещё и из build на
+  /// каждом кадре — поэтому таймер САМ восстанавливается, даже если предыдущий
+  /// осиротел (LockScreen — оверлей в MaterialApp.builder; при пересборке/гонке
+  /// таймер мог не пережить, и отсчёт замирал на ~29с до перезапуска приложения).
+  void _ensureLockoutTimer() {
+    if (_auth.config.isLockedOut) {
+      if (_lockoutTimer?.isActive ?? false) return; // уже тикает
+      _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        if (!_auth.config.isLockedOut) {
+          timer.cancel();
+          _lockoutTimer = null;
+        }
         setState(() {});
-      } else {
-        setState(() {});
-      }
-    });
+      });
+    } else {
+      _lockoutTimer?.cancel();
+      _lockoutTimer = null;
+    }
   }
 
   Future<void> _tryBiometricAuth() async {
@@ -125,15 +136,16 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
       
       final didAuth = await _localAuth.authenticate(
         localizedReason: isRu ? 'Разблокируйте Orpheus' : 'Unlock Orpheus',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: true,
-        ),
+        persistAcrossBackgrounding: true,
+        biometricOnly: true,
       );
       
       if (didAuth && mounted) {
         // Биометрия успешна — проверяем основной PIN для разблокировки
         // (биометрия только как быстрый вход, не как duress)
+        // Синхронизируем модель: иначе requiresUnlock остаётся true при
+        // разблокированном UI (входящий звонок ушёл бы в pending).
+        _auth.markUnlockedExternally();
         widget.onUnlocked();
       }
     } catch (e) {
@@ -181,7 +193,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     // Небольшая задержка для UX
     await Future.delayed(const Duration(milliseconds: 300));
     
-    final result = _auth.verifyPin(_enteredPin);
+    final result = await _auth.verifyPin(_enteredPin);
     
     if (!mounted) return;
     
@@ -266,8 +278,8 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
       _isError = true;
       _enteredPin = '';
     });
-    
-    _startLockoutTimer();
+
+    _ensureLockoutTimer();
   }
 
   String _formatDuration(Duration duration) {
@@ -288,7 +300,10 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     final isRu = locale == 'ru';
     final isLockedOut = _auth.config.isLockedOut;
     final timeUntilUnlock = _auth.timeUntilUnlock;
-    
+    // Самовосстановление таймера отсчёта: если залочены, а таймер не тикает —
+    // (пере)запускаем. Побочки setState тут нет (таймер лишь создаётся).
+    _ensureLockoutTimer();
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
@@ -635,9 +650,10 @@ class _HoldToWipeDialogState extends State<_HoldToWipeDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = L10n.of(context);
-    final locale = LocaleService.instance.effectiveLocale.languageCode;
-    final isRu = locale == 'ru';
-    
+    // Язык берём из виджет-дерева (как и l10n выше), а не из глобального синглтона —
+    // в проде MaterialApp.locale резолвится из того же LocaleService.effectiveLocale.
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+
     return AlertDialog(
       backgroundColor: const Color(0xFF120505),
       shape: RoundedRectangleBorder(

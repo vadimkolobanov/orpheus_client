@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:orpheus_project/services/database_service.dart';
 import 'package:orpheus_project/models/contact_model.dart';
 import 'package:orpheus_project/models/chat_message_model.dart';
@@ -18,13 +17,15 @@ void main() {
       CREATE TABLE contacts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        publicKey TEXT NOT NULL UNIQUE
+        publicKey TEXT NOT NULL UNIQUE,
+        encryptionKey TEXT
       )
     ''');
     await db.execute('''
       CREATE TABLE messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        contactPublicKey TEXT NOT NULL, 
+        contactPublicKey TEXT NOT NULL,
+        messageId TEXT, 
         text TEXT NOT NULL,
         isSentByMe INTEGER NOT NULL,
         timestamp INTEGER NOT NULL,
@@ -62,6 +63,60 @@ void main() {
     test('Получение списка контактов', () async {
       final contacts = await DatabaseService.instance.getContacts();
       expect(contacts, isA<List<Contact>>());
+    });
+
+    test('updateMessageStatusByMessageId и deleteMessagesByMessageIds (LOGIC-2/3)', () async {
+      const key = 'CONTACT_XYZ';
+      await DatabaseService.instance.addMessage(
+        ChatMessage(
+          messageId: 'mid-1',
+          text: 'привет',
+          isSentByMe: true,
+          status: MessageStatus.sending,
+        ),
+        key,
+      );
+
+      // Статус обновляется по стабильному messageId (LOGIC-3).
+      await DatabaseService.instance
+          .updateMessageStatusByMessageId(key, 'mid-1', MessageStatus.failed);
+      var msgs = await DatabaseService.instance.getMessagesForContact(key);
+      expect(msgs.length, 1);
+      expect(msgs.first.messageId, 'mid-1');
+      expect(msgs.first.status, MessageStatus.failed);
+
+      // Удаление по messageId убирает сообщение (LOGIC-2).
+      final deleted =
+          await DatabaseService.instance.deleteMessagesByMessageIds(key, ['mid-1']);
+      expect(deleted, 1);
+      msgs = await DatabaseService.instance.getMessagesForContact(key);
+      expect(msgs, isEmpty);
+    });
+
+    test('getMessagesForContactAfter возвращает только новые сообщения (PERF-1)', () async {
+      const key = 'C_AFTER';
+      await DatabaseService.instance.addMessage(
+        ChatMessage(
+          messageId: 'a',
+          text: 'старое',
+          isSentByMe: false,
+          timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
+        ),
+        key,
+      );
+      await DatabaseService.instance.addMessage(
+        ChatMessage(
+          messageId: 'b',
+          text: 'новое',
+          isSentByMe: false,
+          timestamp: DateTime.fromMillisecondsSinceEpoch(2000),
+        ),
+        key,
+      );
+
+      final after =
+          await DatabaseService.instance.getMessagesForContactAfter(key, 1000);
+      expect(after.map((m) => m.text).toList(), ['новое']);
     });
 
     test('Добавление сообщения', () async {

@@ -290,6 +290,9 @@ class L10nEn extends L10n {
   String get incomingCall => 'Incoming call';
 
   @override
+  String get incomingEncryptedCall => 'Secure connection';
+
+  @override
   String get outgoingCall => 'Outgoing call';
 
   @override
@@ -361,6 +364,12 @@ class L10nEn extends L10n {
 
   @override
   String get add => 'Add';
+
+  @override
+  String get fillAllFields => 'Please fill in both fields';
+
+  @override
+  String get invalidPublicKey => 'Invalid key format';
 
   @override
   String get contactAdded => 'Contact added';
@@ -512,6 +521,13 @@ class L10nEn extends L10n {
   String get disconnected => 'Disconnected';
 
   @override
+  String get authFailedStatus => 'Authorization rejected';
+
+  @override
+  String get authFailedBanner =>
+      'Server rejected this device\'s authorization. Check for updates.';
+
+  @override
   String get reconnecting => 'Reconnecting...';
 
   @override
@@ -572,6 +588,35 @@ class L10nEn extends L10n {
   String get decline => 'Decline';
 
   @override
+  String get answerCall => 'Answer';
+
+  @override
+  String get microphone => 'Microphone';
+
+  @override
+  String get newMessage => 'New message';
+
+  @override
+  String get unknownCaller => 'Unknown';
+
+  @override
+  String get callBack => 'Call back';
+
+  @override
+  String get newMessageInChat => 'New message in chat';
+
+  @override
+  String get officialOrpheusReply => 'Official Orpheus reply';
+
+  @override
+  String get testNotificationWorks => 'Test notification works! 🔔';
+
+  @override
+  String fromCaller(String name) {
+    return 'From: $name';
+  }
+
+  @override
   String get supportChat => 'Support Chat';
 
   @override
@@ -584,7 +629,7 @@ class L10nEn extends L10n {
   String get cameraPermissionRequired => 'Camera permission required';
 
   @override
-  String get openSettings => 'Open Settings';
+  String get openSettings => 'Open settings';
 
   @override
   String get helpQuickStart => 'Quick Start';
@@ -679,7 +724,7 @@ class L10nEn extends L10n {
 
   @override
   String get helpRegionsBullet1 =>
-      'Your region is determined locally on your device and is never sent to Orpheus servers or any third party.';
+      'Your region is detected by a brief encrypted request to one of several independent geolocation services, which sees your IP address (as any website you visit does). Orpheus servers are not involved. If the check is unavailable, the region from your device settings is used.';
 
   @override
   String get helpRegionsBullet2 =>
@@ -721,7 +766,16 @@ class L10nEn extends L10n {
       'Add your first contact to start secure communication';
 
   @override
-  String get enterName => 'Enter contact name';
+  String get enterName => 'Enter name';
+
+  @override
+  String get unitHourShort => 'h';
+
+  @override
+  String get unitMinuteShort => 'm';
+
+  @override
+  String get unitSecondShort => 's';
 
   @override
   String get publicKey => 'Public key';
@@ -757,7 +811,10 @@ class L10nEn extends L10n {
   String get region => 'Region';
 
   @override
-  String get regionLocalOnly => 'Local only • never sent';
+  String get regionSourceIp => 'IP check • encrypted';
+
+  @override
+  String get regionSourceLocale => 'From device settings';
 
   @override
   String get mode => 'Mode';
@@ -830,6 +887,13 @@ class L10nEn extends L10n {
 
   @override
   String get inactivityLockDesc => 'Lock after no activity';
+
+  @override
+  String get callerNameOnLockTitle => 'Caller name on lockscreen';
+
+  @override
+  String get callerNameOnLockDesc =>
+      'Show the contact name on an incoming call while the phone is locked. Off by default for privacy.';
 
   @override
   String get inactivity30s => '30 seconds';
@@ -1199,6 +1263,10 @@ class L10nEn extends L10n {
   String get pointCameraAtQr => 'Point camera at QR code';
 
   @override
+  String get cameraAccessDenied =>
+      'No camera access. Allow camera access to scan the QR code.';
+
+  @override
   String get publicKeyAutoRecognized =>
       'Contact\'s public key will be recognized automatically';
 
@@ -1374,6 +1442,16 @@ class L10nEn extends L10n {
       'You will stop receiving messages from this room.';
 
   @override
+  String get deleteRoom => 'Delete room';
+
+  @override
+  String get deleteRoomTitle => 'Delete room?';
+
+  @override
+  String get deleteRoomDesc =>
+      'The room and all its messages will be permanently deleted for every member. This cannot be undone.';
+
+  @override
   String get create => 'Create';
 
   @override
@@ -1498,43 +1576,127 @@ class L10nEn extends L10n {
   String get notesFromOracle => 'From Oracle chat';
 
   @override
-  String get desktopLinkTitle => 'Desktop Link';
+  String get searchContactsHint => 'Search contacts';
 
   @override
-  String get desktopLinkScanQr => 'Scan QR Code';
+  String get noContactsFound => 'No contacts found';
 
   @override
-  String get desktopLinkReset => 'Reset Session';
+  String get contactInfo => 'Contact info';
 
   @override
-  String get desktopLinkStatusTitle => 'Connection Status';
+  String get verifyKeyHint =>
+      'Compare this key with your contact over a trusted channel to make sure no one is intercepting your messages.';
 
   @override
-  String get desktopLinkConnecting => 'Connecting...';
+  String get buyLicense => 'Buy license';
 
   @override
-  String get desktopLinkNotPaired =>
-      'Not paired. Scan a QR code from the desktop app.';
+  String get premiumPurchaseTitle => 'Buy Premium';
 
   @override
-  String get desktopLinkPaired => 'Paired successfully';
+  String get choosePlan => 'Choose a plan';
 
   @override
-  String get desktopLinkOtpLabel => 'One-Time Password';
+  String get choosePlanHint =>
+      'Pay with USDT (TRC-20). Your license activates automatically after payment.';
 
   @override
-  String get desktopLinkOtpHint =>
-      'Enter this code in the desktop app to confirm.';
+  String get plansLoadError =>
+      'Couldn\'t load plans. Check your connection and try again.';
 
   @override
-  String get desktopLinkExpired => 'Session expired. Please scan again.';
+  String get createInvoiceError =>
+      'Couldn\'t create the payment. Please try again.';
 
   @override
-  String get desktopLinkInvalidQr => 'Invalid QR code.';
+  String get paymentNetworkWarning =>
+      'Send ONLY USDT on the TRON network (TRC-20). Funds sent on any other network will be lost.';
 
   @override
-  String get desktopLinkNetworkError => 'Network error. Check your connection.';
+  String get walletAddress => 'Wallet address';
 
   @override
-  String get desktopLinkUnknownError => 'Something went wrong. Try again.';
+  String get amountToPay => 'Amount';
+
+  @override
+  String get scanQrHint =>
+      'Scan the QR code with your USDT (TRC-20) wallet, or copy the address below.';
+
+  @override
+  String get awaitingPayment => 'Awaiting payment…';
+
+  @override
+  String get awaitingPaymentHint =>
+      'This screen unlocks automatically once the payment is confirmed (about a minute).';
+
+  @override
+  String get iPaid => 'I\'ve paid';
+
+  @override
+  String get invoiceExpired => 'The payment time has expired.';
+
+  @override
+  String get newInvoice => 'New invoice';
+
+  @override
+  String get paymentConfirmedTitle => 'Payment confirmed';
+
+  @override
+  String get paymentConfirmedBody =>
+      'Your license is now active. Welcome to Orpheus.';
+
+  @override
+  String get editNote => 'Edit';
+
+  @override
+  String get rotateConfirm => 'Rotate';
+
+  @override
+  String get panicClearConfirm => 'Clear';
+
+  @override
+  String get leaveConfirm => 'Leave';
+
+  @override
+  String get deleteConfirm => 'Delete';
+
+  @override
+  String get serverSwitchTitle => 'Server';
+
+  @override
+  String get serverProduction => 'Production';
+
+  @override
+  String get serverTest => 'Test server';
+
+  @override
+  String serverCurrent(String host) {
+    return 'Current: $host';
+  }
+
+  @override
+  String get serverTestConnection => 'Test connection';
+
+  @override
+  String serverConnectionOk(int ms) {
+    return 'Reachable ($ms ms)';
+  }
+
+  @override
+  String get serverConnectionFailed => 'Server unreachable';
+
+  @override
+  String get serverApply => 'Apply & reconnect';
+
+  @override
+  String get serverResetProd => 'Reset to production';
+
+  @override
+  String get serverTestBanner => 'TEST SERVER';
+
+  @override
+  String serverSwitched(String host) {
+    return 'Switched to $host';
+  }
 }

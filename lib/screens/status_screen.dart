@@ -12,26 +12,25 @@ import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
 import 'package:orpheus_project/services/crypto_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/geo_service.dart';
 import 'package:orpheus_project/services/pending_actions_service.dart';
 import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_card.dart';
 import 'package:orpheus_project/widgets/app_scaffold.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 
 class StatusScreen extends StatefulWidget {
   const StatusScreen({
     super.key,
-    this.httpClient,
     this.databaseService,
+    this.geoService,
     this.messageUpdates,
     this.debugPublicKeyBase64,
     this.disableTimersForTesting = false,
   });
 
-  final http.Client? httpClient;
   final DatabaseService? databaseService;
+  final GeoService? geoService;
   final Stream<void>? messageUpdates;
   final String? debugPublicKeyBase64;
   final bool disableTimersForTesting;
@@ -43,7 +42,6 @@ class StatusScreen extends StatefulWidget {
 class _StatusScreenState extends State<StatusScreen>
     with TickerProviderStateMixin {
   late final AnimationController _pulseController;
-  http.Client? _ownedHttpClient;
   Timer? _timer;
   StreamSubscription<void>? _updatesSub;
 
@@ -53,9 +51,9 @@ class _StatusScreenState extends State<StatusScreen>
   int _reconnectCount = 0;
 
   // Регион
-  String _country = '...';
   String _countryCode = '--';
   bool _isTrafficControlRegion = false;
+  bool _regionFromIp = false;
 
   // Безопасность
   String _fingerprint = '...';
@@ -73,6 +71,8 @@ class _StatusScreenState extends State<StatusScreen>
   DatabaseService get _db =>
       widget.databaseService ?? DatabaseService.instance;
 
+  GeoService get _geo => widget.geoService ?? GeoService.instance;
+
   @override
   void initState() {
     super.initState();
@@ -82,7 +82,6 @@ class _StatusScreenState extends State<StatusScreen>
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
 
-    _ownedHttpClient = widget.httpClient == null ? http.Client() : null;
     _sessionStart = DateTime.now();
 
     _loadAll();
@@ -100,7 +99,6 @@ class _StatusScreenState extends State<StatusScreen>
   void dispose() {
     _timer?.cancel();
     _updatesSub?.cancel();
-    _ownedHttpClient?.close();
     _pulseController.dispose();
     super.dispose();
   }
@@ -120,31 +118,38 @@ class _StatusScreenState extends State<StatusScreen>
     if (mounted) setState(() {});
   }
 
-  Future<void> _loadRegion() async {
-    final client = widget.httpClient ?? _ownedHttpClient ?? http.Client();
+  Future<void> _loadRegion({bool forceRefresh = false}) async {
+    // Сначала мгновенно показываем регион из локали устройства, затем уточняем
+    // по IP через GeoService (цепочка сторонних HTTPS-сервисов, кэш 12ч,
+    // запрос только при открытии этого экрана — см. help). Старый plaintext
+    // ip-api.com (AUDIT_REPORT ARCH-6) сюда не возвращался: цепочка строго
+    // HTTPS и живёт в слое сервисов.
+    String localeCode = '--';
     try {
-      final resp = await client
-          .get(Uri.parse('http://ip-api.com/json/'))
-          .timeout(const Duration(seconds: 3));
-      if (resp.statusCode != 200) throw Exception();
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final country = (data['country'] as String?)?.trim() ?? 'Unknown';
-      final code =
-          ((data['countryCode'] as String?)?.trim() ?? '--').toUpperCase();
-
-      if (!mounted) return;
+      localeCode = (WidgetsBinding.instance.platformDispatcher.locale.countryCode ??
+              '--')
+          .toUpperCase();
+    } catch (_) {}
+    if (!mounted) return;
+    // Уже показанный IP-результат не сбрасываем на время refresh: иначе тап
+    // по карточке на ~секунды мигал бы локалью и временно понижал «Усиленный».
+    if (!_regionFromIp) {
       setState(() {
-        _country = country;
-        _countryCode = code;
-        _isTrafficControlRegion = _trafficControlCountries.contains(code);
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _country = 'Unknown';
-        _countryCode = '--';
+        _countryCode = localeCode;
+        _isTrafficControlRegion = _trafficControlCountries.contains(localeCode);
       });
     }
+
+    final ipCode = await _geo.getIpCountry(forceRefresh: forceRefresh);
+    if (!mounted || ipCode == null) return;
+    setState(() {
+      _countryCode = ipCode;
+      _regionFromIp = true;
+      // Union: VPN-выход не понижает «усиленный» режим у RU-локали, а IP=RU
+      // поднимает его при иностранной локали.
+      _isTrafficControlRegion = _trafficControlCountries.contains(localeCode) ||
+          _trafficControlCountries.contains(ipCode);
+    });
   }
 
   Future<void> _loadPending() async {
@@ -157,10 +162,10 @@ class _StatusScreenState extends State<StatusScreen>
 
   Future<void> _loadSecurity() async {
     try {
-      final crypto = CryptoService();
+      final crypto = CryptoService.instance;
       await crypto.init();
 
-      final pubKey = widget.debugPublicKeyBase64 ?? crypto.publicKeyBase64;
+      final pubKey = widget.debugPublicKeyBase64 ?? crypto.addressBase64;
       final regDate = crypto.registrationDate;
 
       if (!mounted) return;
@@ -217,15 +222,15 @@ class _StatusScreenState extends State<StatusScreen>
     } catch (_) {}
   }
 
-  String _formatUptime() {
+  String _formatUptime(L10n l10n) {
     if (_sessionStart == null) return '--';
     final diff = DateTime.now().difference(_sessionStart!);
     if (diff.inHours > 0) {
-      return '${diff.inHours}ч ${diff.inMinutes % 60}м';
+      return '${diff.inHours}${l10n.unitHourShort} ${diff.inMinutes % 60}${l10n.unitMinuteShort}';
     } else if (diff.inMinutes > 0) {
-      return '${diff.inMinutes}м';
+      return '${diff.inMinutes}${l10n.unitMinuteShort}';
     }
-    return '${diff.inSeconds}с';
+    return '${diff.inSeconds}${l10n.unitSecondShort}';
   }
 
   String _formatDate(DateTime? date) {
@@ -259,7 +264,7 @@ class _StatusScreenState extends State<StatusScreen>
           _ConnectionCard(
             pulse: _pulseController,
             pendingCount: _pendingCount,
-            uptime: _formatUptime(),
+            uptime: _formatUptime(l10n),
             l10n: l10n,
           ),
           const SizedBox(height: 12),
@@ -270,15 +275,19 @@ class _StatusScreenState extends State<StatusScreen>
           Row(
             children: [
               Expanded(
-                child: _InfoCard(
-                  title: l10n.region,
-                  icon: Icons.public_rounded,
-                  value: _countryCode,
-                  subtitle: _country,
-                  secondaryValue: l10n.regionLocalOnly,
-                  valueColor: _isTrafficControlRegion
-                      ? AppColors.warning
-                      : AppColors.textPrimary,
+                child: GestureDetector(
+                  onTap: () => _loadRegion(forceRefresh: true),
+                  child: _InfoCard(
+                    title: l10n.region,
+                    icon: Icons.public_rounded,
+                    value: _countryCode,
+                    subtitle: _regionFromIp
+                        ? l10n.regionSourceIp
+                        : l10n.regionSourceLocale,
+                    valueColor: _isTrafficControlRegion
+                        ? AppColors.warning
+                        : AppColors.textPrimary,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -322,8 +331,9 @@ class _StatusScreenState extends State<StatusScreen>
                   title: l10n.storage,
                   icon: Icons.storage_rounded,
                   value: '$_messagesCount',
-                  subtitle: l10n.messagesLabel,
-                  secondaryValue: '$_contactsCount ${l10n.contactsLabel}',
+                  subtitle: l10n.messagesCount(_messagesCount),
+                  secondaryValue:
+                      '$_contactsCount ${l10n.contactsCount(_contactsCount)}',
                 ),
               ),
               const SizedBox(width: 12),
@@ -393,10 +403,20 @@ class _ConnectionCard extends StatelessWidget {
               AppColors.warning,
               Icons.cloud_sync_rounded
             ),
+          ConnectionStatus.Authenticating => (
+              l10n.connecting,
+              AppColors.warning,
+              Icons.cloud_sync_rounded
+            ),
           ConnectionStatus.Disconnected => (
               l10n.disconnected,
               AppColors.danger,
               Icons.cloud_off_rounded
+            ),
+          ConnectionStatus.AuthFailed => (
+              l10n.authFailedStatus,
+              AppColors.danger,
+              Icons.gpp_bad_rounded
             ),
         };
 
@@ -518,11 +538,18 @@ class _InfoCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            value,
-            style: t.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: valueColor ?? AppColors.textPrimary,
+          // FittedBox: длинные значения (напр. RU «Усиленный») ужимаются в одну
+          // строку, а не переносятся уродливо в узкой (половина ряда) карточке.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: t.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: valueColor ?? AppColors.textPrimary,
+              ),
             ),
           ),
           const SizedBox(height: 4),

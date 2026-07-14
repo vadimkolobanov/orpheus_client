@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:orpheus_project/l10n/app_localizations.dart';
 import 'package:orpheus_project/main.dart';
+import 'package:orpheus_project/services/identity_directory_service.dart';
 import 'package:orpheus_project/services/locale_service.dart';
 import 'package:orpheus_project/theme/app_tokens.dart';
 import 'package:orpheus_project/widgets/app_button.dart';
@@ -118,15 +119,37 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     super.dispose();
   }
 
+  bool _isCreating = false;
+
   Future<void> _createNewAccount() async {
+    // Guard от двойного тапа: иначе повторный вызов перегенерировал бы ключи
+    // поверх только что созданных (аудит UI-5).
+    if (_isCreating) return;
     HapticFeedback.mediumImpact();
-    await cryptoService.generateNewKeys();
-    widget.onAuthComplete();
+    setState(() => _isCreating = true);
+    try {
+      await cryptoService.generateNewKeys();
+      // Публикуем подписанную связку адрес<->enc в directory (best-effort),
+      // чтобы контакты могли зарезолвить наш enc-ключ.
+      IdentityDirectoryService.instance.publishSelf();
+      widget.onAuthComplete();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${L10n.of(context).error}: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isCreating = false);
+    }
   }
 
   Future<void> _importAccount(String key) async {
     HapticFeedback.lightImpact();
     await cryptoService.importPrivateKey(key);
+    IdentityDirectoryService.instance.publishSelf();
     widget.onAuthComplete();
   }
 
@@ -332,14 +355,15 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               AppButton(
                                 label: l10n.createAccount,
                                 icon: Icons.add_circle_outline,
-                                onPressed: _createNewAccount,
+                                isLoading: _isCreating,
+                                onPressed: _isCreating ? null : _createNewAccount,
                               ),
                               const SizedBox(height: 10),
                               AppButton(
                                 label: l10n.restoreFromKey,
                                 variant: AppButtonVariant.secondary,
                                 icon: Icons.key,
-                                onPressed: _showImportDialog,
+                                onPressed: _isCreating ? null : _showImportDialog,
                               ),
                               const SizedBox(height: 16),
                               AppCard(

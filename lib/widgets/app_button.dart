@@ -51,7 +51,20 @@ class AppButton extends StatelessWidget {
                 Icon(icon, size: 18),
                 const SizedBox(width: 10),
               ],
-              Text(label),
+              // Flexible + FittedBox(scaleDown): длинные RU-подписи (напр. «Отмена»,
+              // «Добавить») в узких кнопках диалога ужимаются, а НЕ режутся в «...»
+              // (ellipsis раньше давал «Отм…»/«Доба…»). Если подпись влезает — масштаб 1:1.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    softWrap: false,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
             ],
           );
 

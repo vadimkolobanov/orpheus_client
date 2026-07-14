@@ -7,6 +7,11 @@ const Map<String, dynamic> rtcConfiguration = {
   'iceServers': [
     {
       'urls': [
+        // Несколько транспортов — WebRTC сам выберет живой на конкретной сети.
+        // Проверено с РФ-телефона (13.07.2026): UDP 3478 РАБОТАЕТ (STUN отвечает),
+        // а TCP 443 в этой РФ-сети режется DPI (SYN не доходит) — т.е. «UDP забанен»
+        // оказалось неверно, режется как раз TCP:443. UDP 3478 — основной путь для РФ,
+        // TCP:443 (маскировка под HTTPS) — фолбэк для сетей, где душат UDP.
         'turn:194.87.151.56:3478',
         'turn:194.87.151.56:3478?transport=tcp',
         'turn:194.87.151.56:443?transport=tcp',
@@ -52,11 +57,54 @@ class WebRTCService {
     }
   }
 
+  /// Диагностика ICE: логирует ВЫБРАННУЮ пару кандидатов (local/remote тип:
+  /// host/srflx/relay) + переданные байты и RTT. Так видно, идёт ли соединение
+  /// напрямую (host/srflx) или через TURN-relay, и течёт ли медиа.
+  Future<void> _logSelectedCandidatePair() async {
+    try {
+      final pc = _peerConnection;
+      if (pc == null) return;
+      final reports = await pc.getStats();
+      final byId = <String, StatsReport>{};
+      for (final r in reports) {
+        byId[r.id] = r;
+      }
+      StatsReport? pair;
+      for (final r in reports) {
+        if (r.type == 'candidate-pair' && r.values['state'] == 'succeeded') {
+          pair = r;
+          if (r.values['nominated'] == true) break;
+        }
+      }
+      if (pair == null) {
+        _log('🔎 [ICE-STATS] выбранная пара ещё не найдена');
+        return;
+      }
+      final v = pair.values;
+      final local = byId[v['localCandidateId']]?.values;
+      final remote = byId[v['remoteCandidateId']]?.values;
+      final lt = local?['candidateType'] ?? '?';
+      final rt = remote?['candidateType'] ?? '?';
+      final proto = local?['protocol'] ?? '?';
+      final sent = v['bytesSent'] ?? 0;
+      final recv = v['bytesReceived'] ?? 0;
+      final rtt = v['currentRoundTripTime'] ?? v['totalRoundTripTime'] ?? '?';
+      _log('🔎 [ICE-STATS] пара local=$lt/$proto remote=$rt | sent=$sent recv=$recv rtt=$rtt');
+      if (lt == 'relay' || rt == 'relay') {
+        _log('🔎 [ICE-STATS] соединение идёт через TURN-relay');
+      }
+    } catch (e) {
+      _log('🔎 [ICE-STATS] error: $e');
+    }
+  }
+
   Future<void> initialize() async {
     _log("--- [WebRTC] Requesting Permissions... ---");
+    // Только микрофон (обязателен). BLUETOOTH_CONNECT (звук в BT-гарнитуру) НЕ
+    // просим здесь: у него пугающий системный диалог «устройства поблизости».
+    // Он запрашивается отдельно, с поясняющим priming-экраном (см. call_screen).
     Map<Permission, PermissionStatus> statuses = await [
       Permission.microphone,
-      Permission.bluetoothConnect,
     ].request();
 
     if (statuses[Permission.microphone]!.isGranted) {
@@ -149,6 +197,16 @@ class WebRTCService {
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
         _log('--- [WebRTC] ICE Failed - restart needed ---');
         _iceRestartNeededController.add(null);
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        // Диагностика: какой тип пары реально выбран (host/srflx/relay) и течёт ли
+        // медиа. Помогает понять, упирается ли соединение в TURN-relay.
+        _logSelectedCandidatePair();
+        Future.delayed(const Duration(seconds: 3), () {
+          if (_peerConnection?.connectionState ==
+              RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+            _logSelectedCandidatePair();
+          }
+        });
       }
     };
     
@@ -206,12 +264,27 @@ class WebRTCService {
   Future<void> handleAnswer(Map<String, dynamic> answerData) async {
     if (_peerConnection == null) return;
 
-    final answer = RTCSessionDescription(answerData['sdp'], answerData['type']);
-    await _peerConnection!.setRemoteDescription(answer);
+    // Answer валиден ТОЛЬКО в состоянии have-local-offer. Звонок шлётся и по WS,
+    // и по HTTP-fallback → answer прилетает дважды; повторный вызов в состоянии
+    // stable кидал "wrong state: stable" (необработанное исключение, ломавшее
+    // первую негоциацию → звонок «обрывался» и переподключался). Гейт по
+    // signalingState дедупает дубликат.
+    final state = _peerConnection!.signalingState;
+    if (state != RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+      _log("⏭️ handleAnswer пропущен: signalingState=$state (дубликат/поздний answer)");
+      return;
+    }
 
-    // ВАЖНО: Устанавливаем флаг и применяем очередь
-    _remoteDescriptionSet = true;
-    await _drainCandidateQueue();
+    try {
+      final answer = RTCSessionDescription(answerData['sdp'], answerData['type']);
+      await _peerConnection!.setRemoteDescription(answer);
+
+      // ВАЖНО: Устанавливаем флаг и применяем очередь
+      _remoteDescriptionSet = true;
+      await _drainCandidateQueue();
+    } catch (e) {
+      _log("⚠️ handleAnswer error: $e");
+    }
   }
 
   // БЕЗОПАСНОЕ ДОБАВЛЕНИЕ КАНДИДАТА

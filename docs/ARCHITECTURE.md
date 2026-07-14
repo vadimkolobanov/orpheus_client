@@ -26,7 +26,6 @@
 - **Oracle of Orpheus (AI)**: `lib/services/ai_assistant_service.dart`, UI: `lib/screens/ai_assistant_chat_screen.dart`
 - **Notes Vault (заметки)**: `lib/screens/notes_vault_screen.dart`, модель: `lib/models/note_model.dart`
 - **Rooms (групповые чаты)**: `lib/services/rooms_service.dart`
-- **Desktop Link (QR‑pairing)**: `lib/services/desktop_link_service.dart`, сервер: `lib/services/desktop_link_server.dart`
 - **Очистка сообщений**: `lib/services/message_cleanup_service.dart`
 - **Настройки уведомлений**: `lib/services/notification_prefs_service.dart`
 
@@ -37,30 +36,38 @@
 
 ## Схема запуска (boot sequence)
 Текущая последовательность инициализации (см. `lib/main.dart`):
-1. Firebase + FCM background handler
-2. `NotificationService.init()`
-3. `CryptoService.init()` (ключи из secure storage)
-4. `AuthService.init()` (security config из secure storage)
-5. `PanicWipeService.init()` (наблюдение lifecycle)
-6. `NetworkMonitorService.init()` (события сети)
-7. `WebSocketService.connect(pubkey)` (если ключи есть)
-8. Подписка на WS‑стрим и обработка через `IncomingMessageHandler`
-9. `TelemetryService.init()` (полные логи в БД в режиме разработки)
+1. `NotificationService.init()` (локальные уведомления, без Google/FCM)
+2. `CryptoService.init()` (ключи из secure storage)
+3. `AuthService.init()` (security config из secure storage)
+4. `PanicWipeService.init()` (наблюдение lifecycle)
+5. `NetworkMonitorService.init()` (события сети)
+6. `WebSocketService.connect(pubkey)` (если ключи есть)
+7. Подписка на WS‑стрим и обработка через `IncomingMessageHandler`
+8. `TelemetryService.init()` (opt-in, по умолчанию выключена; санитизированные логи в БД)
+9. `PushConnectionService.start()` + heartbeat (постоянный foreground-сервис доставки
+   пушей при убитом приложении — замена FCM; только если есть ключи)
 
-## Телеметрия (режим разработки, временно)
-Цель: видеть **полный цикл жизни клиента** и события сервера в БД, включая звонки, WS/HTTP, FCM background.
+## Пуши без Google
+Вместо Firebase Cloud Messaging входящие при убитом приложении будит собственный постоянный
+foreground-сервис `PushConnectionService` (`flutter_background_service`, тип Android `specialUse`).
+Он держит WebSocket в отдельном isolate и показывает CallKit/уведомления через
+`handleBackgroundPush`. Пока UI жив (heartbeat свежий) — сервис молчит; при убитом приложении
+берёт доставку на себя. Дедуп пересечений — по `call_id`/`message_id`.
+
+## Телеметрия (opt-in, по умолчанию выключена)
+Цель: при явном включении пользователем (тумблер в экране отладочных логов) видеть **санитизированный** цикл жизни клиента в БД для диагностики. По умолчанию сбор и отправка выключены (`SEC-2`).
 
 ### Клиент
 - Источник событий: `DebugLogger` + перехват `debugPrint` и `FlutterError`.
 - Сервис: `lib/services/telemetry_service.dart`
-- Транспорт: HTTP батчи на `/api/logs/batch`
-- Контекст событий:
-  - `pubkey`, `peer_pubkey`, `call_id` (если есть)
-  - `app_version`, `device_info`, `os`
+- Транспорт: HTTP батчи на `/api/logs/batch` (только при включённой телеметрии)
+- Контекст событий (**санитизирован** — ключи/pubkey/device_info удаляются):
+  - `pubkey`, `call_id` (если есть)
+  - `app_version`, `os`
   - `network`, `app_state`
-- Фоновый FCM handler также отправляет базовую телеметрию (с `recipient_pubkey` из push data).
+- Фоновый FCM handler не отправляет ключи: телеметрия санитизирована (`recipient_pubkey` убран).
 
-### Сервер (репозиторий `D:\Programs\orpheus`)
+### Сервер (серверный репозиторий — вне этого репозитория)
 - Таблица: `telemetry_logs`
 - Логируются:
   - все HTTP запросы/ответы (middleware),
@@ -153,10 +160,11 @@ ICE кандидаты:
 - **Panic clear**: безвозвратное удаление всей истории комнаты
 - **Orpheus Room**: официальная комната (скрыта до релиза); `asOrpheus` флаг для официальных сообщений
 
-### 10) Desktop Link (QR‑сопряжение, в разработке)
-- **Сервисы**: `lib/services/desktop_link_service.dart`, `lib/services/desktop_link_server.dart`
-- **Протокол**: мобильное устройство сканирует QR от десктопа → подтверждает с OTP и session token → запускает локальный WebSocket-сервер → десктоп подключается по LAN
-- **Безопасность**: QR с `expires`, OTP (4 цифры), session token (32 random bytes), хранение сессии в `FlutterSecureStorage`
+### 10) Desktop Link — УДАЛЁН из клиента
+Паринг телефон↔десктоп по LAN удалён (недостижимый мёртвый код + небезопасный
+протокол: открытый HTTP-обмен токеном, WS-сервер без аутентификации, неиспользуемый
+`desktop_pubkey`). Вернём безопасно после доработки клиента и сервера, когда
+десктоп-приложение дозреет (история в git; план — в памяти проекта).
 
 ### 11) Автоблокировка и очистка сообщений
 - **Автоблокировка по неактивности**: `AuthService` отслеживает время последней активности; не блокируется во время активного звонка (`CallStateService`)

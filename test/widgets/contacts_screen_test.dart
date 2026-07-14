@@ -34,13 +34,15 @@ void main() {
             CREATE TABLE contacts (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               name TEXT NOT NULL,
-              publicKey TEXT NOT NULL UNIQUE
+              publicKey TEXT NOT NULL UNIQUE,
+              encryptionKey TEXT
             )
           ''');
           await db.execute('''
             CREATE TABLE messages (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              contactPublicKey TEXT NOT NULL, 
+              contactPublicKey TEXT NOT NULL,
+              messageId TEXT, 
               text TEXT NOT NULL,
               isSentByMe INTEGER NOT NULL,
               timestamp INTEGER NOT NULL,
@@ -129,6 +131,9 @@ void main() {
       await tester.runAsync(() async {
         await tester.pumpWidget(
           const MaterialApp(
+            localizationsDelegates: L10n.localizationsDelegates,
+            supportedLocales: L10n.supportedLocales,
+            locale: Locale('ru'),
             home: ContactsScreen(enableUnreadCounters: false),
           ),
         );
@@ -151,6 +156,9 @@ void main() {
 
         await tester.pumpWidget(
           const MaterialApp(
+            localizationsDelegates: L10n.localizationsDelegates,
+            supportedLocales: L10n.supportedLocales,
+            locale: Locale('ru'),
             home: ContactsScreen(enableUnreadCounters: false),
           ),
         );
