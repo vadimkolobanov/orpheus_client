@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart'; // Для compute
 import 'package:cryptography/cryptography.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
 import 'package:orpheus_project/services/secure_storage_options.dart';
 
 /// Модель идентичности (PoP): один 32-байтный root_seed -> через HKDF-SHA256
@@ -102,16 +103,30 @@ class CryptoService {
   @visibleForTesting
   Future<void> deriveFromSeedForTest(List<int> rootBytes) => _deriveFromSeed(rootBytes);
 
+  /// Загружает личность из secure storage.
+  ///
+  /// `false` означает РОВНО "ключей нет" (первый запуск/после wipe) — по нему
+  /// показывается экран приветствия. Сбой чтения сюда попасть не должен: осечку
+  /// Keystore ретраим, неустранимую ошибку пробрасываем. Иначе получалось, что
+  /// живому аккаунту предлагали создать новый поверх (баг на Samsung: seed на
+  /// месте, читается как null, дальше "восстановление" и мёртвая база).
   Future<bool> init() async {
-    final rootB64 = await _secureStorage.read(key: _rootSeedStoreKey);
-    final registrationDateStr = await _secureStorage.read(key: _registrationDateKey);
+    final rootB64 = await readSecureWithRetry(_secureStorage, _rootSeedStoreKey);
 
     if (rootB64 != null) {
       await _deriveFromSeed(base64.decode(rootB64));
+      // Дата регистрации читается только при живом seed: на первом запуске
+      // (seed = null) второй заведомо пустой read лишь удвоил бы задержку
+      // ретраев-на-null перед welcome-экраном.
+      final registrationDateStr =
+          await readSecureWithRetry(_secureStorage, _registrationDateKey);
       if (registrationDateStr != null) {
         _registrationDate = DateTime.tryParse(registrationDateStr);
       }
-      print("Identity loaded (Ed25519 address + X25519 enc from root seed).");
+      // DebugLogger, не print: print из tap-хендлеров выполняется в root-зоне,
+      // вне перехватчика Zone, и в файловый лог не попадает (из-за этого импорт
+      // аккаунта 17.07.2026 был невидим в логе и ложно опроверг диагноз).
+      DebugLogger.info('CRYPTO', 'Identity loaded (Ed25519 + X25519 from root seed)');
       return true;
     }
     return false;
@@ -132,7 +147,11 @@ class CryptoService {
     // подчистим возможные legacy-ключи старой модели
     await _secureStorage.delete(key: _legacyPrivateKeyStoreKey);
     await _secureStorage.delete(key: _legacyPublicKeyStoreKey);
-    print("New identity generated (root seed).");
+    // Свежий seed записан актуальным шифром — миграционный deleteAll ему не нужен
+    // никогда. Закрывает цикл «wipe стёр флаг -> аккаунт создан в той же сессии ->
+    // холодный старт сносит его миграцией» независимо от восстановления флага в wipe.
+    await markSecureStorageMigrated();
+    DebugLogger.info('CRYPTO', 'New identity generated (root seed)');
   }
 
   /// Импорт бэкапа. Формат бэкапа = base64(root_seed) (32 байта).
@@ -144,7 +163,8 @@ class CryptoService {
       }
       await _secureStorage.write(key: _rootSeedStoreKey, value: base64.encode(rootBytes));
       await _deriveFromSeed(rootBytes);
-      print("Identity imported from root seed.");
+      await markSecureStorageMigrated(); // см. generateNewKeys
+      DebugLogger.info('CRYPTO', 'Identity imported from root seed');
     } catch (e) {
       throw Exception("Invalid key format");
     }
@@ -173,7 +193,21 @@ class CryptoService {
     _cachedBundle = null;
     _registrationDate = null;
 
-    print("Account deleted.");
+    DebugLogger.info('CRYPTO', 'Account deleted');
+  }
+
+  /// Есть ли seed в ХРАНИЛИЩЕ (память не смотрим) — проверка полноты wipe.
+  ///
+  /// Одна попытка чтения без ретраев: после wipe null — ожидаемый ответ, и
+  /// доказать его «неложность» ретраями всё равно нельзя. Ошибка чтения = false:
+  /// проверка страховочная, блокировать wipe она не должна.
+  Future<bool> hasStoredIdentity() async {
+    try {
+      final rootB64 = await _secureStorage.read(key: _rootSeedStoreKey);
+      return rootB64 != null && rootB64.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
   // --- PoP + IDENTITY-BIND ПОДПИСИ (Ed25519) ---

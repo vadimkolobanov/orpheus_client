@@ -295,6 +295,12 @@ abstract class L10n {
   /// **'Downloading Update'**
   String get updateDownloading;
 
+  /// Snackbar shown after download when the system install prompt appears
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm the installation in the system dialog'**
+  String get updateConfirmInstall;
+
   /// Snackbar shown when no update is available
   ///
   /// In en, this message translates to:
@@ -312,6 +318,42 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'Could not install the update automatically. You can download it via browser.'**
   String get updateInstallErrorMessage;
+
+  /// Snackbar when the OS rejected the install because the update is signed with a different key than the installed app
+  ///
+  /// In en, this message translates to:
+  /// **'Update rejected: signature mismatch. Reinstall the app from scratch.'**
+  String get updateRejectedSignature;
+
+  /// Snackbar when the OS rejected the install for insufficient storage
+  ///
+  /// In en, this message translates to:
+  /// **'Update didn\'t install: not enough free space.'**
+  String get updateRejectedStorage;
+
+  /// Snackbar when the OS rejected the install because the APK failed to parse/verify
+  ///
+  /// In en, this message translates to:
+  /// **'Update didn\'t install: the downloaded file is corrupted.'**
+  String get updateRejectedCorrupt;
+
+  /// Snackbar when the OS rejected the install for another reason; code is the PackageInstaller status
+  ///
+  /// In en, this message translates to:
+  /// **'Update didn\'t install (code {code}). Details are in the debug log.'**
+  String updateRejectedGeneric(int code);
+
+  /// Snackbar shown on Samsung devices when the install was likely blocked by the Auto Blocker security feature
+  ///
+  /// In en, this message translates to:
+  /// **'Update didn\'t install. On Samsung it may be blocked by Auto Blocker: Settings > Security and privacy > Auto Blocker — turn it off, update, then turn it back on.'**
+  String get updateRejectedSamsungBlocker;
+
+  /// Hint shown inside the update dialog on Samsung devices about the Auto Blocker feature
+  ///
+  /// In en, this message translates to:
+  /// **'On Samsung you may need to temporarily turn off Auto Blocker to install (Settings > Security and privacy > Auto Blocker).'**
+  String get updateSamsungBlockerHint;
 
   /// Open in browser button
   ///
@@ -1507,6 +1549,24 @@ abstract class L10n {
   /// **'Rename'**
   String get rename;
 
+  /// Label for a room participant who is not in your contacts
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown'**
+  String get roomUnknownParticipant;
+
+  /// Dialog title to assign a local name to a room participant
+  ///
+  /// In en, this message translates to:
+  /// **'Set name'**
+  String get roomSetParticipantName;
+
+  /// Hint in the set-name dialog for a room participant
+  ///
+  /// In en, this message translates to:
+  /// **'Name for this participant'**
+  String get roomParticipantNameHint;
+
   /// Rename hint
   ///
   /// In en, this message translates to:
@@ -1554,6 +1614,12 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'IP check • encrypted'**
   String get regionSourceIp;
+
+  /// Region subtitle when the shown country is a cached IP result, not a fresh network response
+  ///
+  /// In en, this message translates to:
+  /// **'IP check • cached, tap to refresh'**
+  String get regionSourceIpCache;
 
   /// Region subtitle when country came from the device locale
   ///

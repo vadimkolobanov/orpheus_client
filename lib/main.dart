@@ -37,6 +37,7 @@ import 'package:orpheus_project/services/websocket_service.dart';
 import 'package:orpheus_project/services/telemetry_service.dart';
 import 'package:orpheus_project/services/call_id_storage.dart';
 import 'package:orpheus_project/services/push_connection_service.dart';
+import 'package:orpheus_project/services/room_unread_service.dart';
 import 'package:orpheus_project/services/secure_storage_options.dart';
 import 'package:orpheus_project/theme/app_theme.dart';
 import 'package:orpheus_project/welcome_screen.dart';
@@ -63,6 +64,12 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 // Потоки для обновлений UI
 final StreamController<String> messageUpdateController = StreamController.broadcast();
 final StreamController<Map<String, dynamic>> signalingStreamController = StreamController.broadcast();
+
+/// Fired when unread/badge state may have changed and the home tab badges should
+/// recompute — specifically the "marked as read" case (a new incoming message
+/// already fires messageUpdateController). Kept separate so it does not re-trigger
+/// chat_screen's per-contact listener (which would loop on read).
+final StreamController<void> badgeRefreshController = StreamController.broadcast();
 
 /// Буфер входящих сигналов звонка (ICE candidates и т.п.)
 final IncomingCallBuffer incomingCallBuffer = IncomingCallBuffer.instance;
@@ -418,6 +425,7 @@ void _listenForMessages() {
 
   websocketService.stream.listen((messageJson) async {
     try {
+      _handleRoomEventForBadge(messageJson);
       await handler.handleRawMessage(messageJson);
     } catch (e, stackTrace) {
       DebugLogger.error('MAIN', 'Message Handler Error: $e');
@@ -425,6 +433,31 @@ void _listenForMessages() {
       Sentry.captureException(e, stackTrace: stackTrace);
     }
   });
+}
+
+/// Rooms have no local storage and the strict mutual-add handler drops room frames
+/// (participants aren't necessarily contacts), so room "new message" signals are
+/// handled here: light the Rooms-tab badge and, when the app is backgrounded, show
+/// a neutral (anonymized) alert. The open room screen renders the message itself and
+/// is skipped via RoomUnreadService.activeRoomId.
+void _handleRoomEventForBadge(String messageJson) {
+  try {
+    final decoded = json.decode(messageJson);
+    if (decoded is! Map<String, dynamic>) return;
+    if (decoded['type'] != 'room-message') return;
+    final roomId = decoded['room_id']?.toString() ?? '';
+    if (roomId.isEmpty) return;
+    // Official Orpheus room is hidden until release and has its own notification path.
+    if (roomId == 'orpheus') return;
+    // Don't badge/alert on our own message echoed back by the server.
+    final senderKey = decoded['sender_pubkey']?.toString();
+    if (senderKey != null && senderKey == cryptoService.addressBase64) return;
+    RoomUnreadService.instance.noteIncoming(roomId);
+    // Neutral alert only when backgrounded; in foreground the tab badge is enough.
+    if (!isAppInForeground) {
+      NotificationService.showRoomMessageNotification();
+    }
+  } catch (_) {}
 }
 
 /// Слить конверты, сохранённые push-изолятом при убитом/фоновом приложении, через
@@ -672,10 +705,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
   }
 
-  /// Проверка лицензии: слушает license-status по WS + 10с таймаут-фолбэк на показ
+  /// Проверка лицензии: слушает license-status по WS + 25с таймаут-фолбэк на показ
   /// экрана лицензии. Идемпотентно (отменяет прошлую подписку). Вызывается при старте
   /// И после создания нового аккаунта — иначе после wipe+создания в одной сессии
   /// подписка уже отменена, а таймаут израсходован, и экран лицензии не показывается.
+  ///
+  /// Подписка живёт всю сессию (снимается только в dispose/пере-арме): статус приходит
+  /// на каждом подключении, и по нему же ловится отзыв лицензии.
   void _startLicenseCheck() {
     _licenseSubscription?.cancel();
     _licenseSubscription = websocketService.stream.listen((message) {
@@ -691,8 +727,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             _isCheckCompleted = true;
           });
           _persistLicense(_isLicensed); // обновляем кэш для офлайн-запусков
-          _licenseSubscription?.cancel();
-          _licenseSubscription = null;
+          // Подписку НЕ отменяем: сервер шлёт license-status на КАЖДОМ подключении
+          // (main.py, сразу после PoP), и это единственный канал, по которому можно
+          // узнать об отзыве лицензии в живой сессии — ровно как обещает комментарий
+          // к _loadCachedLicense. Раньше отмена после первого фрейма глушила и отзыв,
+          // и исправляющий active после реконнекта (в логе устройства: 24 пришло, 6
+          // обработано).
         } else if (data['type'] == 'payment-confirmed') {
           print("💳 Payment confirmed!");
           setState(() {
@@ -700,8 +740,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             _isCheckCompleted = true;
           });
           _persistLicense(true);
-          _licenseSubscription?.cancel();
-          _licenseSubscription = null;
         }
       } catch (_) {}
     });
@@ -710,9 +748,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // (не запирая офлайн-пользователя), онлайн-проверка идёт в фоне.
     _loadCachedLicense();
 
-    // Таймаут на проверку лицензии (10 секунд)
-    // Если за это время не получили ответ — показываем экран лицензии
-    Future.delayed(const Duration(seconds: 10), () {
+    // Таймаут на проверку лицензии. 25с, а не 10: license-status физически не может
+    // прийти раньше, чем сокет авторизуется, а бюджет подключения больше десяти секунд
+    // (watchdog коннекта 8с -> смена хоста -> реконнект с backoff, плюс до 12с на PoP —
+    // websocket_service). На устройстве таймаут срабатывал за 3 секунды ДО прихода
+    // active: лицензия есть, сервер её подтвердил, а пользователь видел экран лицензии.
+    Future.delayed(const Duration(seconds: 25), () {
       if (mounted && !_isCheckCompleted) {
         print("⚠️ License check timeout - showing license screen");
         setState(() {
@@ -734,12 +775,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         _isCheckCompleted = false;
         _isLicensed = false;
       });
+      // Пере-армить проверку лицензии — иначе после wipe экран лицензии не покажется
+      // (подписка была отменена, таймаут израсходован) и экран зависнет чёрным.
+      // СТРОГО до connect(): stream broadcast, и license-status, пришедший до
+      // подписки, потерялся бы (инвариант зафиксирован там же, где connect на старте).
+      _startLicenseCheck();
       if (cryptoService.addressBase64 != null) {
         websocketService.connect(cryptoService.addressBase64!);
       }
-      // Пере-армить проверку лицензии — иначе после wipe экран лицензии не покажется
-      // (подписка была отменена, таймаут израсходован) и экран зависнет чёрным.
-      _startLicenseCheck();
     });
   }
 

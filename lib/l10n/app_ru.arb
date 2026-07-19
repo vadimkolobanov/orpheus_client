@@ -56,11 +56,20 @@
   "updateDownloading": "Скачивание обновления",
   "@updateDownloading": {"description": "Update downloading progress dialog title"},
 
+  "updateConfirmInstall": "Подтвердите установку в системном окне",
+  "@updateConfirmInstall": {"description": "Snackbar shown after download when the system install prompt appears"},
+
   "updateUpToDate": "У вас последняя версия",
   "@updateUpToDate": {"description": "Snackbar shown when no update is available"},
 
   "updateInstallError": "Ошибка установки",
   "updateInstallErrorMessage": "Не удалось установить обновление автоматически. Можно скачать через браузер.",
+  "updateRejectedSignature": "Обновление отклонено: подпись не совпадает. Переустановите приложение начисто.",
+  "updateRejectedStorage": "Обновление не установилось: не хватает свободного места.",
+  "updateRejectedCorrupt": "Обновление не установилось: скачанный файл повреждён.",
+  "updateRejectedGeneric": "Обновление не установилось (код {code}). Подробности в отладочном логе.",
+  "updateRejectedSamsungBlocker": "Обновление не установилось. На Samsung установку может блокировать «Автоблокировка»: Настройки → Безопасность и конфиденциальность → Автоблокировка — временно отключите, обновитесь и включите обратно.",
+  "updateSamsungBlockerHint": "На Samsung для установки может потребоваться временно отключить «Автоблокировку» (Настройки → Безопасность и конфиденциальность → Автоблокировка).",
   "updateOpenBrowser": "Открыть в браузере",
 
   "exportAccount": "Экспорт аккаунта",
@@ -300,6 +309,9 @@
   "publicKey": "Публичный ключ",
   "pasteOrScanKey": "Ключ или QR",
   "rename": "Переименовать",
+  "roomUnknownParticipant": "Неизвестный",
+  "roomSetParticipantName": "Задать имя",
+  "roomParticipantNameHint": "Имя для этого участника",
   "enterNewName": "Введите новое имя",
   "deleteContactFull": "Удалить {name}?",
   "deleteContactFullWarning": "Контакт и вся история переписки будут удалены безвозвратно.",
@@ -309,6 +321,7 @@
   "queue": "Очередь",
   "region": "Регион",
   "regionSourceIp": "По IP • зашифровано",
+  "regionSourceIpCache": "По IP • кэш, тап — обновить",
   "regionSourceLocale": "Из настроек устройства",
   "mode": "Режим",
   "enhanced": "Усиленный",

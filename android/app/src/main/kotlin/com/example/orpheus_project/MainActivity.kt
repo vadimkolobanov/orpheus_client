@@ -26,6 +26,12 @@ class MainActivity: FlutterFragmentActivity() {
     private val CALL_CHANNEL = "com.example.orpheus_project/call"
     private val APK_INSTALLER_CHANNEL = "com.orpheus.apk_installer"
 
+    // Proximity wake lock на время разговора у уха: система гасит экран И отключает
+    // тач, пока датчик закрыт (как штатная звонилка). Заодно закрывает «ухо тапает
+    // по кнопкам» — тач мёртв у уха. Берётся из CallScreen при соединении/выключенном
+    // динамике, отпускается при динамике/завершении.
+    private var proximityWakeLock: PowerManager.WakeLock? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Флаги showWhenLocked/turnScreenOn применяются runtime только во время звонков
@@ -189,9 +195,56 @@ class MainActivity: FlutterFragmentActivity() {
                     stopCallAudioService()
                     result.success(true)
                 }
+                "acquireProximityLock" -> {
+                    acquireProximityLock()
+                    result.success(true)
+                }
+                "releaseProximityLock" -> {
+                    releaseProximityLock()
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /// Берём PROXIMITY_SCREEN_OFF_WAKE_LOCK: экран гаснет и тач отключается, пока
+    /// датчик закрыт (телефон у уха). Best-effort. На телефонах без датчика
+    /// isWakeLockLevelSupported == false -> тихо пропускаем. referenceCounted=false
+    /// + проверка isHeld делают повторный acquire идемпотентным.
+    private fun acquireProximityLock() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) return
+            var lock = proximityWakeLock
+            if (lock == null) {
+                lock = pm.newWakeLock(
+                    PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+                    "orpheus:call_proximity",
+                ).apply { setReferenceCounted(false) }
+                proximityWakeLock = lock
+            }
+            if (!lock.isHeld) lock.acquire()
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "acquireProximityLock failed: ${e.message}")
+        }
+    }
+
+    /// Отпускаем proximity-lock. RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY — чтобы экран не
+    /// мигнул, если отпускаем, пока датчик ещё закрыт.
+    private fun releaseProximityLock() {
+        try {
+            val lock = proximityWakeLock ?: return
+            if (lock.isHeld) lock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY)
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "releaseProximityLock failed: ${e.message}")
+        }
+    }
+
+    override fun onDestroy() {
+        // Страховка: не оставляем висящий proximity-lock при аварийном teardown.
+        releaseProximityLock()
+        super.onDestroy()
     }
 
     /// Поднимает микрофонный foreground-сервис на время звонка. Вызывается из
@@ -373,11 +426,20 @@ class MainActivity: FlutterFragmentActivity() {
                 }
             }
 
-            // Create a pending intent for the install result
-            val intent = Intent(Intent.ACTION_VIEW)
-            val pendingIntent = android.app.PendingIntent.getActivity(
-                this, sessionId, intent,
-                android.app.PendingIntent.FLAG_MUTABLE
+            // Status callback: the system delivers PackageInstaller.EXTRA_STATUS through
+            // this IntentSender. It MUST target an explicit BroadcastReceiver that, on
+            // STATUS_PENDING_USER_ACTION, launches the confirm dialog from EXTRA_INTENT.
+            // An empty ACTION_VIEW here resolves to nothing -> no dialog, session hangs.
+            // FLAG_MUTABLE is required on API 31+: the system fills in EXTRA_STATUS/
+            // EXTRA_INTENT via a fill-in Intent; an immutable PendingIntent would drop them.
+            val statusIntent = Intent(this, InstallStatusReceiver::class.java)
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                android.app.PendingIntent.FLAG_MUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = android.app.PendingIntent.getBroadcast(
+                this, sessionId, statusIntent, flags
             )
 
             session.commit(pendingIntent.intentSender)

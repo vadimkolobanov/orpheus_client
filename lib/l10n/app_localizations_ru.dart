@@ -137,6 +137,9 @@ class L10nRu extends L10n {
   String get updateDownloading => 'Скачивание обновления';
 
   @override
+  String get updateConfirmInstall => 'Подтвердите установку в системном окне';
+
+  @override
   String get updateUpToDate => 'У вас последняя версия';
 
   @override
@@ -145,6 +148,31 @@ class L10nRu extends L10n {
   @override
   String get updateInstallErrorMessage =>
       'Не удалось установить обновление автоматически. Можно скачать через браузер.';
+
+  @override
+  String get updateRejectedSignature =>
+      'Обновление отклонено: подпись не совпадает. Переустановите приложение начисто.';
+
+  @override
+  String get updateRejectedStorage =>
+      'Обновление не установилось: не хватает свободного места.';
+
+  @override
+  String get updateRejectedCorrupt =>
+      'Обновление не установилось: скачанный файл повреждён.';
+
+  @override
+  String updateRejectedGeneric(int code) {
+    return 'Обновление не установилось (код $code). Подробности в отладочном логе.';
+  }
+
+  @override
+  String get updateRejectedSamsungBlocker =>
+      'Обновление не установилось. На Samsung установку может блокировать «Автоблокировка»: Настройки → Безопасность и конфиденциальность → Автоблокировка — временно отключите, обновитесь и включите обратно.';
+
+  @override
+  String get updateSamsungBlockerHint =>
+      'На Samsung для установки может потребоваться временно отключить «Автоблокировку» (Настройки → Безопасность и конфиденциальность → Автоблокировка).';
 
   @override
   String get updateOpenBrowser => 'Открыть в браузере';
@@ -795,6 +823,15 @@ class L10nRu extends L10n {
   String get rename => 'Переименовать';
 
   @override
+  String get roomUnknownParticipant => 'Неизвестный';
+
+  @override
+  String get roomSetParticipantName => 'Задать имя';
+
+  @override
+  String get roomParticipantNameHint => 'Имя для этого участника';
+
+  @override
   String get enterNewName => 'Введите новое имя';
 
   @override
@@ -820,6 +857,9 @@ class L10nRu extends L10n {
 
   @override
   String get regionSourceIp => 'По IP • зашифровано';
+
+  @override
+  String get regionSourceIpCache => 'По IP • кэш, тап — обновить';
 
   @override
   String get regionSourceLocale => 'Из настроек устройства';

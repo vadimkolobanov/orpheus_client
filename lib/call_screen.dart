@@ -93,6 +93,11 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   bool _isSpeakerOn = false;
   bool _isMicMuted = false;
 
+  // Взят ли proximity wake lock (экран у уха тухнет + тач отключён). Держим только
+  // при СОЕДИНЁННОМ звонке и выключенном динамике. Флаг — чтобы acquire/release
+  // не дёргались лишний раз (нативная сторона тоже идемпотентна).
+  bool _proximityAcquired = false;
+
   // Флаги жизненного цикла
   bool _isDisposed = false;
   bool _messagesSent = false;
@@ -130,6 +135,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   // аккаунта и она даже не может отклонить).
   Timer? _outgoingRingWatchdog;
 
+  // Момент появления экрана — для тап-гарда входящего (см. _ignoreEarlyIncomingTap).
+  final DateTime _uiShownAt = DateTime.now();
+
   @override
   void initState() {
     super.initState();
@@ -143,7 +151,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _displayName = widget.contactPublicKey.substring(0, 8);
     // Поднимаем микрофонный foreground-сервис из видимого CallScreen — тогда
     // микрофон переживёт сворачивание приложения во время разговора (Android 14).
-    CallNativeUiService.startCallAudio(title: _displayName);
+    // Без имени: в этот момент _displayName — ещё префикс ключа, и он утекал в
+    // шторку (device-скрин 18.07: «e_wfH1Zr / In call»). Уведомление нейтральное,
+    // личность звонка показывает основное уведомление сервиса доставки.
+    CallNativeUiService.startCallAudio();
     _resolveContactName();
 
     // Единый call_id для корреляции логов.
@@ -446,6 +457,25 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       final type = signal['type'];
       final data = signal['data'];
 
+      // ЕДИНЫЙ гейт call_id для ВСЕХ типов сигналов. Раньше фильтр стоял только
+      // на hang-up/call-rejected: ice-restart МЁРТВОГО звонка лёг на PeerConnection
+      // СЛЕДУЮЩЕГО («Called in wrong state: have-local-offer») — экран навечно
+      // завис в «ICE restart…» (инцидент 19.07 11:48). Сигнал без call_id
+      // (старые клиенты) — легаси-поведение, пропускаем в обработку.
+      final signalCallId = data is Map ? data['call_id'] : null;
+      if (signalCallId != null && signalCallId != _callId) {
+        _addLog("📞 Игнорирую $type чужого звонка (call_id=$signalCallId ≠ $_callId)");
+        return;
+      }
+      // Гейт тирдауна: звонок уже хоронится (_messagesSent) — поздние answer/ICE
+      // не должны его воскрешать. В том же инциденте call-answer, пришедший через
+      // 0.5с после call-rejected, реанимировал WebRTC (state Rejected → Connecting).
+      // Повторные hang-up/rejected пропускаем: _onRemoteHangup сам идемпотентен.
+      if (_messagesSent && type != 'hang-up' && type != 'call-rejected') {
+        _addLog("📞 Игнорирую $type: звонок уже завершается");
+        return;
+      }
+
       if (type == 'call-answer') {
         _controller.setDebugStatus("Answer received");
         await _webrtcService.handleAnswer(data);
@@ -464,17 +494,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       } else if (type == 'ice-candidate') {
         await _webrtcService.addCandidate(data);
       } else if (type == 'hang-up' || type == 'call-rejected') {
-        // Проверяем call_id: устаревший hang-up/reject от ПРЕДЫДУЩЕГО захода
-        // (например, тайаут-reject старого звонка, долетевший поздно по
-        // HTTP-fallback) не должен завершать ТЕКУЩИЙ соединённый звонок.
-        // Если call_id нет (старые клиенты) — обрабатываем как раньше.
-        final signalCallId = data is Map ? data['call_id'] : null;
-        if (signalCallId != null && signalCallId != _callId) {
-          _addLog("📞 Игнорирую устаревший $type (call_id=$signalCallId ≠ $_callId)");
-        } else {
-          _addLog("📞 Получен $type - завершаем звонок");
-          _onRemoteHangup();
-        }
+        // Фильтр call_id уже пройден единым гейтом выше.
+        _addLog("📞 Получен $type - завершаем звонок");
+        _onRemoteHangup();
       }
     });
 
@@ -581,6 +603,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _acceptCall() async {
+    if (_ignoreEarlyIncomingTap()) return;
     SoundService.instance.stopAllSounds();
     _controller.onConnecting();
 
@@ -636,7 +659,23 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     });
   }
 
+  /// Тап-гард входящего: экран появляется мгновенно (в т.ч. под пальцем, когда
+  /// пользователь печатает в чате), и тап «в полёте» попадал в Принять/Отклонить —
+  /// device-лог 18.07: call-rejected через 330мс после показа, звонок сорван.
+  /// Только для состояния Incoming: авто-пути (autoAnswer — Connecting, watchdog
+  /// исходящего — Dialing) под гард не попадают.
+  bool _ignoreEarlyIncomingTap() {
+    if (_callState != CallState.Incoming) return false;
+    final elapsed = DateTime.now().difference(_uiShownAt);
+    if (elapsed < const Duration(milliseconds: 400)) {
+      _addLog("🛡️ Игнорирую тап по входящему в первые 400мс (${elapsed.inMilliseconds}мс)");
+      return true;
+    }
+    return false;
+  }
+
   void _endCallButton() async {
+    if (_ignoreEarlyIncomingTap()) return;
     if (_messagesSent) return;  // Предотвращаем повторные вызовы
     _messagesSent = true;
 
@@ -686,6 +725,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _outgoingRingWatchdog?.cancel();
     SoundService.instance.stopAllSounds();
     SoundService.instance.playConnectedSound();
+
+    // Звонок соединён — если разговор у уха (динамик выключен), гасим экран у уха.
+    _syncProximityLock();
 
     if (_isReconnecting) {
       _addLog("✅ Соединение восстановлено!");
@@ -745,6 +787,24 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void _toggleSpeaker() {
     setState(() => _isSpeakerOn = !_isSpeakerOn);
     Helper.setSpeakerphoneOn(_isSpeakerOn);
+    // Динамик = телефон в руке у лица: proximity-гашение экрана тут мешает,
+    // поэтому на динамике отпускаем, а при возврате к уху (и живом звонке) берём.
+    _syncProximityLock();
+  }
+
+  /// Держим proximity wake lock ТОЛЬКО когда звонок соединён и динамик выключен
+  /// (телефон у уха). Идемпотентно по [_proximityAcquired]. Наушник/BT спец-логики
+  /// не требуют: датчик сработает лишь при физическом закрытии (телефон в руке =
+  /// датчик открыт = экран горит).
+  void _syncProximityLock() {
+    final wantLock = _everConnected && !_isSpeakerOn && !_isDisposed;
+    if (wantLock && !_proximityAcquired) {
+      _proximityAcquired = true;
+      CallNativeUiService.acquireProximityLock();
+    } else if (!wantLock && _proximityAcquired) {
+      _proximityAcquired = false;
+      CallNativeUiService.releaseProximityLock();
+    }
   }
 
   void _toggleMic() {
@@ -778,11 +838,15 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               .messageExistsByMessageId(widget.contactPublicKey, _callId)) {
         return;
       }
+      // Входящий недозвон — непрочитанное событие: даёт метку на таб-баре и
+      // «пилюлю» в списке контактов, очищается при открытии чата. Свои исходящие
+      // и состоявшиеся звонки прочитаны сразу (для тебя это не «новое»).
+      final isMissedIncoming = !isSentByMe && messageText == "Missed call";
       final callMessage = ChatMessage(
         text: messageText,
         isSentByMe: isSentByMe,
         status: MessageStatus.sent,
-        isRead: true,
+        isRead: !isMissedIncoming,
         messageId: _callId.isNotEmpty ? _callId : null,
       );
       await DatabaseService.instance.addMessage(callMessage, widget.contactPublicKey);
@@ -1157,6 +1221,10 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     // мёртвым кодом -> активный id висел до TTL 15с, и быстрый повторный звонок
     // (уже с НОВЫМ id) отклонялся trySetActiveCall как "занято, другой активен".
     CallIdStorage.clear();
+    // Отпускаем proximity-lock БЕЗУСЛОВНО (звонок завершён) — не оставляем экран
+    // гаснущим у уха после звонка. _proximityAcquired сбрасываем до _isDisposed.
+    _proximityAcquired = false;
+    CallNativeUiService.releaseProximityLock();
     CallNativeUiService.disableCallMode();
     // Останавливаем микрофонный сервис — звонок завершён.
     CallNativeUiService.stopCallAudio();

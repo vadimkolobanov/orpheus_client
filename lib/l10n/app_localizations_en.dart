@@ -133,6 +133,10 @@ class L10nEn extends L10n {
   String get updateDownloading => 'Downloading Update';
 
   @override
+  String get updateConfirmInstall =>
+      'Confirm the installation in the system dialog';
+
+  @override
   String get updateUpToDate => 'You have the latest version';
 
   @override
@@ -141,6 +145,31 @@ class L10nEn extends L10n {
   @override
   String get updateInstallErrorMessage =>
       'Could not install the update automatically. You can download it via browser.';
+
+  @override
+  String get updateRejectedSignature =>
+      'Update rejected: signature mismatch. Reinstall the app from scratch.';
+
+  @override
+  String get updateRejectedStorage =>
+      'Update didn\'t install: not enough free space.';
+
+  @override
+  String get updateRejectedCorrupt =>
+      'Update didn\'t install: the downloaded file is corrupted.';
+
+  @override
+  String updateRejectedGeneric(int code) {
+    return 'Update didn\'t install (code $code). Details are in the debug log.';
+  }
+
+  @override
+  String get updateRejectedSamsungBlocker =>
+      'Update didn\'t install. On Samsung it may be blocked by Auto Blocker: Settings > Security and privacy > Auto Blocker — turn it off, update, then turn it back on.';
+
+  @override
+  String get updateSamsungBlockerHint =>
+      'On Samsung you may need to temporarily turn off Auto Blocker to install (Settings > Security and privacy > Auto Blocker).';
 
   @override
   String get updateOpenBrowser => 'Open in Browser';
@@ -787,6 +816,15 @@ class L10nEn extends L10n {
   String get rename => 'Rename';
 
   @override
+  String get roomUnknownParticipant => 'Unknown';
+
+  @override
+  String get roomSetParticipantName => 'Set name';
+
+  @override
+  String get roomParticipantNameHint => 'Name for this participant';
+
+  @override
   String get enterNewName => 'Enter new name';
 
   @override
@@ -812,6 +850,9 @@ class L10nEn extends L10n {
 
   @override
   String get regionSourceIp => 'IP check • encrypted';
+
+  @override
+  String get regionSourceIpCache => 'IP check • cached, tap to refresh';
 
   @override
   String get regionSourceLocale => 'From device settings';
