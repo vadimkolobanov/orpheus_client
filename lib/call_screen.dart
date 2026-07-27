@@ -890,8 +890,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       if (encKey == null || encKey.isEmpty) return;
       final payload = await cryptoService.encrypt(encKey, messageText);
       // message_id = call_id: у получателя эта копия дедупится против его локальной
-      // записи того же звонка (см. _saveCallStatusMessageLocally).
-      websocketService.sendChatMessage(widget.contactPublicKey, payload,
+      // записи того же звонка (см. _saveCallStatusMessageLocally). Уходит через
+      // outbox: при пустом _callId id сгенерируется в очереди.
+      await websocketService.sendChatMessage(widget.contactPublicKey, payload,
           messageId: _callId.isNotEmpty ? _callId : null);
     } catch (e) {
       DebugLogger.error('CALL', 'Error sending message to peer: $e',
@@ -1239,7 +1240,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     incomingCallBuffer.takeAll(widget.contactPublicKey);
 
     // 3. Отправляем HangUp если закрыли свайпом (не через кнопку)
-    if (!_messagesSent) {
+    //
+    // Гард по личности: после wipe этот dispose приходит уже ПОСЛЕ стирания
+    // (performWipe зовёт onWipeCompleted последним шагом, а тот снимает маршруты).
+    // Без гарда _writeCallLog пересоздал бы SQLCipher-базу с НОВЫМ ключом в
+    // Keystore и записью «с кем и когда был звонок», а hang-up ушёл бы по
+    // HTTP-fallback от стёртой личности. Нет личности — некому звонить и нечей
+    // журнал вести.
+    if (!_messagesSent && cryptoService.addressBase64 != null) {
       final finalState = _callState;
       print("📞 Dispose: отправка hang-up (state=$finalState, everConnected=$_everConnected)");
 

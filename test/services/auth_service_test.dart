@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orpheus_project/models/message_retention_policy.dart';
 import 'package:orpheus_project/models/security_config.dart';
 import 'package:orpheus_project/services/auth_service.dart';
 import 'package:orpheus_project/services/database_service.dart';
+import 'package:orpheus_project/services/debug_logger_service.dart';
 
 class _InMemoryAuthStorage implements AuthSecureStorage {
   final Map<String, String> _kv = {};
@@ -109,6 +111,116 @@ void main() {
       expect(r, equals(PinVerifyResult.duress));
       expect(auth.isUnlocked, isTrue);
       expect(auth.isDuressMode, isTrue);
+    });
+
+    test('duress: сеттеры настроек безопасности не меняют реальный конфиг',
+        () async {
+      final storage = _InMemoryAuthStorage();
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      await auth.setPin('123456');
+      await auth.setAutoWipe(true, attempts: 7);
+      await auth.setPanicGestureEnabled(true);
+      await auth.setBiometricEnabled(true);
+      await auth.setInactivityLockSeconds(30);
+      await auth.setMessageRetention(MessageRetentionPolicy.week);
+
+      auth.debugSetDuressMode(true);
+      addTearDown(() => auth.debugSetDuressMode(false));
+
+      // Наблюдатель без основного PIN пытается снять защиты жертвы.
+      await auth.setAutoWipe(false);
+      await auth.setPanicGestureEnabled(false);
+      await auth.setBiometricEnabled(false);
+      await auth.setInactivityLockSeconds(600);
+      await auth.setMessageRetention(MessageRetentionPolicy.all);
+
+      expect(auth.config.isAutoWipeEnabled, isTrue);
+      expect(auth.config.autoWipeAttempts, equals(7));
+      expect(auth.config.isPanicGestureEnabled, isTrue);
+      expect(auth.config.isBiometricEnabled, isTrue);
+      expect(auth.config.inactivityLockSeconds, equals(30));
+      expect(auth.config.messageRetention, equals(MessageRetentionPolicy.week));
+
+      // И то же самое в persisted-конфиге, а не только в памяти.
+      final reloaded = AuthService.createForTesting(secureStorage: storage);
+      await reloaded.init();
+      expect(reloaded.config.isAutoWipeEnabled, isTrue);
+      expect(reloaded.config.inactivityLockSeconds, equals(30));
+    });
+
+    test('вне duress те же сеттеры работают (иначе тест выше был бы пустым)',
+        () async {
+      final storage = _InMemoryAuthStorage();
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      await auth.setPin('123456');
+      await auth.setAutoWipe(true, attempts: 7);
+      await auth.setInactivityLockSeconds(30);
+
+      await auth.setAutoWipe(false);
+      await auth.setInactivityLockSeconds(600);
+
+      expect(auth.config.isAutoWipeEnabled, isFalse);
+      expect(auth.config.inactivityLockSeconds, equals(600));
+    });
+
+    test('confirmMainPin внутри duress подтверждает, но НЕ снимает режим', () async {
+      final storage = _InMemoryAuthStorage();
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      await auth.setPin('123456');
+      expect(await auth.setDuressCode('123456', '654321'), isTrue);
+
+      auth.lock();
+      expect(await auth.verifyPin('654321'), equals(PinVerifyResult.duress));
+      expect(auth.isDuressMode, isTrue);
+
+      // Жертву заставили подтвердить чувствительное действие основным PIN.
+      expect(await auth.confirmMainPin('123456'), isTrue);
+      // Подтвердили ОДНО действие, а не вышли из режима: иначе на экране остался бы
+      // пустой профиль над разгейченной базой.
+      expect(auth.isDuressMode, isTrue,
+          reason: 'подтверждение PIN не должно снимать duress-гейт');
+
+      // Duress-код и мусор как подтверждение не проходят.
+      expect(await auth.confirmMainPin('654321'), isFalse);
+      expect(auth.isDuressMode, isTrue);
+      expect(await auth.confirmMainPin('000000'), isFalse);
+      expect(auth.isDuressMode, isTrue);
+    });
+
+    test('confirmMainPin вне duress работает как обычная проверка', () async {
+      final storage = _InMemoryAuthStorage();
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      await auth.setPin('123456');
+
+      expect(await auth.confirmMainPin('123456'), isTrue);
+      expect(auth.isDuressMode, isFalse);
+      expect(await auth.confirmMainPin('999999'), isFalse);
+    });
+
+    test('duress: вход не оставляет следа в логе — экран логов доступен наблюдателю',
+        () async {
+      final storage = _InMemoryAuthStorage();
+      final auth = AuthService.createForTesting(secureStorage: storage);
+      await auth.init();
+      await auth.setPin('123456');
+      expect(await auth.setDuressCode('123456', '654321'), isTrue);
+
+      auth.lock();
+      expect(await auth.verifyPin('654321'), equals(PinVerifyResult.duress));
+
+      // Трассу берём ЦЕЛИКОМ, без предварительного clear(): слово не должно
+      // всплывать ни при настройке кода, ни при входе — экран логов доступен
+      // наблюдателю из duress-сессии.
+      final trace = DebugLogger.logs
+          .map((e) => '${e.tag} ${e.message}')
+          .join('\n')
+          .toLowerCase();
+      expect(trace.contains('duress'), isFalse,
+          reason: 'запись про duress в логе — самый разрушительный tell: $trace');
     });
 
     test('wipeCode: возвращает wipeCode и НЕ инкрементит failedAttempts', () async {

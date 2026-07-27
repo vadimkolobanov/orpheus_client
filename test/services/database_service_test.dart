@@ -25,7 +25,7 @@ void main() {
       CREATE TABLE messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         contactPublicKey TEXT NOT NULL,
-        messageId TEXT, 
+        messageId TEXT,
         text TEXT NOT NULL,
         isSentByMe INTEGER NOT NULL,
         timestamp INTEGER NOT NULL,
@@ -33,7 +33,17 @@ void main() {
         isRead INTEGER DEFAULT 1
       )
     ''');
-    
+    await db.execute('''
+      CREATE TABLE outbox (
+        messageId TEXT PRIMARY KEY NOT NULL,
+        recipientKey TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        createdAt INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        lastAttemptAt INTEGER
+      )
+    ''');
+
     // Инициализируем сервис с тестовой БД
     DatabaseService.instance.initWithDatabase(db);
   });
@@ -182,6 +192,27 @@ void main() {
       // Проверяем, что контакт удален
       final contactsAfter = await DatabaseService.instance.getContacts();
       expect(contactsAfter.any((c) => c.publicKey == "DELETE_KEY"), isFalse);
+    });
+
+    test('duress: очистка истории чата НЕ трогает реальную переписку', () async {
+      await DatabaseService.instance
+          .addContact(Contact(name: "Alice", publicKey: "KEEP_KEY"));
+      await DatabaseService.instance.addMessage(
+        ChatMessage(text: "REAL-MESSAGE", isSentByMe: false),
+        "KEEP_KEY",
+      );
+
+      DatabaseService.instance.setDuressMode(true);
+      addTearDown(() => DatabaseService.instance.setDuressMode(false));
+
+      await DatabaseService.instance.clearChatHistory("KEEP_KEY");
+
+      // Читаем уже вне duress — иначе гейт чтения вернул бы пусто в любом случае
+      // и тест прошёл бы вакуумно.
+      DatabaseService.instance.setDuressMode(false);
+      final messages =
+          await DatabaseService.instance.getMessagesForContact("KEEP_KEY");
+      expect(messages.map((m) => m.text), contains("REAL-MESSAGE"));
     });
   });
 }
